@@ -10,8 +10,8 @@ import { SHARED } from './look';
  * - splashes: tiny crowns flicking up off the grass, each at a new random spot every time.
  * Nothing on the CPU per frame but a few uniforms.
  */
-const DROPS = 9000;
-const SPLASHES = 2600;
+const DROPS = 6200;
+const SPLASHES = 1700;
 /** Rain box (metres) around the middle of the view. */
 const BX = 110;
 const BY = 34;
@@ -85,7 +85,7 @@ export class Rain {
           uniform vec3 uFloodColor;
           varying float vA;
           void main() {
-            gl_FragColor = vec4(mix(vec3(0.55, 0.62, 0.75), uFloodColor, 0.6) * vA * (0.2 + 0.22 * uFlood), 1.0);
+            gl_FragColor = vec4(mix(vec3(0.55, 0.62, 0.75), uFloodColor, 0.6) * vA * (0.17 + 0.18 * uFlood), 1.0);
           }
         `,
       }),

@@ -345,7 +345,7 @@ export class Match {
     for (const p of this.players) p.plan = null;
   }
 
-  private startSetPiece(kind: SetPieceKind, team: number, x: number, z: number): void {
+  startSetPiece(kind: SetPieceKind, team: number, x: number, z: number): void {
     this.phase = 'setpiece';
     this.phaseT = 0;
     this.owner = null;

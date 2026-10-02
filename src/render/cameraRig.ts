@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GOAL_SEQ, PITCH } from '../sim/constants';
 import type { Match } from '../sim/match';
-import { clamp, lerp } from '../sim/vec';
+import { clamp, lerp, smoothstep } from '../sim/vec';
 
 const CAM_PITCH_DEG = 21;
 /** Pixel art looks down more steeply: a cleaner, more readable top-down-ish framing. */
@@ -23,6 +23,8 @@ export class CameraRig {
   private leadX = 0;
   private leadZ = 0;
   private dist = 40;
+  /** Set-piece zoom (1 = the normal distance; a corner pulls back to take in the box). */
+  private zoom = 1;
   private shake = 0;
   private look = new THREE.Vector3();
   /** Debug: fixed camera distance (e.g. ?zoom=10 for a close-up). */
@@ -141,6 +143,27 @@ export class CameraRig {
     const wc = goal ? 1 : aimT ? 0.55 : 0.4 * (1 - clamp((cd - 8) / 22, 0, 1));
     let sx = bx + this.leadX + (cx - bx - this.leadX) * wc;
     let sz = bz + this.leadZ + (cz - bz - this.leadZ) * wc;
+    const sp = match.setPiece;
+    const corner = match.phase === 'setpiece' && sp?.kind === 'corner' ? sp : null;
+    if (corner) {
+      // A corner: the penalty box is the picture. Aim at the middle of the box (or between
+      // it and the delivery ring while it's being aimed); the safe frame below then slides
+      // just far enough toward the flag to keep the taker in shot.
+      const gx = PITCH.halfL * match.teams[corner.team].dir;
+      const boxX = gx - match.teams[corner.team].dir * 10;
+      sx = aimT ? (boxX + aimT.x) / 2 : boxX;
+      sz = aimT ? aimT.z * 0.5 : 0;
+    } else if (!goal) {
+      // Closing on a goal (or a set piece near one): lean the frame toward it, so the goal
+      // and what's in front of it come into the picture with the ball.
+      const team = match.phase === 'setpiece' && sp ? sp.team : att;
+      if (team >= 0 && (live || match.phase === 'setpiece')) {
+        const gx = PITCH.halfL * match.teams[team].dir;
+        const wg = 0.42 * (1 - smoothstep(14, 44, Math.abs(gx - bx)));
+        sx += (gx - sx) * wg;
+        sz += (0 - sz) * wg * 0.6;
+      }
+    }
     // Composition: subject above centre (controls cover the bottom).
     sz += halfZ * 0.12;
 
@@ -154,14 +177,27 @@ export class CameraRig {
 
     // Safe frame: the active player, then the ball (applied last so it wins).
     this.aimX = this.keepIn(this.aimX, cx, halfX * 0.78, halfX * 0.78);
-    this.aimZ = this.keepIn(this.aimZ, cz, halfZ * 0.72, halfZ * 0.5);
-    this.aimX = this.keepIn(this.aimX, bx, halfX * 0.82, halfX * 0.82);
-    this.aimZ = this.keepIn(this.aimZ, bz, halfZ * 0.78, halfZ * 0.55);
+    // At a corner the framing is tight, so it uses what the camera really sees up and down
+    // the pitch (a tilted camera sees much further to the far side than to the near).
+    const fv = (cam.fov * Math.PI) / 360;
+    const camH = Math.sin(pitch) * this.dist;
+    const camD = Math.cos(pitch) * this.dist;
+    const farExt = camH / Math.tan(Math.max(0.05, pitch - fv)) - camD;
+    const nearExt = camD - camH / Math.tan(pitch + fv);
+    // (The aiming ring at a corner is kept well up, clear of the controls.)
+    if (corner) this.aimZ = this.keepIn(this.aimZ, cz, farExt * 0.6, nearExt * 0.45);
+    else this.aimZ = this.keepIn(this.aimZ, cz, halfZ * 0.72, halfZ * 0.5);
+    // (At a corner the box gets the picture: a taker at the far flag may sit right at the
+    // top edge; at the near flag he's kept just clear of the controls at the bottom.)
+    const bm = corner ? 0.9 : 1;
+    this.aimX = this.keepIn(this.aimX, bx, halfX * 0.82 * bm, halfX * 0.82 * bm);
+    this.aimZ = corner ? this.keepIn(this.aimZ, bz, farExt * 0.8, nearExt * 0.86) : this.keepIn(this.aimZ, bz, halfZ * 0.78, halfZ * 0.55);
 
     // Don't show more than a little beyond the pitch.
-    const mx = Math.max(0, PITCH.halfL + 8 - halfX);
+    // (At a corner the stand behind the goal may come in, so the goal sits inside the frame.)
+    const mx = Math.max(0, PITCH.halfL + 8 - halfX * (corner ? 0.55 : 1));
     this.aimX = clamp(this.aimX, -mx, mx);
-    this.aimZ = clamp(this.aimZ, -PITCH.halfW + halfZ * 0.55 - 6, PITCH.halfW - halfZ * 0.45 + 4);
+    if (!corner) this.aimZ = clamp(this.aimZ, -PITCH.halfW + halfZ * 0.55 - 6, PITCH.halfW - halfZ * 0.45 + 4);
     sx = this.aimX;
     sz = this.aimZ;
 
@@ -174,13 +210,15 @@ export class CameraRig {
     this.tz += this.vz * dt;
     // Never lose the ball, whatever the spring is doing.
     this.tx = this.keepIn(this.tx, bx, halfX * 0.92, halfX * 0.92);
-    this.tz = this.keepIn(this.tz, bz, halfZ * 0.9, halfZ * 0.75);
+    this.tz = corner ? this.keepIn(this.tz, bz, farExt * 0.9, nearExt * 0.92) : this.keepIn(this.tz, bz, halfZ * 0.9, halfZ * 0.75);
 
     const k = 1 - Math.exp(-dt * 6);
     const air = Math.max(0, b.pos.y - 2) * 0.6;
-    const wantDist = (goal ? this.baseDist * 0.78 : this.baseDist) + Math.min(5, b.vel.len() * 0.12 + air);
+    // A corner pulls back a little, to take in the taker and the whole box.
+    this.zoom += ((corner ? 1.3 : 1) - this.zoom) * (1 - Math.exp(-dt * 1.6));
+    const wantDist = (goal ? this.baseDist * 0.78 : this.baseDist * this.zoom) + Math.min(5, b.vel.len() * 0.12 + air);
     if (!pixel) this.dist += ((this.distOverride || wantDist) - this.dist) * k * 0.3;
-    else this.dist = this.distOverride || this.baseDist;
+    else this.dist = this.distOverride || this.baseDist * this.zoom;
     this.shake *= Math.exp(-dt * 6);
     this.updatePov(match, alpha, dt);
     this.updateFront(match, alpha, dt);

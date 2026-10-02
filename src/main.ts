@@ -75,6 +75,9 @@ const TOD = params.has('tod') ? Number(params.get('tod')) : -1;
 const SHOWCASE = params.has('showcase');
 // ?crowd=-1 / 1: hold the goal crowd shot on the home / away end (for looking at the stands).
 const CROWD_SHOT = Number(params.get('crowd')) || 0;
+// ?corner=near / far: your team gets a corner a moment after kick-off (for the corner camera).
+const DEBUG_CORNER = params.get('corner');
+let debugCornerDone = false;
 
 const club = new Club();
 // The attract mode behind the menus plays our own club.
@@ -840,6 +843,11 @@ function frame(now: number): void {
   // The ultras hold up their card display for each kick-off and the opening seconds of the half.
   const tifo = match.phase === 'kickoff' || (match.phase === 'play' && match.clock < 8) ? 1 : 0;
   stadium.setNearStand(rig.groundLevel);
+  if (DEBUG_CORNER && !debugCornerDone && playing && match.phase === 'play' && match.clock > 2) {
+    debugCornerDone = true;
+    const t = match.humanTeam;
+    match.startSetPiece('corner', t, PITCH.halfL * match.teams[t].dir, (DEBUG_CORNER === 'far' ? -1 : 1) * PITCH.halfW);
+  }
   terraces.update(running ? dt : 0, match);
   stadium.update(now / 1000, match.excitement, atmo, tifo, terraces);
   turfMarks.update(match, renderer);

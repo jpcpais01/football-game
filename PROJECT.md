@@ -45,5 +45,6 @@ Ultra-realistic, emergent football mechanics: physics-driven ball, bodies, tackl
 ## Useful knowledge
 - **Benchmarking gameplay.** Make a throwaway vitest file that runs about 20 seeded matches (`m.autoPlay = true`). Hook `m.log` (it logs every kick, e.g. `pass -> #9`) to classify outcomes. For the human's experience, set `autoPlay` only while the controlled player has the ball, so the human seeking code runs with an idle stick. Compare against `git stash` of `src`. Delete the file afterwards.
 - **Shaders.** New GLSL isn't checked by `tsc`. Check it by loading the built app in headless Chromium with Playwright: `import` from `/opt/node22/lib/node_modules/playwright/index.mjs`, use `executablePath /opt/pw-browsers/chromium` with the SwiftShader flags, and watch the console for shader errors. Avoid reserved words such as `flat`.
+- **Corner camera.** `?corner=near` / `?corner=far` gives your team a corner a moment after kick-off.
 - **Looking at the stands.** `?crowd=-1` / `?crowd=1` holds the goal crowd shot on the home / away end, and `?tod=1` sets night. Hide the UI in a headless screenshot with `body * { visibility: hidden }` and `canvas { visibility: visible }`.
 - **Human input.** A player switch cancels any held button. In tests, set `m.switchT = 99` before pressing.

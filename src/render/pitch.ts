@@ -175,7 +175,7 @@ export function createPitch(renderer: THREE.WebGLRenderer, marks: THREE.Texture)
           gWet = (0.6 + 0.4 * nc.g) * (1.0 - gLine) * (1.0 - mk.r * 0.7);
           // Rain: soaked grass goes darker and deeper green; water stands in the low spots
           // and the worn goalmouths, and in the mud of the slide marks.
-          gPuddle = smoothstep(0.72, 0.84, nc.g * 0.55 + nf.r * 0.45 + wb * 0.18 + mk.r * 0.3) * uRain;
+          gPuddle = smoothstep(0.79, 0.88, nc.g * 0.55 + nf.r * 0.45 + wb * 0.18 + mk.r * 0.3) * uRain;
           col *= mix(vec3(1.0), vec3(0.7, 0.78, 0.72), uRain);
           col = mix(col, col * vec3(0.4, 0.45, 0.52), gPuddle * 0.8);
           return pow(col, vec3(2.2));
