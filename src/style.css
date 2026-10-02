@@ -71,13 +71,6 @@ html, body {
 }
 .scoreboard .added.show { display: flex; }
 
-.banner {
-  position: absolute; top: calc(48px + var(--safe-t)); left: 50%; transform: translate(-50%, -6px);
-  padding: 4px 14px; background: var(--panel); border-radius: 3px;
-  font-weight: 600; font-size: 15px; letter-spacing: 0.14em; text-transform: uppercase;
-  opacity: 0; transition: opacity 0.25s, transform 0.25s;
-}
-.banner.show { opacity: 1; transform: translate(-50%, 0); }
 
 .caption {
   position: absolute; left: 0; right: 0; top: 30%; text-align: center; opacity: 0; pointer-events: none;
@@ -261,7 +254,7 @@ html, body {
 .menu-card { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
 /* Pause: actions full width, settings two by two, so it fits short landscape phones. */
 .menu.pause .menu-card {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: min(460px, calc(100vw - 32px));
+  display: grid; grid-template-columns: 1fr 1fr; gap: 6px; width: min(340px, calc(100vw - 32px));
   max-height: calc(100dvh - 16px - var(--safe-t) - var(--safe-b)); overflow-y: auto; padding: 4px;
 }
 .menu.pause h2, .menu.pause .resume, .menu.pause .restart, .menu.pause .wide { grid-column: 1 / -1; }
@@ -269,12 +262,14 @@ html, body {
 .menu.pause .palette { display: flex; align-items: center; justify-content: space-between; }
 .menu.pause .palette .pal-arrow { opacity: 0.6; padding: 0 4px; font-size: 1.3em; line-height: 0.8; }
 
-.menu.pause button.ghost { font-size: 15px; padding: 10px 8px; letter-spacing: 0.08em; white-space: nowrap; }
+.menu.pause h2 { font-size: 26px; margin: 0 0 2px; }
+.menu.pause button { font-size: 15px; padding: 8px 12px; }
+.menu.pause button.ghost { font-size: 11px; padding: 8px 6px; letter-spacing: 0.08em; white-space: nowrap; border-width: 1.5px; }
 @media (max-height: 420px) {
-  .menu.pause h2 { font-size: 30px; margin: 0; }
-  .menu.pause .menu-card { gap: 6px; }
-  .menu.pause button { font-size: 18px; padding: 8px 16px; }
-  .menu.pause button.ghost { font-size: 13px; padding: 7px 6px; }
+  .menu.pause h2 { font-size: 20px; }
+  .menu.pause .menu-card { gap: 5px; }
+  .menu.pause button { font-size: 14px; padding: 7px 12px; }
+  .menu.pause button.ghost { font-size: 10.5px; padding: 7px 5px; }
 }
 .kicker { font-weight: 600; letter-spacing: 0.3em; text-transform: uppercase; color: var(--accent); font-size: 15px; }
 .menu h1 { margin: 0; font-weight: 800; font-size: clamp(56px, 12vw, 120px); line-height: 0.85; letter-spacing: 0.02em; text-transform: uppercase; }
@@ -386,8 +381,8 @@ html, body {
 
 /* Pause menu: pixel fineness slider. */
 .menu.pause .fine {
-  display: flex; align-items: center; gap: 10px; padding: 6px 12px; border: 2px solid rgba(244, 239, 227, 0.4); border-radius: 4px;
-  font-weight: 800; font-size: 15px; letter-spacing: 0.08em; text-transform: uppercase;
+  display: flex; align-items: center; gap: 8px; padding: 2px 10px; border: 1.5px solid rgba(244, 239, 227, 0.4); border-radius: 4px;
+  font-weight: 800; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
 }
 /* The slider, drawn by hand so the ticks line up with the thumb on every browser. */
 .menu.pause .fine-track { position: relative; flex: 1; min-width: 0; height: 26px; }
@@ -408,7 +403,7 @@ html, body {
   left: calc(9px + var(--p) * (100% - 18px)); background: rgba(244, 239, 227, 0.75);
 }
 .menu.pause .fine b.sharp { color: #6ff0a8; }
-.menu.pause .fine b { min-width: 6.4em; text-align: right; font-weight: 800; font-size: 15px; letter-spacing: 0.04em; color: var(--accent); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.menu.pause .fine b { min-width: 6.4em; text-align: right; font-weight: 800; font-size: 12px; letter-spacing: 0.04em; color: var(--accent); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 /* Minimap: bottom centre, between the joystick and the buttons. */
 .minimap {

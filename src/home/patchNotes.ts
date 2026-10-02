@@ -1,5 +1,7 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.63', note: 'Stoppage time: each half now runs on for 1 to 5 added minutes. The board goes up at 45 and 90 minutes (+3 beside the clock) and the clock carries on, 45+1, 45+2, until the whistle.' },
+  { v: '0.62.1', note: 'Smaller pause menu: compact buttons and text. No more instruction banners during corners, free kicks, penalties, goal kicks, throw-ins and kick-offs.' },
   { v: '0.62', note: 'Through balls reworked: struck at the right pace into the space a runner reaches first, so most now find him in stride. Players judge loose balls by who gets there first and meet them sooner. Strikers time runs off the passer having time to look up.' },
   { v: '0.61', note: 'A new home ground: the Old Ground, a second-division classic. Four separate stands, lattice floodlight pylons in the open corners, a covered Shed for the home end, an away cage, terraced houses and a church spire beyond. Pick it under Club, Kit, Home ground.' },
   { v: '0.60.2', note: 'The score card after a goal now pops up in the middle of the screen.' },
