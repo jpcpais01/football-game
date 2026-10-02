@@ -3,6 +3,9 @@ import { PITCH } from '../sim/constants';
 import type { Match } from '../sim/match';
 import { clamp, lerp } from '../sim/vec';
 
+export const CAMERA_PRESETS = { close: 33, normal: 40, far: 48 } as const;
+export type CameraPreset = keyof typeof CAMERA_PRESETS;
+
 /** Broadcast-style camera: high on the side, eases after the play, leans into the attack. */
 export class CameraRig {
   readonly camera: THREE.PerspectiveCamera;
@@ -10,11 +13,13 @@ export class CameraRig {
   private tz = 0;
   private vx = 0;
   private vz = 0;
-  private dist = 34;
+  private dist = 40;
   private shake = 0;
   private look = new THREE.Vector3();
   /** Debug: fixed camera distance (e.g. ?zoom=10 for a close-up). */
   distOverride = 0;
+  /** Base distance from the play; set by the camera setting. */
+  baseDist: number = CAMERA_PRESETS.normal;
 
   /** Point on the pitch the camera is framing (the shadow map follows it). */
   get focusX(): number {
@@ -65,7 +70,7 @@ export class CameraRig {
 
     const speed = b.vel.len();
     const air = Math.max(0, b.pos.y - 2) * 0.6;
-    const wantDist = (match.phase === 'goal' ? 26 : 33) + Math.min(5, speed * 0.12 + air);
+    const wantDist = (match.phase === 'goal' ? this.baseDist * 0.78 : this.baseDist) + Math.min(5, speed * 0.12 + air);
     this.dist += ((this.distOverride || wantDist) - this.dist) * k * 0.3;
     this.shake *= Math.exp(-dt * 6);
     this.place(time);

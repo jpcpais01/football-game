@@ -9,7 +9,7 @@ import { createStadium } from './render/stadium';
 import { createGoals } from './render/goals';
 import { PlayersView } from './render/players';
 import { BallView } from './render/ballView';
-import { CameraRig } from './render/cameraRig';
+import { CAMERA_PRESETS, CameraRig, type CameraPreset } from './render/cameraRig';
 import { Atmosphere } from './render/atmosphere';
 import { SHARED } from './render/look';
 import { Controls } from './ui/controls';
@@ -62,6 +62,16 @@ const ballView = new BallView();
 scene.add(ballView.group);
 const rig = new CameraRig(window.innerWidth / window.innerHeight);
 if (params.has('showcase')) rig.distOverride = 9;
+// Camera setting (Close / Normal / Far), remembered on this device.
+const CAMERA_ORDER: CameraPreset[] = ['close', 'normal', 'far'];
+let cameraPreset: CameraPreset = 'normal';
+try {
+  const saved = localStorage.getItem('camera') as CameraPreset | null;
+  if (saved && saved in CAMERA_PRESETS) cameraPreset = saved;
+} catch {
+  /* storage unavailable: keep the default */
+}
+rig.baseDist = CAMERA_PRESETS[cameraPreset];
 if (params.has('zoom')) rig.distOverride = Number(params.get('zoom')) || 10;
 const FIXED_DPR = params.has('dpr');
 if (FIXED_DPR) renderer.setPixelRatio((dpr = Number(params.get('dpr')) || 1));
@@ -103,6 +113,7 @@ pauseMenu.innerHTML = `
     <h2>Paused</h2>
     <button class="resume">Resume</button>
     <button class="restart ghost">Restart match</button>
+    <button class="camera ghost">Camera: Normal</button>
     <button class="sound ghost">Sound: on</button>
   </div>`;
 ui.appendChild(pauseMenu);
@@ -169,6 +180,19 @@ pauseMenu.querySelector('.resume')!.addEventListener('click', () => setPaused(fa
 pauseMenu.querySelector('.restart')!.addEventListener('click', () => {
   newMatch();
   setPaused(false);
+});
+const cameraBtn = pauseMenu.querySelector('.camera') as HTMLButtonElement;
+const cameraLabel = () => (cameraBtn.textContent = `Camera: ${cameraPreset[0].toUpperCase()}${cameraPreset.slice(1)}`);
+cameraLabel();
+cameraBtn.addEventListener('click', () => {
+  cameraPreset = CAMERA_ORDER[(CAMERA_ORDER.indexOf(cameraPreset) + 1) % CAMERA_ORDER.length];
+  rig.baseDist = CAMERA_PRESETS[cameraPreset];
+  cameraLabel();
+  try {
+    localStorage.setItem('camera', cameraPreset);
+  } catch {
+    /* ignore */
+  }
 });
 const soundBtn = pauseMenu.querySelector('.sound') as HTMLButtonElement;
 soundBtn.addEventListener('click', () => {
