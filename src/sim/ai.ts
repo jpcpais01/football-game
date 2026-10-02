@@ -1,5 +1,5 @@
 import { DT, GOAL_SEQ, PITCH, PLAYER } from './constants';
-import { predictBallAt, rollTimeAt, rollingPass } from './kick';
+import { predictBallAt, rollAt, rollPaceFor, rollingPass } from './kick';
 import type { Match } from './match';
 import type { Player } from './player';
 import { DIVE_HANDS, DIVE_HIPS, DIVE_RADIUS, divePose, planDive, type DivePose } from './keeperPose';
@@ -11,10 +11,31 @@ interface Intercept {
   z: number;
   /** Time in hand there by his real running (runTime): the ball's arrival minus his. */
   slack: number;
+  /** When the ball gets to (x, z), seconds after `at` (the moment this was worked out). */
+  m: number;
+  at: number;
+  /** The ball's velocity there (m/s): he arrives running with it, not stopping for it. */
+  vx: number;
+  vz: number;
 }
 
 const SAMPLES = 36;
 const SAMPLE_DT = 0.1;
+/** Reading the live ball: reaction (s), and the margin a meeting needs over the other side. */
+const LIVE_REACT = 0.1;
+const LIVE_MARGIN = 0.25;
+/** Planning a pass: the opponents' reaction to the strike, the runner's, and the margin. */
+const PLAN_REACT_OPP = 0.15;
+const PLAN_REACT_RUN = 0.1;
+const PLAN_MARGIN = 0.35;
+/** Worth of a meeting point: per metre forward, per second waited, and per second short of
+ * MEET_CLOSE ahead of the other side. */
+const MEET_PROGRESS = 1;
+const MEET_WAIT = 4;
+const MEET_CLOSE = 0.8;
+const MEET_CONTEST = 6;
+/** How a planned through ball's score sits against an ordinary pass's. */
+const THROUGH_BIAS = -0.3;
 
 const BOX_SPOTS: [number, number][] = [
   [-6, -2],
@@ -58,6 +79,24 @@ function traitsFor(p: Player): Traits {
   };
 }
 
+/** A planned through ball: who it's for, where and when he meets it, and the strike. */
+export interface ThroughPlan {
+  receiver: Player;
+  x: number;
+  z: number;
+  /** Ball speed when he meets it. */
+  arrive: number;
+  time: number;
+  /** Ground ball: strike pace and direction. */
+  v0: number;
+  dx: number;
+  dz: number;
+  /** Lofted: where it comes down. */
+  landX: number;
+  landZ: number;
+  score: number;
+}
+
 /** Team brains. Coordinates in comments are "team frame": +x is the goal the team attacks. */
 export class AI {
   readonly intercept: Intercept[] = [];
@@ -67,8 +106,14 @@ export class AI {
   readonly sz = new Float32Array(SAMPLES);
   private sampleCount = 0;
   private nextIntercept = 0;
+  /** When the live intercepts were last worked out. */
+  interceptAt = 0;
+  /** Scratch path for planning passes. */
+  private path = { x: new Float32Array(SAMPLES), y: new Float32Array(SAMPLES), z: new Float32Array(SAMPLES), v: new Float32Array(SAMPLES) };
   private nextDecision: number[] = [];
   private tackleReady: number[] = [];
+  /** Next time a carrier looks for a through ball. */
+  private throughLook: number[] = [];
   private run: { x: number; z: number; until: number }[] = [];
   private curves: { key: number; t: number[]; s: number[]; v: number[] }[] = [];
   private dribX: number[] = [];
@@ -112,9 +157,10 @@ export class AI {
       this.seekAt.push(0);
       this.mark.push(null);
       this.offBallT.push(-1);
-      this.intercept.push({ t: -1, x: 0, z: 0, slack: -9 });
+      this.intercept.push({ t: -1, x: 0, z: 0, slack: -9, m: 0, at: -9, vx: 0, vz: 0 });
       this.nextDecision.push(0);
       this.tackleReady.push(0);
+      this.throughLook.push(0);
       this.run.push({ x: 0, z: 0, until: -1 });
       this.dribX.push(1);
       this.dribZ.push(0);
@@ -222,6 +268,24 @@ export class AI {
   }
 
   /**
+   * Going to meet the ball: flat out when it's tight; with time in hand, just the pace that
+   * gets him there as it arrives, so he takes it on the run instead of waiting for it.
+   */
+  private pace(p: Player): void {
+    if (this.m.ballDist(p) < 3) return;
+    p.wantSpeed = Math.min(p.wantSpeed, Math.max(PLAYER.jogSpeed * 0.6, this.meetPace(p)));
+    p.sprinting = p.wantSpeed > PLAYER.jogSpeed + 0.5;
+  }
+
+  /** The pace that has him at his meeting point as the ball gets there (top speed when it's tight). */
+  meetPace(p: Player): number {
+    const ip = this.intercept[p.id];
+    if (ip.slack < 0.35) return p.topSpeed;
+    const left = ip.m - (this.m.time - ip.at);
+    return Math.min(p.topSpeed, dist2D(p.pos.x, p.pos.z, ip.x, ip.z) / Math.max(0.2, left - 0.25) + 0.8);
+  }
+
+  /**
    * A team-mate's kick is coming through and it's not for him: if its line passes close
    * (and low enough to hit him) in the next moment, step off it, to the side he's on.
    */
@@ -258,10 +322,15 @@ export class AI {
   }
 
   /**
-   * Through ball: the spot in space that a runner reaches at the same moment as the ball,
-   * before any defender or the keeper. Tries every candidate runner, several run lines
-   * (toward goal, straight, his current run, the stick) and lead distances; scores safety,
-   * timing, progress, danger, offside, the stick and the requested weight.
+   * Through ball, planned as the strike it is: a direction and a pace for the ball. For each
+   * candidate runner, run lines (toward goal, straight, the channels, his current run, the
+   * stick) and lead distances give directions, and the pace that has the ball there as he
+   * arrives (or a little firmer). Each such ball's path is known exactly (the rolling table,
+   * or the flight for a lofted one); on it, the defenders' and the keeper's earliest
+   * arrivals are worked out by how they really run, and the runner's meeting point by the
+   * same rule he'll use to go and get it (`meeting`). Only a ball he gets to safely first is
+   * a through ball; among those: progress, danger, the margin, a ball he can take in his
+   * stride, offside, and the stick and the weight asked for.
    */
   planThrough(
     p: Player,
@@ -271,25 +340,32 @@ export class AI {
     power: number,
     lofted: boolean,
     only: Player | null,
-  ): { receiver: Player; x: number; z: number; arrive: number; time: number } | null {
+  ): ThroughPlan | null {
     const m = this.m;
     const team = m.teams[p.team];
     const dir = team.dir;
     const gx = PITCH.halfL * dir;
     const b = m.ball.pos;
-    const opps = m.teams[1 - p.team].players;
+    const near = m.teams[1 - p.team].players.slice();
     const line = this.offside[p.team];
     const prefLead = 5 + 13 * power;
-    const LEADS = [4, 6.5, 9, 12, 15, 19];
-    let best: { receiver: Player; x: number; z: number; arrive: number; time: number } | null = null;
+    const LEADS = [4, 7, 11, 15, 19];
+    const P = this.path;
+    const roll = { d: 0, v: 0 };
+    let best: ThroughPlan | null = null;
     let bestS = -1e9;
     const dirs: [number, number][] = [];
-    for (const q of team.players) {
-      if (q === p || q.role === 'GK') continue;
-      if (only && q !== only) continue;
-      if (q.pos.x * dir < b.x * dir - 12) continue; // well behind the ball: not a through ball
+    const tried = new Set<number>();
+    // The most advanced runners first: the best ball is usually theirs, and once it's known
+    // most of the others can be passed over without asking the defenders.
+    const runners = team.players.filter((q) => q !== p && q.role !== 'GK' && (!only || q === only));
+    runners.sort((a, c) => c.pos.x * dir - a.pos.x * dir);
+    for (const q of runners) {
+      if (q.pos.x * dir < b.x * dir - 8) continue; // well behind the ball: not a through ball
       if (dist2D(q.pos.x, q.pos.z, b.x, b.z) > 48) continue;
       const offsideNow = q.pos.x * dir > line + 0.3 && q.pos.x * dir > b.x * dir;
+      // Defenders nearest him first: if anyone beats him to it, it's usually one of them.
+      near.sort((a, c) => dist2D(a.pos.x, a.pos.z, q.pos.x, q.pos.z) - dist2D(c.pos.x, c.pos.z, q.pos.x, q.pos.z));
       // Candidate run lines.
       dirs.length = 0;
       {
@@ -304,6 +380,7 @@ export class AI {
       dirs.push([dir * Math.cos(0.45), -Math.sin(0.45)]);
       if (q.speed > 2) dirs.push([q.vel.x / q.speed, q.vel.z / q.speed]);
       if (aimed) dirs.push([aimX, aimZ]);
+      tried.clear();
       for (const [ux, uz] of dirs) {
         if (ux * dir < -0.2) continue; // through balls go forward
         for (const L of LEADS) {
@@ -313,81 +390,99 @@ export class AI {
           if ((gx - x) * dir < PITCH.sixDepth + 1 && Math.abs(z) < PITCH.sixHalfWidth + 1) continue;
           const D = dist2D(b.x, b.z, x, z);
           if (D < 6) continue;
-          const tr = this.runTime(q, x, z, 0.12);
-          // Ball: rolling (≈1.2 m/s² of grass + air) or a lofted pass (~flight + a bounce).
-          let tb: number;
-          let arrive = 0;
-          let v0 = 0;
+          const kx = (x - b.x) / D;
+          const kz = (z - b.z) / D;
+          const tr = this.runTime(q, x, z, PLAN_REACT_RUN);
+          let v0s: number[];
+          let tFly = 0;
           if (lofted) {
-            tb = 0.55 + D / 17;
+            tFly = 0.55 + D / 17;
+            v0s = [0];
           } else {
-            // Weight it so the ball gets there a touch before the runner (real physics).
+            // Paced to get there a touch before him (into a long run, a little firmer too: he meets it sooner).
             const rp = rollingPass(D, Math.max(0.5, tr - 0.15));
             if (!rp) continue;
-            tb = rp.t;
-            arrive = rp.arrive;
-            v0 = rp.v0;
+            v0s = L >= 11 && rp.v0 + 2 <= 19 ? [rp.v0, rp.v0 + 2] : [rp.v0];
           }
-          // What matters for taking it in stride is the ball's speed relative to the runner
-          // (running onto it at full pace, a 12 m/s ball is easy; standing, it isn't).
-          const pdx = (x - b.x) / D;
-          const pdz = (z - b.z) / D;
-          const runAlong = Math.max(0, (x - q.pos.x) * pdx + (z - q.pos.z) * pdz) / Math.max(0.3, Math.hypot(x - q.pos.x, z - q.pos.z));
-          const relArrive = lofted ? 0 : arrive - q.topSpeed * 0.85 * runAlong;
-          if (relArrive > 2.5) continue;
-          const meet = Math.max(tr, tb);
-          // Defenders and keeper: can anyone get to the spot first?
-          let spot = 9;
-          let lane = 9;
-          for (const o of opps) {
-            const keeper = o.role === 'GK' && this.inOwnBox(o, x, z);
-            const reach = keeper ? 1.6 : 0.8;
-            const top = o.topSpeed;
-            spot = Math.min(spot, this.runTime(o, x, z, 0.05) - reach / top - meet);
-            if (!lofted) {
-              // Anyone standing close to the path will simply step across it.
-              {
-                const lx = x - b.x;
-                const lz = z - b.z;
-                const t0 = clamp(((o.pos.x - b.x) * lx + (o.pos.z - b.z) * lz) / (D * D), 0, 1);
-                if (t0 > 0.05 && t0 < 0.97) {
-                  const perp = Math.hypot(o.pos.x - (b.x + lx * t0), o.pos.z - (b.z + lz * t0));
-                  lane = Math.min(lane, (perp - 2.2) * 1.5);
-                }
+          for (const v0 of v0s) {
+            const key = Math.round(Math.atan2(kz, kx) * 40) * 64 + (lofted ? Math.round(D) : v0);
+            if (tried.has(key)) continue;
+            tried.add(key);
+            // The ball's path, every SAMPLE_DT.
+            let n = 0;
+            if (lofted) {
+              // Flight to the spot (too high to play), the bounce, then running on.
+              const h = (9.81 * tFly * tFly) / 8;
+              const vh = D / tFly;
+              for (; n < SAMPLES; n++) {
+                const t = n * SAMPLE_DT;
+                const u = t / tFly;
+                const d = u < 1 ? D * u : D + vh * 0.55 * (t - tFly) - 0.75 * (t - tFly) * (t - tFly);
+                P.x[n] = b.x + kx * d;
+                P.z[n] = b.z + kz * d;
+                P.y[n] = u < 1 ? 4 * h * u * (1 - u) : 0;
+                P.v[n] = u < 1 ? vh : Math.max(0, vh * 0.55 - 1.5 * (t - tFly));
+                if (u >= 1 && P.v[n] <= 0) break;
               }
-              for (let k = 1; k <= 5; k++) {
-                const f = k / 6;
-                const px = b.x + (x - b.x) * f;
-                const pz = b.z + (z - b.z) * f;
-                // When the ball really gets there (same physics table as the strike).
-                const tk = rollTimeAt(v0, D * f);
-                if (tk < 0) continue;
-                lane = Math.min(lane, this.runTime(o, px, pz, 0.05) - 0.9 / top - tk);
+            } else {
+              let still = 0;
+              for (; n < SAMPLES; n++) {
+                rollAt(v0, n * SAMPLE_DT, roll);
+                P.x[n] = b.x + kx * roll.d;
+                P.z[n] = b.z + kz * roll.d;
+                P.y[n] = 0;
+                P.v[n] = roll.v;
+                // A dead ball waits a moment for whoever gets there.
+                if (roll.v < 0.3 && ++still > 6) break;
               }
             }
-          }
-          const progress = ((x - b.x) * dir) / 20;
-          const threat = 1 - clamp(dist2D(x, z, gx, 0) / 38, 0, 1);
-          let sc =
-            progress * 0.9 +
-            threat * 0.9 +
-            // Must beat every defender and the keeper by a real margin.
-            clamp((spot - 0.2) / 0.4, -3, 1) * 1.4 +
-            (lofted ? 0 : clamp((lane - 0.15) / 0.3, -3, 1) * 1.4) -
-            Math.abs(tb - tr) * 0.35 -
-            Math.max(0, relArrive + 1) * 0.35 +
-            q.attrs.pace * 0.25 +
-            (q.role === 'FWD' ? 0.2 : 0);
-          if (offsideNow) sc -= 4;
-          if (aimed) {
-            const pd = Math.max(0.1, D);
-            const align = ((x - b.x) * aimX + (z - b.z) * aimZ) / pd;
-            sc += align * 2.2 - (align < 0.45 ? 3 : 0);
-            sc -= Math.abs(L - prefLead) / 7;
-          }
-          if (sc > bestS) {
-            bestS = sc;
-            best = { receiver: q, x, z, arrive, time: meet };
+            n = Math.min(n + 1, SAMPLES);
+            const first = this.arrival(q, P.x, P.y, P.z, n, PLAN_REACT_RUN);
+            if (first < 0) continue;
+            // Unopposed, where would he take it, and what's the most that could be worth? (Only
+            // a ball that could beat the best so far is worth asking the defenders about.)
+            const k0 = this.meeting(q, P.x, P.y, P.z, n, first, 1e9, PLAN_REACT_RUN, 0);
+            if (k0 < 0) continue;
+            const ub = ((P.x[k0] - b.x) * dir) / 20 * 0.9 + (1 - clamp(dist2D(P.x[k0], P.z[k0], gx, 0) / 38, 0, 1)) * 0.9 + 0.8 + q.attrs.pace * 0.25 + (q.role === 'FWD' ? 0.2 : 0) + (aimed ? 2.2 : 0);
+            if (ub - (offsideNow ? 4 : 0) <= bestS) continue;
+            // The other side: the first of them to the ball (no need to look past where he'd take it).
+            const look = Math.min(n, k0 + Math.ceil(PLAN_MARGIN / SAMPLE_DT) + 2);
+            let tOpp = 1e9;
+            for (const o of near) {
+              const i = this.arrival(o, P.x, P.y, P.z, Math.min(look, tOpp < 1e8 ? Math.round(tOpp / SAMPLE_DT) : look), PLAN_REACT_OPP);
+              if (i >= 0) tOpp = Math.min(tOpp, i * SAMPLE_DT);
+              if (tOpp <= first * SAMPLE_DT) break;
+            }
+            if (tOpp <= first * SAMPLE_DT) continue;
+            const k = tOpp > 1e8 ? k0 : this.meeting(q, P.x, P.y, P.z, n, first, tOpp, PLAN_REACT_RUN, PLAN_MARGIN);
+            if (k < 0) continue;
+            const mx = P.x[k];
+            const mz = P.z[k];
+            const tm = k * SAMPLE_DT;
+            if (dist2D(mx, mz, b.x, b.z) < 6) continue; // that's a pass to feet
+            // Taking it in stride: the ball's pace against his run onto it.
+            const md = Math.hypot(mx - q.pos.x, mz - q.pos.z);
+            const runAlong = md > 0.5 ? Math.max(0, ((mx - q.pos.x) * kx + (mz - q.pos.z) * kz) / md) : 0;
+            const rel = lofted ? 0 : P.v[k] - q.topSpeed * 0.85 * runAlong;
+            const progress = ((mx - b.x) * dir) / 20;
+            const threat = 1 - clamp(dist2D(mx, mz, gx, 0) / 38, 0, 1);
+            let sc =
+              progress * 0.9 +
+              threat * 0.9 +
+              clamp((tOpp - tm - PLAN_MARGIN) / 0.6, 0, 1) * 0.8 -
+              Math.max(0, rel - 1) * 0.3 +
+              q.attrs.pace * 0.25 +
+              (q.role === 'FWD' ? 0.2 : 0);
+            if (offsideNow) sc -= 4;
+            if (aimed) {
+              const align = kx * aimX + kz * aimZ;
+              sc += align * 2.2 - (align < 0.45 ? 3 : 0);
+              sc -= Math.abs(md - prefLead) / 7;
+            }
+            if (sc > bestS) {
+              bestS = sc;
+              best = { receiver: q, x: mx, z: mz, arrive: P.v[k], time: tm, v0, dx: kx, dz: kz, landX: x, landZ: z, score: sc };
+            }
           }
         }
       }
@@ -428,38 +523,47 @@ export class AI {
       }
     }
     this.sampleCount = n;
+    this.interceptAt = m.time;
 
-    // Each player's meeting point: the earliest point on the ball's path he could reach at
-    // full stride. Deliberately ambitious — it has him attack the ball instead of waiting
-    // for it (and as he closes in it settles on where they really meet). How much time he
-    // actually has there, by the way he really runs, is the slack: that sets his pace.
+    // Who can be at the ball first, by the way each player really runs (runTime against the
+    // ball's own clock): his earliest arrival on its path.
+    const first = [1e9, 1e9];
     for (const p of m.players) {
       const ip = this.intercept[p.id];
-      ip.t = -1;
-      const top = p.topSpeed * 0.92;
-      // Best effort if unreachable in the horizon: the point he gets closest to in time.
-      let bestDef = 1e9;
-      let bestI = n - 1;
-      for (let i = 0; i < n; i++) {
-        const t = i * SAMPLE_DT;
-        const y = this.sy[i];
-        const maxH = p.role === 'GK' && this.inOwnBox(p, this.sx[i], this.sz[i]) ? 2.5 : p.headReach;
-        if (y > maxH) continue;
-        const d = dist2D(p.pos.x, p.pos.z, this.sx[i], this.sz[i]) - PLAYER.reach * 0.8;
-        const deficit = d - Math.max(0, t - 0.2) * top;
-        if (deficit < bestDef) {
-          bestDef = deficit;
-          bestI = i;
-        }
-        if (d <= Math.max(0, t - 0.2) * top) {
-          ip.t = t;
-          bestI = i;
-          break;
+      const i = this.arrival(p, this.sx, this.sy, this.sz, n, LIVE_REACT);
+      ip.t = i < 0 ? -1 : i * SAMPLE_DT;
+      if (i >= 0) first[p.team] = Math.min(first[p.team], ip.t);
+    }
+    // Where each one takes it: the best point on the path he gets to safely ahead of the other
+    // side (see `meeting`). With none, he attacks it at his earliest; out of reach, he goes
+    // for the point he gets closest to in time.
+    for (const p of m.players) {
+      const ip = this.intercept[p.id];
+      const prev = ip.at + ip.m - m.time;
+      let i = ip.t < 0 ? -1 : this.meeting(p, this.sx, this.sy, this.sz, n, Math.round(ip.t / SAMPLE_DT), first[1 - p.team], LIVE_REACT, LIVE_MARGIN, prev);
+      if (i < 0 && ip.t >= 0) i = Math.round(ip.t / SAMPLE_DT);
+      if (i < 0) {
+        const top = p.topSpeed;
+        let bestDef = 1e9;
+        i = n - 1;
+        for (let k = 0; k < n; k++) {
+          const deficit = dist2D(p.pos.x, p.pos.z, this.sx[k], this.sz[k]) - PLAYER.reach * 0.8 - Math.max(0, k * SAMPLE_DT - 0.2) * top;
+          if (deficit < bestDef) {
+            bestDef = deficit;
+            i = k;
+          }
         }
       }
-      ip.x = this.sx[bestI];
-      ip.z = this.sz[bestI];
-      ip.slack = bestI * SAMPLE_DT - this.runTime(p, ip.x, ip.z, 0.05, PLAYER.reach * 0.75);
+      ip.x = this.sx[i];
+      ip.z = this.sz[i];
+      ip.m = i * SAMPLE_DT;
+      ip.at = m.time;
+      const i0 = Math.max(0, i - 1);
+      const i1 = Math.min(n - 1, i + 1);
+      const h = i1 > i0 ? (i1 - i0) * SAMPLE_DT : 1;
+      ip.vx = (this.sx[i1] - this.sx[i0]) / h;
+      ip.vz = (this.sz[i1] - this.sz[i0]) / h;
+      ip.slack = ip.m - this.runTime(p, ip.x, ip.z, 0.05, PLAYER.reach * 0.75);
     }
 
     for (let t = 0; t < 2; t++) {
@@ -489,6 +593,77 @@ export class AI {
       const ballInAttFrame = b.pos.x * -dir;
       this.offside[1 - t] = Math.max(bb, ballInAttFrame, 0);
     }
+  }
+
+  /** Highest ball (m) this player can play at (x, z): keepers in their box use their hands. */
+  private playHeight(p: Player, x: number, z: number): number {
+    return p.role === 'GK' && this.inOwnBox(p, x, z) ? 2.5 : p.headReach;
+  }
+
+  /**
+   * The first sample of a ball path (positions every SAMPLE_DT from now) at which `q` can be
+   * at the ball, by his real running (runTime), or -1. A cheap bound skips the samples he
+   * can't possibly reach at top speed.
+   */
+  private arrival(q: Player, xs: ArrayLike<number>, ys: ArrayLike<number>, zs: ArrayLike<number>, n: number, react: number): number {
+    const reach = PLAYER.reach * 0.8;
+    const top = q.topSpeed + 0.5;
+    const px = q.pos.x;
+    const pz = q.pos.z;
+    for (let i = 0; i < n; i++) {
+      const t = i * SAMPLE_DT;
+      if (ys[i] > this.playHeight(q, xs[i], zs[i])) continue;
+      // A ball going past within reach of where he stands is his without a step: check the
+      // whole stretch it travels up to this sample, not just the sample (a hard pass covers
+      // a couple of metres between two).
+      // (Until he reacts, he carries on the way he's going.)
+      if (i > 0) {
+        const tc = Math.min(t, react + 0.1);
+        const cx = px + q.vel.x * tc;
+        const cz = pz + q.vel.z * tc;
+        const ax = xs[i - 1];
+        const az = zs[i - 1];
+        const vx = xs[i] - ax;
+        const vz = zs[i] - az;
+        const l2 = vx * vx + vz * vz;
+        const k = l2 > 1e-6 ? clamp(((cx - ax) * vx + (cz - az) * vz) / l2, 0, 1) : 0;
+        if (Math.hypot(cx - ax - vx * k, cz - az - vz * k) < PLAYER.reach + 0.15 && ys[i - 1] < 1) return i;
+      }
+      const d = dist2D(px, pz, xs[i], zs[i]) - reach;
+      if (react + d / top > t + 0.05) continue;
+      if (this.runTime(q, xs[i], zs[i], react, reach) <= t) return i;
+    }
+    return -1;
+  }
+
+  /**
+   * Where on a ball path `q` should take it, given the other side's earliest arrival (`tOpp`):
+   * of the points he can be at in time, inside the pitch and safely before them, the one worth
+   * most — further forward is better, waiting costs, cutting it fine with them closing costs
+   * more. So a ball played into space is run onto and taken in stride, one coming square or
+   * back is met early, a contested one is attacked. The passer plans with the same rule, so
+   * runner and ball meet where the pass was meant to be met. `prev` (seconds from now) keeps
+   * a meeting he's already going for. -1: no safe point.
+   */
+  private meeting(q: Player, xs: ArrayLike<number>, ys: ArrayLike<number>, zs: ArrayLike<number>, n: number, from: number, tOpp: number, react: number, margin: number, prev = -9): number {
+    const dir = this.m.teams[q.team].dir;
+    const reach = PLAYER.reach * 0.8;
+    let best = -1;
+    let bestV = -1e9;
+    for (let i = Math.max(0, from); i < n; i++) {
+      const t = i * SAMPLE_DT;
+      if (t > tOpp - margin) break;
+      if (Math.abs(xs[i]) > PITCH.halfL - 0.5 || Math.abs(zs[i]) > PITCH.halfW - 0.5) break;
+      if (ys[i] > this.playHeight(q, xs[i], zs[i])) continue;
+      if (i > from && this.runTime(q, xs[i], zs[i], react, reach) > t) continue;
+      let v = xs[i] * dir * MEET_PROGRESS - t * MEET_WAIT - Math.max(0, MEET_CLOSE - (tOpp - t)) * MEET_CONTEST;
+      if (Math.abs(t - prev) < 0.2) v += 0.6;
+      if (v > bestV) {
+        bestV = v;
+        best = i;
+      }
+    }
+    return best;
   }
 
   inOwnBox(p: Player, x: number, z: number): boolean {
@@ -594,6 +769,7 @@ export class AI {
       // metres, in moveTo): facing a ball played from behind would have him backpedalling.
       this.meetPoint(p, this.tmp);
       this.moveTo(p, this.tmp.x, this.tmp.z, true, false);
+      this.pace(p);
       // As it arrives he opens his body to it, set to take it.
       p.squareUp = m.ballDist(p) < 6;
       p.burst = m.ballDist(p) < 2.5;
@@ -621,9 +797,24 @@ export class AI {
         const cx = carrier.pos.x * dir;
         const line = this.offside[p.team];
         const nearLine = p.pos.x * dir > line - 9 && p.pos.x * dir < line + 0.5;
-        const chance = (p.role === 'FWD' ? 0.006 : 0.0015) * (cx > -10 ? 1 : 0.3);
+        // The cue: the man on the ball has time and is looking up the pitch. That is when a
+        // runner goes, from onside, so the pass can meet him in stride. Without it, rarely.
+        const cue = m.nearestOpponentDist(carrier) > 4.5 && Math.cos(carrier.facing) * dir > 0.3;
+        const chance = (p.role === 'FWD' ? (cue ? 0.03 : 0.002) : cue ? 0.006 : 0.0005) * (cx > -10 ? 1 : 0.3);
         if (nearLine && m.rng.next() < chance) {
-          const tz = p.pos.z * 0.6 + (m.rng.next() - 0.5) * 12;
+          // Bend it into the gap: away from the nearest defender, never off toward the flag.
+          const opp = m.teams[1 - p.team].players;
+          let nz = 0;
+          let nd = Infinity;
+          for (const q of opp) {
+            const d = dist2D(p.pos.x, p.pos.z, q.pos.x, q.pos.z);
+            if (d < nd) {
+              nd = d;
+              nz = q.pos.z;
+            }
+          }
+          const away = nd < 8 ? Math.sign(p.pos.z - nz || 1) * 4 : 0;
+          const tz = p.pos.z * 0.7 + away + (m.rng.next() - 0.5) * 6;
           this.setRun(p, (line + 7 + m.rng.next() * 6) * dir, tz);
           run.until = m.time + 2.2;
         }
@@ -639,8 +830,9 @@ export class AI {
     // Defending or loose ball.
     if (this.chaser[p.team] === p) {
       if (m.owner && m.owner.team !== p.team) return this.press(p, m.owner);
-      const ip = this.intercept[p.id];
-      this.moveTo(p, ip.x, ip.z, true, true);
+      this.meetPoint(p, this.tmp);
+      this.moveTo(p, this.tmp.x, this.tmp.z, true, true);
+      this.pace(p);
       p.burst = m.ballDist(p) < 2.5;
       return;
     }
@@ -1030,17 +1222,23 @@ export class AI {
       let bestThrough = false;
       for (const q of team.players) {
         if (q === p) continue;
-        for (let k = 0; k < 2; k++) {
-          const through = k === 1;
-          // Through balls only for runners near the last line.
-          if (through && (q.role === 'GK' || q.role === 'DEF' || q.pos.x * dir < this.offside[p.team] - 10)) continue;
-          const s = this.passScore(p, q, through);
-          if (s > bestScore) {
-            bestScore = s;
-            best = q;
-            bestThrough = through;
-          }
+        const s = this.passScore(p, q, false);
+        if (s > bestScore) {
+          bestScore = s;
+          best = q;
         }
+      }
+      // A ball into space for a runner, when there's one he'll get to first. (Looked for
+      // twice a second or so: the runs don't change faster than that.)
+      let tp: ThroughPlan | null = null;
+      if (m.time >= this.throughLook[p.id]) {
+        this.throughLook[p.id] = m.time + 0.45;
+        tp = this.planThrough(p, dir, 0, false, 0.5, false, null);
+      }
+      if (tp && tp.score + THROUGH_BIAS > bestScore) {
+        bestScore = tp.score + THROUGH_BIAS;
+        best = tp.receiver;
+        bestThrough = true;
       }
       const dribbleValue = this.dribbleValue(p);
       const needPass = pressure < 2.2 ? 0.45 : pressure < 4 ? 0.15 : 0;
@@ -1178,12 +1376,50 @@ export class AI {
     if (!through && q.pos.x * dir > this.offside[p.team] + 0.3) return -9; // offside
     const lane = this.laneClearance(b.x, b.z, tx, tz, p.team, false);
     if (lane < -0.3) return -9;
+    if (!through && this.passMargin(p, q) < 0.15) return -9;
     let open = 99;
     for (const o of m.teams[1 - p.team].players) open = Math.min(open, dist2D(o.pos.x, o.pos.z, tx, tz));
     const progress = ((tx - b.x) * dir) / 25;
     const goalDist = dist2D(tx, tz, PITCH.halfL * dir, 0);
     const threat = clamp(1 - goalDist / 40, 0, 1);
     return progress * 0.8 + clamp(lane / 3, 0, 1) * 0.7 + clamp(open / 7, 0, 1) * 0.5 + threat * 0.6 - d / 70;
+  }
+
+  /**
+   * A ball played to a team-mate's feet, judged like a through ball: the path a ground pass of
+   * the usual weight takes, and how much sooner he's on it than the first of the other side
+   * (seconds; negative: they'd cut it out — a defender it would go past within reach, or one
+   * who gets across in time).
+   */
+  passMargin(p: Player, q: Player): number {
+    const m = this.m;
+    const b = m.ball.pos;
+    const tx = q.pos.x + q.vel.x * 0.5;
+    const tz = q.pos.z + q.vel.z * 0.5;
+    const D = dist2D(b.x, b.z, tx, tz);
+    if (D < 1) return 9;
+    const kx = (tx - b.x) / D;
+    const kz = (tz - b.z) / D;
+    const v0 = rollPaceFor(D, clamp(5.5 + D * 0.14, 6, 11));
+    const P = this.path;
+    const roll = { d: 0, v: 0 };
+    let n = 0;
+    for (; n < SAMPLES; n++) {
+      rollAt(v0, n * SAMPLE_DT, roll);
+      P.x[n] = b.x + kx * roll.d;
+      P.z[n] = b.z + kz * roll.d;
+      P.y[n] = 0;
+      if (roll.d > D + 2 || roll.v < 0.3) break;
+    }
+    n = Math.min(n + 1, SAMPLES);
+    const mine = this.arrival(q, P.x, P.y, P.z, n, PLAN_REACT_RUN);
+    if (mine < 0) return -9;
+    let tOpp = 9;
+    for (const o of m.teams[1 - p.team].players) {
+      const i = this.arrival(o, P.x, P.y, P.z, n, PLAN_REACT_OPP);
+      if (i >= 0) tOpp = Math.min(tOpp, i * SAMPLE_DT);
+    }
+    return tOpp - mine * SAMPLE_DT;
   }
 
   /** Best option overall (used when the stick is idle). */
@@ -1229,6 +1465,8 @@ export class AI {
       let open = 99;
       for (const o of m.teams[1 - p.team].players) open = Math.min(open, dist2D(o.pos.x, o.pos.z, q.pos.x, q.pos.z));
       let s = align * 3 + clamp(open / 6, 0, 1) * 0.6 - d / 35;
+      // Of the ones the stick points at, one he can actually get it to.
+      if (!through && align > 0.7 && this.passMargin(p, q) < 0.1) s -= 1.2;
       if (through && q.role === 'FWD') s += 0.3;
       if (q.role === 'GK') s -= 0.8;
       if (s > bestS) {

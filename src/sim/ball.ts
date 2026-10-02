@@ -50,6 +50,12 @@ export class Ball {
     this.prevPos.copy(this.pos);
     const v = this.vel;
     const w = this.spin;
+    // On the grass means on it: a real lift takes it off; a sliver of upward speed (a ground
+    // pass, a nudge off a shin) is nothing, or it would float, rolling with no grass to slow it.
+    if (this.onGround && v.y !== 0) {
+      if (v.y > 0.05) this.onGround = false;
+      else v.y = 0;
+    }
     const speed = v.len();
 
     // --- Aerodynamics -------------------------------------------------------

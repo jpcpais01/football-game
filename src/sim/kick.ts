@@ -320,3 +320,40 @@ export function rollTimeAt(v0: number, dist: number): number {
   for (let i = 0; i < row.d.length; i++) if (row.d[i] >= dist) return (i + 1) * TABLE_DT;
   return -1;
 }
+
+/** A ground pass struck at `v0` m/s along the unit direction (dx, dz): side-foot, partly rolling (as in the table). */
+export function groundKick(dx: number, dz: number, v0: number): { vel: V3; spin: V3 } {
+  return { vel: new V3(dx * v0, 0, dz * v0), spin: makeSpin(dx, dz, (v0 / 0.11) * 0.55, 0, new V3()) };
+}
+
+/**
+ * Where a ground pass struck at `v0` (whole m/s, 4..20: a table row) is `t` seconds later:
+ * metres rolled and its speed then (it stays put once it has stopped).
+ */
+export function rollAt(v0: number, t: number, out: { d: number; v: number }): { d: number; v: number } {
+  if (!rollTable) rollTable = buildRollTable();
+  const row = rollTable[Math.max(0, Math.min(rollTable.length - 1, Math.round(v0) - 4))];
+  const f = t / TABLE_DT - 1;
+  if (f <= 0) {
+    const k = Math.max(0, t / TABLE_DT);
+    out.d = row.d[0] * k;
+    out.v = row.v0 + (row.v[0] - row.v0) * k;
+    return out;
+  }
+  const i = Math.min(row.d.length - 2, Math.floor(f));
+  const k = Math.min(1, f - i);
+  out.d = row.d[i] + (row.d[i + 1] - row.d[i]) * k;
+  out.v = row.v[i] + (row.v[i + 1] - row.v[i]) * k;
+  return out;
+}
+
+/** The softest ground pass (table row, m/s) still going at `arrive` m/s when it has rolled `dist` metres (20 if none). */
+export function rollPaceFor(dist: number, arrive: number): number {
+  if (!rollTable) rollTable = buildRollTable();
+  for (const row of rollTable) {
+    let i = 0;
+    while (i < row.d.length && row.d[i] < dist) i++;
+    if (i < row.d.length && row.v[i] >= arrive) return row.v0;
+  }
+  return 20;
+}

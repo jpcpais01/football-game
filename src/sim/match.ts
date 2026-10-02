@@ -1,11 +1,11 @@
 import { Ball } from './ball';
 import { BALL, DT, GOAL_SEQ, MATCH, PITCH, PLAYER } from './constants';
 import { Btn, type InputState } from './input';
-import { predictBallAt, solveFreeKick, solveGroundPass, solveLofted, solveShot } from './kick';
+import { groundKick, predictBallAt, solveFreeKick, solveGroundPass, solveLofted, solveShot } from './kick';
 import { Player, type Attributes, type KickPlan, type Role } from './player';
 import { FORMATION_433, HAIR_COLORS, SKIN_TONES, TEAMS, makeAttributes, type TeamInfo } from './teams';
 import { V3, Rng, angleDiff, clamp, dist2D, smoothstep } from './vec';
-import { AI } from './ai';
+import { AI, type ThroughPlan } from './ai';
 
 export type Phase = 'kickoff' | 'play' | 'out' | 'setpiece' | 'goal' | 'halftime' | 'fulltime';
 /** Goal celebrations, one per button: Pass, Through, Shoot, Sprint. */
@@ -964,31 +964,28 @@ export class Match {
           let speed: number;
           let stickW = 0.3;
           if (mode === 'loose') {
-            // Pace from the meeting: flat out when it's tight, otherwise enough to get there
-            // with a little to spare (and attack the ball rather than wait for it).
+            // Pace from the meeting: flat out when it's tight, otherwise just enough to be there
+            // as the ball is (the same pace the computer's players run at). A slow or dying ball
+            // close by won't come to him: he goes and gets it.
             const ip = this.ai.intercept[c.id];
-            const dI = dist2D(c.pos.x, c.pos.z, ip.x, ip.z);
-            const need = ip.slack < 0.35 ? c.topSpeed : dI / Math.max(0.2, ip.t - 0.3) + 1;
-            // A slow or dying ball won't come to us: go and get it.
             const bs = Math.hypot(this.ball.vel.x, this.ball.vel.z);
             const gap = this.ballDist(c);
-            const floor = gap > 3 ? PLAYER.jogSpeed + 2.2 : gap > 1 ? PLAYER.jogSpeed + (bs < 3 ? 1 : 0) : bs < 1.5 ? 2.5 : 1.2;
-            speed = Math.max(floor, need);
+            const floor = gap > 3 ? PLAYER.jogSpeed : gap > 1 ? PLAYER.jogSpeed + (bs < 3 ? 1 : 0) : bs < 1.5 ? 2.5 : 1.2;
+            speed = Math.max(floor, this.ai.meetPace(c));
             stickW *= clamp((ip.slack - 0.15) / 0.5, 0, 1);
             c.burst = gap < 2.5;
-            // Arrive, don't overrun: no faster than he can pull up in what's left, plus however
-            // fast the spot itself is running away (a ball going away is chased down).
-            // Except for a ball cutting across in front of him that he's late for (it gets to
-            // the spot before he's within reach): that's a step across its line, as quick as
-            // he can, with nothing to overrun. Head-on meetings keep the cap (charging into
-            // the ball makes a heavy touch).
+            // Arrive, don't overrun: no faster than he can come into the meeting point moving
+            // with the ball there (a ball running on ahead is taken in stride, one coming at
+            // him he pulls up for). Except for a ball cutting across in front of him that he's
+            // late for (it gets to the spot before he's within reach): that's a step across its
+            // line, as quick as he can, with nothing to overrun.
             const bsp = Math.hypot(this.ball.vel.x, this.ball.vel.z);
             const toSpot = bsp > 1 ? ((tmpV.x - this.ball.pos.x) * this.ball.vel.x + (tmpV.z - this.ball.pos.z) * this.ball.vel.z) / (bsp * bsp) : -1;
             const across = bsp > 1 && Math.abs(tx * this.ball.vel.x + tz * this.ball.vel.z) < 0.6 * bsp;
             const late = across && toSpot > 0 && this.ai.runTime(c, tmpV.x, tmpV.z, 0, PLAYER.reach * 0.75) > toSpot;
             if (!late) {
-              const away = Math.max(0, (this.ball.vel.x * tx + this.ball.vel.z * tz) * (gap < 3 ? 1 : 0));
-              speed = Math.min(speed, Math.sqrt(2 * PLAYER.brake * 0.7 * d) + 0.6 + away);
+              const along = Math.max(0, gap < 3 ? this.ball.vel.x * tx + this.ball.vel.z * tz : ip.vx * tx + ip.vz * tz);
+              speed = Math.min(speed, Math.sqrt(along * along + 2 * PLAYER.brake * 0.7 * d) + 0.6);
             }
           } else {
             // Close down hard, then ease in tight on the carrier.
@@ -1652,6 +1649,19 @@ export class Match {
     const opp = PITCH.halfL * team.dir;
     const setPieceKind = this.setPiece?.kind;
 
+    // A through ball is planned now, at the strike. The computer's player looks again if the
+    // run he picked has gone; with no runner left, he plays it to feet instead.
+    let through: ThroughPlan | null = null;
+    if (plan.type === 'through') {
+      const ask = (only: Player | null) =>
+        this.ai.planThrough(p, plan.dirX, plan.dirZ, plan.aimed === true, plan.aimed === undefined ? 0.5 : plan.power, !!plan.lofted, only);
+      through = ask(plan.targetId >= 0 ? this.players[plan.targetId] : null);
+      if (!through && plan.aimed === undefined) {
+        through = ask(null);
+        if (!through) plan = { ...plan, type: 'pass', targetId: -1, aimed: false };
+      }
+    }
+
     if (plan.type === 'shot' && setPieceKind === 'penalty') {
       // Penalty: the stick picks the side (centre if it's idle), the hold picks the height and pace.
       skill = p.attrs.shooting;
@@ -1780,19 +1790,11 @@ export class Match {
     } else if (plan.type === 'through') {
       // Planned through ball: into space so the runner and the ball arrive together.
       const lofted = !!plan.lofted;
-      const tp = this.ai.planThrough(
-        p,
-        plan.dirX,
-        plan.dirZ,
-        plan.aimed === true,
-        plan.aimed === undefined ? 0.5 : plan.power,
-        lofted,
-        plan.targetId >= 0 ? this.players[plan.targetId] : null,
-      );
+      const tp = through;
       let r;
       if (tp) {
         receiver = tp.receiver;
-        r = lofted ? solveLofted(b.pos, tp.x, tp.z, clamp(22 + dist2D(b.pos.x, b.pos.z, tp.x, tp.z) * 0.3, 26, 40), 45, 0) : solveGroundPass(b.pos, tp.x, tp.z, tp.arrive);
+        r = lofted ? solveLofted(b.pos, tp.landX, tp.landZ, clamp(22 + dist2D(b.pos.x, b.pos.z, tp.landX, tp.landZ) * 0.3, 26, 40), 45, 0) : groundKick(tp.dx, tp.dz, tp.v0);
         this.ai.setRun(receiver, tp.x, tp.z, tp.time + 1.2);
       } else {
         // No runner: weighted into space along the stick.
