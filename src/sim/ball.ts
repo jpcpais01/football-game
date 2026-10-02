@@ -85,7 +85,18 @@ export class Ball {
       w.scale(decay);
     }
 
-    this.pos.addScaled(v, dt);
+    // Near the goal frame, move in small sub-steps so a fast ball can't tunnel
+    // through a 12 cm post or the net between two frames.
+    const nearGoal = Math.abs(this.pos.x) > PITCH.halfL - 2 && Math.abs(this.pos.x) < PITCH.halfL + 3 && Math.abs(this.pos.z) < PITCH.goalHalfWidth + 2;
+    if (nearGoal) {
+      const n = Math.min(8, Math.max(1, Math.ceil((speed * dt) / 0.04)));
+      for (let i = 0; i < n; i++) {
+        this.pos.addScaled(v, dt / n);
+        this.collideGoals();
+      }
+    } else {
+      this.pos.addScaled(v, dt);
+    }
 
     // --- Ground -------------------------------------------------------------
     if (this.pos.y <= R) {
@@ -168,61 +179,110 @@ export class Ball {
     const side = p.x > 0 ? 1 : -1;
     const lineX = side * PITCH.halfL;
     const hw = PITCH.goalHalfWidth;
+    const H = PITCH.goalHeight;
     const pr = PITCH.postRadius;
     // Posts (vertical) and crossbar (horizontal), all sitting on the goal line.
-    this.collideSegment(lineX, 0, -hw, lineX, PITCH.goalHeight, -hw, pr);
-    this.collideSegment(lineX, 0, hw, lineX, PITCH.goalHeight, hw, pr);
-    this.collideSegment(lineX, PITCH.goalHeight, -hw, lineX, PITCH.goalHeight, hw, pr);
+    this.collideSegment(lineX, 0, -hw, lineX, H, -hw, pr);
+    this.collideSegment(lineX, 0, hw, lineX, H, hw, pr);
+    this.collideSegment(lineX, H, -hw, lineX, H, hw, pr);
 
-    // Net volume behind the line.
-    const backX = side * (PITCH.halfL + PITCH.goalDepth);
-    const prevAx = Math.abs(this.prevPos.x);
-    const insideNow = ax > PITCH.halfL && ax < PITCH.halfL + PITCH.goalDepth + 0.5 && Math.abs(p.z) < hw && p.y < PITCH.goalHeight;
+    // The net, in goal-local coordinates: u = depth behind the line, z across, y up.
+    // Same profile as the rendered net: flat roof to ROOF, then a slope down to DEPTH.
+    const D = PITCH.goalDepth;
+    const RF = PITCH.goalRoofDepth;
+    const u = ax - PITCH.halfL;
+    const prevU = Math.abs(this.prevPos.x) - PITCH.halfL;
+    const az = Math.abs(p.z);
+    const top = (uu: number) => (uu <= RF ? H : uu >= D ? 0 : H * (1 - (uu - RF) / (D - RF)));
+    // Back slope plane through (RF, H) and (D, 0); outward normal in (u, y).
+    const nl = Math.hypot(H, D - RF);
+    const nu = H / nl;
+    const ny = (D - RF) / nl;
+    const backDist = ((u - RF) * H + (p.y - H) * (D - RF)) / nl; // >0 outside
+
     if (!this.inGoal) {
-      if (insideNow && prevAx <= PITCH.halfL + 0.02) {
+      if (u > 0 && prevU <= 0.05 && az < hw && p.y < H) {
         this.inGoal = true; // came in through the mouth
-      } else if (ax > PITCH.halfL && ax < PITCH.halfL + PITCH.goalDepth) {
-        // Outside the frame: side netting and roof stop the ball.
-        const nearSide = Math.abs(Math.abs(p.z) - hw) < R && p.y < PITCH.goalHeight;
-        const nearRoof = Math.abs(p.y - PITCH.goalHeight) < R && Math.abs(p.z) < hw;
-        if (nearSide && Math.abs(this.prevPos.z) > hw) {
-          p.z = Math.sign(p.z) * (hw + R);
-          this.netHit(Math.abs(this.vel.z));
-          this.vel.z *= -0.15;
-          this.vel.x *= 0.5;
-        } else if (nearRoof && this.prevPos.y > PITCH.goalHeight) {
-          p.y = PITCH.goalHeight + R;
-          this.netHit(Math.abs(this.vel.y));
-          this.vel.y *= -0.2;
-          this.vel.x *= 0.6;
-          this.vel.z *= 0.6;
+      } else if (u > -R && u < D + R && az < hw + R && p.y < H + R) {
+        // Outside the frame touching the net: side netting, roof or back.
+        const penSide = az > hw - R && Math.abs(this.prevPos.z) >= hw ? hw + R - az : 1e9;
+        const penRoof = u > 0 && u <= RF && this.prevPos.y >= H ? H + R - p.y : 1e9;
+        const penBack = u > RF && backDist > -R && backDist < R ? R - backDist : 1e9;
+        const pen = Math.min(penSide, penRoof, penBack);
+        if (pen < 1e8 && pen > 0) {
+          if (pen === penSide) {
+            p.z = Math.sign(p.z) * (hw + R);
+            this.netHit(Math.abs(this.vel.z));
+            this.vel.z *= -0.15;
+            this.vel.x *= 0.5;
+            this.vel.y *= 0.7;
+          } else if (pen === penRoof) {
+            p.y = H + R;
+            this.netHit(Math.abs(this.vel.y));
+            if (this.vel.y < 0) this.vel.y *= -0.2;
+            this.vel.x *= 0.6;
+            this.vel.z *= 0.6;
+            this.onGround = false;
+          } else {
+            p.x += side * nu * pen;
+            p.y += ny * pen;
+            const vn = this.vel.x * side * nu + this.vel.y * ny;
+            if (vn < 0) {
+              this.netHit(-vn);
+              this.vel.x -= side * nu * vn * 1.2;
+              this.vel.y -= ny * vn * 1.2;
+            }
+            this.vel.x *= 0.6;
+            this.vel.z *= 0.6;
+          }
         }
       }
     }
     if (this.inGoal) {
-      // Keep the ball inside the net and soak up its energy.
-      if (side * (p.x - backX) > -R) {
-        p.x = backX - side * R;
-        this.netHit(Math.abs(this.vel.x));
-        this.vel.x *= -0.12;
-        this.vel.y *= 0.5;
-        this.vel.z *= 0.5;
+      // Inside: the net catches the ball and soaks up its energy.
+      if (u > RF && backDist > -R) {
+        const pen = backDist + R;
+        p.x -= side * nu * pen;
+        p.y -= ny * pen;
+        const vn = this.vel.x * side * nu + this.vel.y * ny;
+        if (vn > 0) {
+          this.netHit(vn);
+          this.vel.x -= side * nu * vn * 1.12;
+          this.vel.y -= ny * vn * 1.12;
+        }
+        this.vel.z *= 0.6;
       }
-      if (Math.abs(p.z) > hw - R) {
+      if (u <= RF && p.y > H - R) {
+        p.y = H - R;
+        if (this.vel.y > 0) {
+          this.netHit(this.vel.y);
+          this.vel.y *= -0.1;
+        }
+        this.vel.x *= 0.7;
+      }
+      if (Math.abs(p.x) - PITCH.halfL > D - R) {
+        p.x = side * (PITCH.halfL + D - R);
+        if (this.vel.x * side > 0) {
+          this.netHit(Math.abs(this.vel.x));
+          this.vel.x *= -0.12;
+        }
+      }
+      if (az > hw - R) {
         p.z = Math.sign(p.z) * (hw - R);
-        this.netHit(Math.abs(this.vel.z));
-        this.vel.z *= -0.15;
-        this.vel.x *= 0.6;
-      }
-      if (p.y > PITCH.goalHeight - R) {
-        p.y = PITCH.goalHeight - R;
-        this.netHit(Math.abs(this.vel.y));
-        this.vel.y *= -0.1;
+        if (this.vel.z * Math.sign(p.z) > 0) {
+          this.netHit(Math.abs(this.vel.z));
+          this.vel.z *= -0.15;
+        }
+        this.vel.x *= 0.7;
       }
       // Ball can't escape back through the front once it's in.
       if (Math.abs(p.x) < PITCH.halfL + R) {
         p.x = side * (PITCH.halfL + R);
-        this.vel.x *= -0.2;
+        if (this.vel.x * side < 0) this.vel.x *= -0.2;
+      }
+      if (p.y > top(Math.abs(p.x) - PITCH.halfL) - R + 0.001 && Math.abs(p.x) - PITCH.halfL > RF) {
+        // Numerical safety: never leave the volume through the slope.
+        p.y = Math.max(R, top(Math.abs(p.x) - PITCH.halfL) - R);
       }
     }
   }

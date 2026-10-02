@@ -2,6 +2,7 @@ import { DT, PITCH, PLAYER } from './constants';
 import { predictBallAt } from './kick';
 import type { Match } from './match';
 import type { Player } from './player';
+import { DIVE_HANDS, DIVE_HIPS, DIVE_RADIUS, divePose, planDive, type DivePose } from './keeperPose';
 import { V3, angleDiff, clamp, dist2D } from './vec';
 
 interface Intercept {
@@ -41,10 +42,14 @@ export class AI {
   private offside: number[] = [PITCH.halfL, PITCH.halfL];
   private keeperDiveT = [-10, -10];
   diveHeight: number[] = [];
+  /** Planned dive pose per player (keepers), shared with the renderer. */
+  diveRoll: number[] = [];
+  diveLift: number[] = [];
   private lastOwner: Player | null = null;
   private possStart = 0;
   private patience = 0.6;
   private tmp = new V3();
+  private pose: DivePose = { roll: 0, lift: 0 };
 
   constructor(private m: Match) {
     for (let i = 0; i < 22; i++) {
@@ -56,6 +61,8 @@ export class AI {
       this.dribZ.push(0);
       this.dribSprint.push(false);
       this.diveHeight.push(0.5);
+      this.diveRoll.push(1.3);
+      this.diveLift.push(0);
     }
   }
 
@@ -897,16 +904,28 @@ export class AI {
       this.moveTo(k, k.pos.x, cz, true, true);
       return true;
     }
+    const dh = clamp(cy, 0.15, 2.4);
+    // How far the body can reach to the side at this height (if he dived now).
+    const reachNow = planDive(Math.abs(dz), dh, k.look.height).reach;
+    // Don't commit early: shuffle across the line first, dive only in the last moment so
+    // the full stretch arrives together with the ball.
+    if (ct > 0.42 && !k.isBusy()) {
+      this.moveTo(k, k.pos.x, cz - Math.sign(dz) * Math.min(Math.abs(dz), reachNow * 0.6), true, true);
+      return true;
+    }
     if (!k.isBusy() && m.time > this.keeperDiveT[k.team] + 0.8) {
       this.keeperDiveT[k.team] = m.time;
-      const s = Math.sign(dz);
-      k.startAction('dive', 1.25, 0, s);
-      // Aim the forearms (not the fingertips) at the ball.
-      const need = Math.abs(dz) - 1.0;
-      const tt = Math.max(0.2, ct - react * 0.5);
-      const lat = clamp(need / tt, 1.5, 6 + k.attrs.keeping * 2);
-      k.vel.set(-own * 0.6, 0, s * lat);
-      this.diveHeight[k.id] = clamp(cy, 0.2, 2.3);
+      const s = Math.sign(dz) || 1;
+      const tt = Math.max(0.2, ct);
+      // Lateral push so the body line reaches the ball, then aim the body line at it.
+      const push = clamp((Math.abs(dz) - reachNow) / tt, 0, 6 + k.attrs.keeping * 2);
+      const aAtContact = Math.max(0, Math.abs(dz) - push * tt);
+      const plan = planDive(aAtContact, dh, k.look.height);
+      k.startAction('dive', 1.2, 0, s);
+      k.vel.set(-own * 0.6, 0, s * push);
+      this.diveHeight[k.id] = dh;
+      this.diveRoll[k.id] = plan.roll;
+      this.diveLift[k.id] = plan.lift;
     }
     return true;
   }
@@ -916,71 +935,108 @@ export class AI {
     const m = this.m;
     const b = m.ball;
     if (k.touchCooldown > 0 || m.heldBy) return false;
+    if (k.action === 'stumble' || k.action === 'kick' || k.action === 'throw') return false;
     if (!this.inOwnBox(k, b.pos.x, b.pos.z)) return false;
     if (m.owner && m.owner.team === k.team && m.owner !== k) return false;
     if (m.lastTouch === k && m.time - m.lastKickTime < 0.6) return false;
     // Back-pass rule: no hands from a teammate's deliberate kick.
     if (m.lastKicker && m.lastKicker.team === k.team && m.lastKicker !== k && m.lastTouch === m.lastKicker) return false;
+    // Only a ball in front of the goal line can be handled.
+    const own = -m.teams[k.team].dir;
+    if (b.pos.x * own > PITCH.halfL) return false;
+
     const diving = k.action === 'dive';
-    let hit = false;
+    const h = k.look.height;
+    let region: 'hands' | 'body' | null = null;
     let edge = 0;
     if (diving) {
-      // Capsule from hips toward the hands along the dive.
+      // Capsule along the body axis from the hips to the outstretched hands.
+      const pose = divePose(k, this.diveRoll[k.id], this.diveLift[k.id], this.pose);
       const s = k.actionDirZ;
-      const p = clamp(k.actionT / 0.3, 0, 1);
-      const dh = this.diveHeight[k.id];
-      const hipY = 0.9 + (dh * 0.8 - 0.9) * p;
-      const handY = 1.4 + (dh - 1.4) * p;
-      const ax = k.pos.x;
-      const az = k.pos.z;
-      const bx = k.pos.x;
-      const bz = k.pos.z + s * (0.6 + 1.2 * p);
-      const lx = bx - ax;
-      const ly = handY - hipY;
-      const lz = bz - az;
-      const len2 = lx * lx + ly * ly + lz * lz;
-      const t = clamp(((b.pos.x - ax) * lx + (b.pos.y - hipY) * ly + (b.pos.z - az) * lz) / len2, 0, 1);
-      const cx = ax + lx * t;
-      const cy = hipY + ly * t;
-      const cz = az + lz * t;
-      const d = Math.hypot(b.pos.x - cx, b.pos.y - cy, b.pos.z - cz);
-      hit = d < 0.45;
-      edge = t;
+      const sr = Math.sin(pose.roll);
+      const cr = Math.cos(pose.roll);
+      const l0 = DIVE_HIPS * h;
+      const l1 = DIVE_HANDS * h;
+      const ay = pose.lift + l0 * cr;
+      const az = k.pos.z + s * l0 * sr;
+      const ly = (l1 - l0) * cr;
+      const lz = s * (l1 - l0) * sr;
+      const len2 = ly * ly + lz * lz;
+      const t = clamp(((b.pos.y - ay) * ly + (b.pos.z - az) * lz) / len2, 0, 1);
+      const d = Math.hypot(b.pos.x - k.pos.x, b.pos.y - (ay + ly * t), b.pos.z - (az + lz * t));
+      if (d < DIVE_RADIUS + 0.11) {
+        region = t > 0.55 ? 'hands' : 'body';
+        edge = t;
+      }
     } else {
-      const d = dist2D(k.pos.x, k.pos.z, b.pos.x, b.pos.z);
-      hit = d < 0.7 && b.pos.y < 2.35;
-      edge = d / 0.7;
+      const dx = b.pos.x - k.pos.x;
+      const dz = b.pos.z - k.pos.z;
+      const d = Math.hypot(dx, dz);
+      const y = b.pos.y;
+      // Body: a person-sized column. Hands: in front of / beside him, from knee to above head.
+      // Depth (toward the pitch) and lateral offsets in the keeper's frame.
+      const fx = Math.cos(k.facing);
+      const fz = Math.sin(k.facing);
+      const depth = dx * fx + dz * fz;
+      const lat = Math.abs(-dx * fz + dz * fx);
+      if (d < 0.36 && y < 1.85 * h) region = 'body';
+      // Hands: a slab just in front of him, arm's length to each side, knee to above head
+      // (and down to the grass right by his feet).
+      else if (depth > -0.15 && depth < 0.45 && lat < 0.85 && y < 2.3 * h && (y > 0.3 || lat < 0.6)) region = 'hands';
+      edge = lat / 0.85;
     }
-    if (!hit) return false;
+    if (!region) return false;
+
     const speed = b.vel.len();
-    k.touchCooldown = 0.5;
+    k.touchCooldown = 0.4;
     if (speed < 7 && !diving) {
       m.catchBall(k);
       m.events.save = 0.3;
       return true;
     }
-    const saveP = 0.5 + k.attrs.keeping * 0.45 - clamp((speed - 18) / 16, 0, 1) * 0.3 - (edge > 0.8 ? 0.25 : 0);
+    const saveP = 0.55 + k.attrs.keeping * 0.4 - clamp((speed - 18) / 16, 0, 1) * 0.3 - (edge > 0.85 ? 0.25 : 0) + (region === 'body' ? 0.25 : 0);
+    const team = m.teams[k.team];
+    const out = team.dir; // away from his goal
     if (m.rng.next() < saveP) {
-      const team = m.teams[k.team];
       if (speed < 17 && (!diving || m.rng.next() < 0.35)) {
         m.catchBall(k);
+      } else if (diving) {
+        // Tipped wide: the ball keeps going toward the dive side, pushed away from goal.
+        const s = k.actionDirZ;
+        b.vel.set(out * speed * (0.1 + m.rng.next() * 0.2), 0.8 + m.rng.next() * 2.5, s * (2 + m.rng.next() * 4) + b.vel.z * 0.3);
       } else {
-        // Parry away from goal.
-        const out = team.dir;
-        b.vel.set(out * speed * (0.15 + m.rng.next() * 0.2), 1.5 + m.rng.next() * 3, b.vel.z * 0.3 + (m.rng.next() - 0.5) * speed * 0.5);
+        // Beaten away in front of him.
+        b.vel.set(out * speed * (0.25 + m.rng.next() * 0.2), 1 + m.rng.next() * 2.5, b.vel.z * 0.3 + (m.rng.next() - 0.5) * 5);
+      }
+      if (m.heldBy !== k) {
         b.spin.set(0, 0, 0);
         b.onGround = false;
         m.owner = null;
         m.lastTouch = k;
         m.lastKicker = k;
+        m.lastKickTime = m.time;
         m.passTarget = null;
       }
       m.events.save = clamp(speed / 30, 0.3, 1);
       return true;
     }
-    // Fingertips: slight deflection.
-    b.vel.z += (m.rng.next() - 0.5) * 2;
-    b.vel.scale(0.92);
+    if (region === 'body') {
+      // Not held, but it still hits him: a real rebound off the body.
+      const vx = b.vel.x;
+      b.vel.x = -vx * 0.35;
+      b.vel.z *= 0.6;
+      b.vel.y = Math.abs(b.vel.y) * 0.3 + 0.5;
+      b.onGround = false;
+      b.pos.x = k.pos.x + Math.sign(vx || out) * -0.48;
+      m.lastTouch = k;
+      m.events.save = 0.3;
+      return true;
+    }
+    // Fingertips: a slight touch that doesn't stop it (the body can still be hit after).
+    k.touchCooldown = 0.08;
+    b.vel.z += (m.rng.next() - 0.5) * 1.5;
+    b.vel.y += m.rng.next() * 0.6;
+    b.vel.scale(0.95);
     m.lastTouch = k;
     return true;
   }

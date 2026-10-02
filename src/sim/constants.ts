@@ -11,6 +11,8 @@ export const PITCH = {
   goalHalfWidth: 7.32 / 2,
   goalHeight: 2.44,
   goalDepth: 2.0,
+  // Net roof runs flat this far back, then the back of the net slopes down to the ground.
+  goalRoofDepth: 1.0,
   postRadius: 0.06,
   boxDepth: 16.5,
   boxHalfWidth: 20.16,

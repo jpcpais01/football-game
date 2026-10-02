@@ -984,7 +984,9 @@ export class Match {
     if (!best) return;
     const p = best;
     if (h > PLAYER.controlHeight) {
-      this.header(p);
+      // Head it only when it makes sense; otherwise take it down on the chest.
+      if (this.shouldHead(p)) this.header(p);
+      else this.controlTouch(p);
       return;
     }
     if (p === this.owner) this.dribbleTouch(p);
@@ -1099,6 +1101,24 @@ export class Match {
     if (p.team === this.humanTeam) this.setControlled(p);
   }
 
+  /**
+   * Automatic headers are for real heading situations: a queued Pass/Shoot, a chance in
+   * front of goal, a clearance under pressure, or a contested ball. A free high ball is
+   * chested down instead, which stops endless heading rallies.
+   */
+  private shouldHead(p: Player): boolean {
+    const b = this.ball;
+    if (b.pos.y > 1.95) return true; // too high to chest
+    if (p.plan) return true;
+    const team = this.teams[p.team];
+    const distGoal = dist2D(b.pos.x, b.pos.z, PITCH.halfL * team.dir, 0);
+    if (distGoal < 18) return true;
+    const press = this.nearestOpponentDist(p);
+    const ownThird = b.pos.x * team.dir < -PITCH.halfL / 3;
+    if (ownThird && press < 4) return true;
+    return press < 1.8;
+  }
+
   private header(p: Player): void {
     const b = this.ball;
     const team = this.teams[p.team];
@@ -1125,7 +1145,9 @@ export class Match {
         dirZ = -b.pos.z * 0.02;
       }
       speed = 9 + Math.min(1, Math.hypot(dirX, dirZ) / 25) * 5;
-      up = 0.35;
+      // Nod it down to a teammate's feet; only clearances go high.
+      const clearing = b.pos.x * team.dir < -PITCH.halfL / 3 && this.nearestOpponentDist(p) < 4;
+      up = clearing ? 0.35 : 0.05;
     }
     const d = Math.max(0.01, Math.hypot(dirX, dirZ));
     const sd = 0.08 + (1 - p.attrs.control) * 0.12;

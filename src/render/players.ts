@@ -3,6 +3,7 @@ import type { Match } from '../sim/match';
 import type { Player } from '../sim/player';
 import { clamp, lerp, smoothstep } from '../sim/vec';
 import { STAND_SHADOW_GLSL, SUN_DIR, outlineMaterial, toonMaterial } from './look';
+import { divePose, type DivePose } from '../sim/keeperPose';
 
 /**
  * Players are built from simple rounded parts and animated procedurally from the
@@ -116,6 +117,7 @@ export class PlayersView {
   private q = new THREE.Quaternion();
   private v = new THREE.Vector3();
   private s = new THREE.Vector3();
+  private pose: DivePose = { roll: 0, lift: 0 };
 
   constructor(match: Match) {
     const players = match.players;
@@ -357,26 +359,24 @@ export class PlayersView {
           break;
         }
         case 'dive': {
-          // Which side (in the keeper's local frame) is the dive going?
+          // Same pose the physics uses for the hands, so saves happen where you see them.
           const leftZ = -Math.cos(facing);
           const side = Math.sign(p.actionDirZ * leftZ) || 1;
-          const k = smoothstep(0, 0.28, pr);
-          const land = smoothstep(0.55, 0.8, pr);
-          const dh = match.ai.diveHeight[p.id];
-          roll = -side * 1.35 * k;
-          hipY = lerp(HIP_Y, lerp(0.75 + dh * 0.35, 0.28, land), k);
-          const up = -2.9;
-          if (side > 0) {
-            armL = lerp(armL, up, k);
-            armR = lerp(armR, up + 0.3, k);
-          } else {
-            armR = lerp(armR, up, k);
-            armL = lerp(armL, up + 0.3, k);
-          }
-          armOutL = armOutR = 0.25;
-          elbowL = elbowR = 0.15;
-          hipL = hipR = 0.2;
-          kneeL = kneeR = 0.4;
+          divePose(p, match.ai.diveRoll[p.id], match.ai.diveLift[p.id], this.pose);
+          const k = smoothstep(0, 0.22, pr);
+          roll = -side * this.pose.roll;
+          lift = this.pose.lift;
+          hipY = HIP_Y;
+          leanF = 0;
+          leanS = 0;
+          // Both arms stretched along the body axis, past the head.
+          armL = lerp(armL, -3.05, k);
+          armR = lerp(armR, -3.05, k);
+          armOutL = armOutR = lerp(0.1, 0.12, k);
+          elbowL = elbowR = 0.05;
+          hipL = hipR = lerp(hipL, 0.15, k);
+          kneeL = lerp(kneeL, 0.5, k);
+          kneeR = lerp(kneeR, 0.15, k);
           break;
         }
         case 'header': {

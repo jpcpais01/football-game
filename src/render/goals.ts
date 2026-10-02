@@ -10,7 +10,7 @@ export interface Goals {
 }
 
 const NET_DEPTH = PITCH.goalDepth;
-const ROOF_DEPTH = 1.0;
+const ROOF_DEPTH = PITCH.goalRoofDepth;
 
 function netGeometry(): THREE.BufferGeometry {
   // Built for the goal at +x, in metres. Attribute `aOut` = outward direction for ripples.
