@@ -155,6 +155,53 @@ export class AI {
     return react + extra + t;
   }
 
+  /**
+   * Where to go to get to the ball. The planned through-ball run is used only while the
+   * ball can't be reached yet (a long ball still overtaking the runner); otherwise it's
+   * the ball itself, led by how it's moving: a ball coming toward him is met head-on, one
+   * running away from him is chased to the point where he can catch it.
+   */
+  meetPoint(p: Player, out: V3): V3 {
+    const m = this.m;
+    const b = m.ball;
+    const ip = this.intercept[p.id];
+    const rt = m.passTarget === p ? this.runTarget(p) : null;
+    if (rt && ip.t < 0 && dist2D(p.pos.x, p.pos.z, rt.x, rt.z) > 1) return out.set(rt.x, 0, rt.z);
+    const gap = m.ballDist(p);
+    // How fast the ball is coming at him (m/s; negative = running away).
+    const toward = gap > 0.1 ? ((p.pos.x - b.pos.x) * b.vel.x + (p.pos.z - b.pos.z) * b.vel.z) / gap : 0;
+    const coming = clamp(toward / 4, 0, 1);
+    const w = 0.1 + clamp((gap - 2) / 6, 0, 1) * 0.85 * (1 - 0.8 * coming);
+    const bx = b.pos.x + b.vel.x * 0.15;
+    const bz = b.pos.z + b.vel.z * 0.15;
+    return out.set(bx + (ip.x - bx) * w, 0, bz + (ip.z - bz) * w);
+  }
+
+  /**
+   * A team-mate's kick is coming through and it's not for him: if its line passes close
+   * (and low enough to hit him) in the next moment, step off it, to the side he's on.
+   */
+  private dodge(p: Player): boolean {
+    const m = this.m;
+    const k = m.lastKicker;
+    if (!k || k === p || k.team !== p.team || m.lastTouch !== k || m.owner || m.heldBy || m.passTarget === p) return false;
+    if (m.time - m.lastKickTime > 2) return false;
+    const b = m.ball;
+    const sp = Math.hypot(b.vel.x, b.vel.z);
+    if (sp < 8) return false;
+    const rx = p.pos.x - b.pos.x;
+    const rz = p.pos.z - b.pos.z;
+    const t = (rx * b.vel.x + rz * b.vel.z) / (sp * sp);
+    if (t <= 0.05 || t > 1.2) return false;
+    const lat = (rx * b.vel.z - rz * b.vel.x) / sp;
+    if (Math.abs(lat) > 1.3) return false;
+    const i = Math.min(this.sampleCount - 1, Math.round(t / SAMPLE_DT));
+    if (this.sy[i] > 2.0) return false; // it'll fly over him
+    const side = Math.sign(lat) || 1;
+    this.moveTo(p, p.pos.x + (b.vel.z / sp) * side * 2.2, p.pos.z - (b.vel.x / sp) * side * 2.2, true, true);
+    return true;
+  }
+
   /** Active planned run (e.g. onto a through ball), if any. */
   runTarget(p: Player): { x: number; z: number } | null {
     const r = this.run[p.id];
@@ -495,19 +542,13 @@ export class AI {
     const att = m.attackingTeam();
     const run = this.run[p.id];
     if (m.passTarget === p) {
-      // On a through ball, sprint for the planned spot; meet the ball once it's close.
-      const rt = this.runTarget(p);
-      if (rt && m.ballDist(p) > 4 && dist2D(p.pos.x, p.pos.z, rt.x, rt.z) > 1) {
-        this.moveTo(p, rt.x, rt.z, true, false);
-        p.sprinting = true;
-        return;
-      }
-      const ip = this.intercept[p.id];
-      this.moveTo(p, ip.x, ip.z, true, true);
-      p.lookTarget.copy(m.ball.pos);
-      p.lookAt = p.lookTarget;
+      this.meetPoint(p, this.tmp);
+      this.moveTo(p, this.tmp.x, this.tmp.z, true, true);
+      p.sprinting = m.ballDist(p) > 6;
       return;
     }
+    // A team-mate's kick coming through: get out of its way.
+    if (this.dodge(p)) return;
     // A cross is on: attackers fill the box, defenders drop in to mark it.
     const crossCarrier = m.owner && m.inCrossZone(m.owner.team, m.owner.pos.x, m.owner.pos.z) ? m.owner : null;
     const pressing = crossCarrier !== null && crossCarrier.team !== p.team && this.chaser[p.team] === p;
