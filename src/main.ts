@@ -2,7 +2,7 @@ import '@fontsource/barlow-condensed/latin-600.css';
 import '@fontsource/barlow-condensed/latin-800.css';
 import './style.css';
 import * as THREE from 'three';
-import { DT } from './sim/constants';
+import { DT, MATCH } from './sim/constants';
 import { Match } from './sim/match';
 import { createPitch } from './render/pitch';
 import { createStadium } from './render/stadium';
@@ -10,7 +10,8 @@ import { createGoals } from './render/goals';
 import { PlayersView } from './render/players';
 import { BallView } from './render/ballView';
 import { CameraRig } from './render/cameraRig';
-import { COLORS, SUN_DIR } from './render/look';
+import { Atmosphere } from './render/atmosphere';
+import { SHARED } from './render/look';
 import { Controls } from './ui/controls';
 import { Hud } from './ui/hud';
 import { GameAudio } from './ui/audio';
@@ -33,16 +34,19 @@ let dpr = maxDpr;
 renderer.setPixelRatio(dpr);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+// Filmic tone mapping: warm highlights roll off softly instead of clipping.
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.95;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 app.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(COLORS.fog);
-scene.fog = new THREE.Fog(COLORS.fog, 90, 260);
-
-const sun = new THREE.DirectionalLight(COLORS.sun, 2.6);
-sun.position.copy(SUN_DIR).multiplyScalar(-100);
-scene.add(sun);
-scene.add(new THREE.HemisphereLight(COLORS.hemiSky, COLORS.hemiGround, 1.25));
+const atmo = new Atmosphere(scene, { shadowSize: coarse ? 1024 : 2048 });
+// ?tod=0..1 pins the time of day (for looking at the evening without playing a match).
+const TOD = params.has('tod') ? Number(params.get('tod')) : -1;
+// ?showcase: frozen line-up near the camera, for judging the player models.
+const SHOWCASE = params.has('showcase');
 
 let match = new Match(Date.now() & 0xffff);
 match.autoPlay = true;
@@ -57,6 +61,7 @@ scene.add(playersView.group);
 const ballView = new BallView();
 scene.add(ballView.group);
 const rig = new CameraRig(window.innerWidth / window.innerHeight);
+if (params.has('showcase')) rig.distOverride = 9;
 if (params.has('zoom')) rig.distOverride = Number(params.get('zoom')) || 10;
 const FIXED_DPR = params.has('dpr');
 if (FIXED_DPR) renderer.setPixelRatio((dpr = Number(params.get('dpr')) || 1));
@@ -276,6 +281,29 @@ function adaptQuality(frameMs: number, now: number): void {
   }
 }
 
+function showcase(dt: number): void {
+  const picks = [0, 9, 5, 12, 20, 2, 11, 16];
+  picks.forEach((id, i) => {
+    const p = match.players[id];
+    const running = i % 3 === 1;
+    p.pos.set(-5.6 + i * 1.6, 0, 5 + (i % 2) * 1.2);
+    p.prevPos.copy(p.pos);
+    p.facing = running ? 0 : Math.PI / 2 - 0.5 + i * 0.15;
+    p.prevFacing = p.facing;
+    p.vel.set(running ? 7 : 0, 0, 0);
+    p.stridePhase += running ? dt * 10 : 0;
+    p.action = 'none';
+  });
+  for (const p of match.players) {
+    if (!picks.includes(p.id)) {
+      p.pos.set(p.pos.x, 0, -30);
+      p.prevPos.copy(p.pos);
+    }
+  }
+  match.ball.reset(0.8, 7);
+  match.phase = 'play';
+}
+
 let cpuAvg = 0;
 function frame(now: number): void {
   requestAnimationFrame(frame);
@@ -290,7 +318,11 @@ function frame(now: number): void {
     controls.setMode(match.humanAttacking() ? 'attack' : 'defend');
     acc += dt;
     let steps = 0;
-    while (acc >= DT && steps < 12) {
+    if (SHOWCASE) {
+      showcase(dt);
+      acc = 0;
+    }
+    while (!SHOWCASE && acc >= DT && steps < 12) {
       match.step(controls.input);
       acc -= DT;
       steps++;
@@ -307,7 +339,12 @@ function frame(now: number): void {
   playersView.update(match, alpha, now / 1000);
   ballView.update(match, alpha, running ? dt : 0);
   goals.update(simTime);
-  stadium.update(now / 1000, match.excitement);
+  // Time of day follows the match clock (the attract mode loops through it too).
+  const progress = TOD >= 0 ? TOD : Math.min(1, ((match.half - 1) * MATCH.halfSeconds + match.clock) / (2 * MATCH.halfSeconds));
+  atmo.set(progress);
+  atmo.follow(rig.focusX, rig.focusZ);
+  SHARED.uTime.value = now / 1000;
+  stadium.update(now / 1000, match.excitement, atmo);
   if (playing) hud.update(match, now / 1000);
 
   renderer.render(scene, rig.camera);

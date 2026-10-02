@@ -16,6 +16,14 @@ export class CameraRig {
   /** Debug: fixed camera distance (e.g. ?zoom=10 for a close-up). */
   distOverride = 0;
 
+  /** Point on the pitch the camera is framing (the shadow map follows it). */
+  get focusX(): number {
+    return this.tx;
+  }
+  get focusZ(): number {
+    return this.tz - 4;
+  }
+
   constructor(aspect: number) {
     this.camera = new THREE.PerspectiveCamera(30, aspect, 1, 1500);
     this.place(0);
@@ -64,12 +72,13 @@ export class CameraRig {
   }
 
   private place(time: number): void {
-    const pitch = (25 * Math.PI) / 180;
+    // A little lower than a tactical cam so the stands and sky are part of the picture.
+    const pitch = (21 * Math.PI) / 180;
     const cam = this.camera;
     const sx = Math.sin(time * 41) * this.shake * 0.25;
     const sy = Math.cos(time * 37) * this.shake * 0.2;
     cam.position.set(this.tx + sx, Math.sin(pitch) * this.dist + sy, this.tz + Math.cos(pitch) * this.dist);
-    this.look.set(this.tx, 0, this.tz - 1.5);
+    this.look.set(this.tx, 0, this.tz - 3.5);
     cam.lookAt(this.look);
   }
 }

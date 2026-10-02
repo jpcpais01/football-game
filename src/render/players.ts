@@ -1,108 +1,351 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { Match } from '../sim/match';
 import type { Player } from '../sim/player';
 import { clamp, lerp, smoothstep } from '../sim/vec';
-import { STAND_SHADOW_GLSL, SUN_DIR, outlineMaterial, toonMaterial } from './look';
+import { PYLONS, blobMaterial, litMaterial } from './look';
 import { divePose, type DivePose } from '../sim/keeperPose';
 
 /**
- * Players are built from simple rounded parts and animated procedurally from the
- * simulation state (speed, stride phase, lean, actions), so motion always matches the
- * physics. Every part type is one InstancedMesh: all 22 players ≈ 20 draw calls.
+ * Players: shaped, kitted figures (collars, trim, numbers, faces, hair) built from a few
+ * smooth parts and animated procedurally from the simulation state, so motion always
+ * matches the physics. Every part type is one InstancedMesh: all 22 players are ~17 draw
+ * calls, plus the same again for the sun's shadow map.
  */
 
-type PartName = 'torso' | 'pelvis' | 'head' | 'hair' | 'upperArm' | 'forearm' | 'shortsLeg' | 'thigh' | 'shin' | 'boot';
+type PartName =
+  | 'torso'
+  | 'pelvis'
+  | 'neck'
+  | 'head'
+  | 'hairShort'
+  | 'hairCurly'
+  | 'hairBun'
+  | 'upperArm'
+  | 'forearm'
+  | 'shortsLeg'
+  | 'thigh'
+  | 'shin'
+  | 'boot';
 
 interface Part {
   mesh: THREE.InstancedMesh;
-  outline: THREE.InstancedMesh | null;
   perPlayer: number;
 }
 
 const THIGH = 0.43;
 const SHIN = 0.42;
 const HIP_Y = 0.94;
+const HAIR_PARTS: PartName[] = ['hairShort', 'hairCurly', 'hairBun'];
 
-function capsule(r: number, len: number, capSeg = 3, radial = 8): THREE.BufferGeometry {
-  return new THREE.CapsuleGeometry(r, len, capSeg, radial);
+function lathe(points: [number, number][], segments = 14): THREE.BufferGeometry {
+  return new THREE.LatheGeometry(
+    points.map(([r, y]) => new THREE.Vector2(r, y)),
+    segments,
+  );
 }
 
 function buildGeometries(): Record<PartName, THREE.BufferGeometry> {
-  const torso = capsule(0.16, 0.3, 4, 10);
-  torso.scale(1.18, 1, 0.66);
-  torso.translate(0, 0.3, 0);
+  // Torso from the waist up: chest, shoulders, neckline. uv.y = 0 at the hem, 1 at the neck.
+  const torso = lathe(
+    [
+      [0.0, -0.01],
+      [0.138, 0.0],
+      [0.15, 0.07],
+      [0.157, 0.17],
+      [0.17, 0.3],
+      [0.186, 0.42],
+      [0.19, 0.5],
+      [0.172, 0.565],
+      [0.12, 0.605],
+      [0.066, 0.625],
+      [0.0, 0.63],
+    ],
+    18,
+  );
+  torso.scale(1.2, 1, 0.68);
 
-  const pelvis = capsule(0.15, 0.06, 3, 10);
-  pelvis.scale(1.12, 1, 0.74);
+  const pelvis = lathe(
+    [
+      [0.0, 0.08],
+      [0.148, 0.07],
+      [0.158, 0.0],
+      [0.165, -0.08],
+      [0.168, -0.13],
+      [0.0, -0.14],
+    ],
+    16,
+  );
+  pelvis.scale(1.1, 1, 0.8);
 
-  const head = new THREE.SphereGeometry(0.112, 12, 9);
-  head.scale(0.94, 1.08, 1);
-  head.translate(0, 0.13, 0.01);
+  const neck = new THREE.CylinderGeometry(0.052, 0.058, 0.11, 10);
+  neck.translate(0, 0.04, 0);
 
-  const hair = new THREE.SphereGeometry(0.124, 12, 6, 0, Math.PI * 2, 0, Math.PI * 0.5);
-  hair.scale(0.97, 1.06, 1.06);
-  hair.translate(0, 0.145, -0.005);
+  const head = new THREE.SphereGeometry(0.104, 20, 14);
+  {
+    // Shape a jaw and a slightly longer face.
+    const pos = head.getAttribute('position') as THREE.BufferAttribute;
+    for (let i = 0; i < pos.count; i++) {
+      let x = pos.getX(i);
+      let y = pos.getY(i);
+      let z = pos.getZ(i);
+      if (y < 0) {
+        const k = -y / 0.104;
+        x *= 1 - 0.18 * k;
+        z *= 1 - 0.08 * k;
+        y *= 1.12;
+      }
+      if (z > 0) z *= 1.04;
+      pos.setXYZ(i, x * 0.9, y * 1.06, z);
+    }
+    head.computeVertexNormals();
+    head.translate(0, 0.13, 0.008);
+  }
 
-  const upperArm = capsule(0.054, 0.2);
-  upperArm.translate(0, -0.15, 0);
-  const forearm = capsule(0.043, 0.21);
-  forearm.translate(0, -0.15, 0);
-  const shortsLeg = capsule(0.088, 0.1);
-  shortsLeg.translate(0, -0.1, 0);
-  const thigh = capsule(0.068, 0.3);
-  thigh.translate(0, -0.21, 0);
-  const shin = capsule(0.058, 0.3);
-  shin.translate(0, -0.21, 0);
-  const boot = capsule(0.048, 0.13, 2, 8);
+  const cap = (r: number, theta: number, tilt: number) => {
+    const g = new THREE.SphereGeometry(r, 18, 9, 0, Math.PI * 2, 0, theta);
+    g.rotateX(-tilt);
+    return g;
+  };
+  const hairShort = cap(0.112, Math.PI * 0.56, 0.32);
+  hairShort.scale(0.93, 1.07, 1.06);
+  hairShort.translate(0, 0.142, -0.006);
+
+  const hairCurly = new THREE.IcosahedronGeometry(0.128, 2);
+  {
+    const pos = hairCurly.getAttribute('position') as THREE.BufferAttribute;
+    const v = new THREE.Vector3();
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i);
+      const n = 1 + 0.06 * Math.sin(v.x * 90) * Math.sin(v.y * 80) * Math.sin(v.z * 85);
+      v.multiplyScalar(n);
+      pos.setXYZ(i, v.x * 0.95, v.y * 0.95, v.z);
+    }
+    hairCurly.computeVertexNormals();
+    hairCurly.translate(0, 0.165, -0.015);
+  }
+  const hairBun = (() => {
+    const c = cap(0.112, Math.PI * 0.55, 0.38);
+    c.scale(0.93, 1.06, 1.06);
+    c.translate(0, 0.142, -0.006);
+    const bun = new THREE.SphereGeometry(0.048, 10, 8);
+    bun.translate(0, 0.235, -0.07);
+    return mergeGeometries([c, bun])!;
+  })();
+
+  // Arm: sleeve on top (uv.y < ~0.5), skin below. uv.y = 0 at the shoulder.
+  const upperArm = lathe(
+    [
+      [0.0, 0.03],
+      [0.06, 0.02],
+      [0.068, -0.04],
+      [0.066, -0.12],
+      [0.067, -0.155],
+      [0.05, -0.17],
+      [0.05, -0.22],
+      [0.044, -0.29],
+      [0.0, -0.31],
+    ],
+    12,
+  );
+  // Forearm and hand: uv.y > ~0.68 is the hand (gloves for keepers).
+  const forearm = lathe(
+    [
+      [0.0, 0.02],
+      [0.044, 0.0],
+      [0.046, -0.06],
+      [0.037, -0.2],
+      [0.03, -0.235],
+      [0.038, -0.27],
+      [0.036, -0.32],
+      [0.0, -0.345],
+    ],
+    10,
+  );
+  forearm.scale(1, 1, 0.85);
+  const shortsLeg = lathe(
+    [
+      [0.092, 0.05],
+      [0.098, -0.06],
+      [0.104, -0.16],
+      [0.107, -0.215],
+    ],
+    14,
+  );
+  const thigh = lathe(
+    [
+      [0.0, 0.02],
+      [0.074, 0.0],
+      [0.078, -0.1],
+      [0.07, -0.25],
+      [0.056, -0.39],
+      [0.05, -0.44],
+      [0.0, -0.46],
+    ],
+    12,
+  );
+  // Shin in a sock: calf bulge, uv.y < ~0.16 is the sock band.
+  const shin = lathe(
+    [
+      [0.0, 0.02],
+      [0.052, 0.0],
+      [0.056, -0.05],
+      [0.063, -0.15],
+      [0.052, -0.29],
+      [0.04, -0.39],
+      [0.038, -0.43],
+      [0.0, -0.45],
+    ],
+    12,
+  );
+  shin.scale(1, 1, 1.08);
+  const boot = new THREE.CapsuleGeometry(0.046, 0.16, 3, 10);
   boot.rotateX(Math.PI / 2);
-  boot.scale(1, 0.85, 1);
-  boot.translate(0, -0.035, 0.045);
-  return { torso, pelvis, head, hair, upperArm, forearm, shortsLeg, thigh, shin, boot };
+  boot.scale(0.92, 0.72, 1);
+  boot.translate(0, -0.035, 0.05);
+  return { torso, pelvis, neck, head, hairShort, hairCurly, hairBun, upperArm, forearm, shortsLeg, thigh, shin, boot };
 }
 
-function shadowMaterial(opacity: number, sunShadow: boolean): THREE.ShaderMaterial {
-  return new THREE.ShaderMaterial({
-    transparent: true,
-    depthWrite: false,
-    polygonOffset: true,
-    polygonOffsetFactor: -2,
-    polygonOffsetUnits: -2,
-    uniforms: { uOpacity: { value: opacity } },
-    vertexShader: /* glsl */ `
-      varying vec2 vUv;
-      varying vec3 vWorld;
-      void main() {
-        vUv = uv;
-        vec4 wp = modelMatrix * instanceMatrix * vec4(position, 1.0);
-        vWorld = wp.xyz;
-        gl_Position = projectionMatrix * viewMatrix * wp;
-      }
-    `,
-    fragmentShader: /* glsl */ `
-      varying vec2 vUv;
-      varying vec3 vWorld;
-      uniform float uOpacity;
-      ${STAND_SHADOW_GLSL}
-      void main() {
-        vec2 q = (vUv - 0.5) * 2.0;
-        ${sunShadow ? 'q.y = q.y < 0.0 ? q.y * 1.8 : q.y;' : ''}
-        float r = length(q);
-        float a = (1.0 - smoothstep(0.35, 1.0, r)) * uOpacity;
-        ${sunShadow ? 'a *= 1.0 - standShadow(vec3(vWorld.x, 0.0, vWorld.z));' : ''}
-        gl_FragColor = vec4(0.12, 0.15, 0.1, a);
-      }
-    `,
+/** Digits 0-9 in a strip, white on transparent, for shirt numbers. */
+function numberTexture(): THREE.CanvasTexture {
+  const cv = document.createElement('canvas');
+  cv.width = 640;
+  cv.height = 96;
+  const tex = new THREE.CanvasTexture(cv);
+  const draw = () => {
+    const g = cv.getContext('2d')!;
+    g.clearRect(0, 0, cv.width, cv.height);
+    g.fillStyle = '#fff';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.font = '800 92px "Barlow Condensed", "Arial Narrow", sans-serif';
+    for (let i = 0; i < 10; i++) g.fillText(String(i), i * 64 + 32, 52);
+    tex.needsUpdate = true;
+  };
+  draw();
+  void document.fonts?.ready.then(draw);
+  tex.anisotropy = 4;
+  return tex;
+}
+
+// Per-part shader details. vUv2 = geometry uv, vColor/diffuseColor = instance colour.
+const KIT_DECL = /* glsl */ `
+varying vec3 vTrim;
+float band(float x, float a, float b) { return step(a, x) * step(x, b); }
+`;
+const TRIM_VERT = { vertDecl: 'attribute vec3 aTrim; varying vec3 vTrim;', vertBody: 'vTrim = aTrim;' };
+
+function torsoMaterial(numbers: THREE.Texture): THREE.MeshStandardMaterial {
+  return litMaterial({
+    groundAO: true,
+    roughness: 0.78,
+    uniforms: { uNumbers: { value: numbers } },
+    vertDecl: 'attribute vec3 aTrim; attribute vec3 aNumCol; attribute float aNum; varying vec3 vTrim; varying vec3 vNumCol; varying float vNum;',
+    vertBody: 'vTrim = aTrim; vNumCol = aNumCol; vNum = aNum;',
+    fragDecl: `${KIT_DECL}
+      varying vec3 vNumCol; varying float vNum;
+      uniform sampler2D uNumbers;
+      float digit(vec2 p, float d) {
+        if (p.x < 0.0 || p.x > 1.0 || p.y < 0.0 || p.y > 1.0) return 0.0;
+        return texture2D(uNumbers, vec2((d + p.x) / 10.0, p.y)).a;
+      }`,
+    diffuseHook: /* glsl */ `{
+      float u = vUv2.x;
+      float v = vUv2.y;
+      vec3 base = diffuseColor.rgb;
+      // Collar and side panels.
+      float collar = smoothstep(0.86, 0.875, v);
+      float side = (1.0 - smoothstep(0.012, 0.02, abs(u - 0.25))) + (1.0 - smoothstep(0.012, 0.02, abs(u - 0.75)));
+      side *= smoothstep(0.1, 0.2, v) * (1.0 - smoothstep(0.7, 0.8, v));
+      vec3 c = mix(base, vTrim, clamp(collar + side * 0.85, 0.0, 1.0));
+      // Crest on the left chest.
+      float crest = 1.0 - smoothstep(0.018, 0.024, length(vec2((u - 0.085) * 3.0, v - 0.72)));
+      c = mix(c, vTrim, crest);
+      // Number on the back (u = 0.5).
+      vec2 nb = vec2((u - 0.5) * 6.2, (v - 0.33) / 0.24);
+      float tens = floor(vNum / 10.0);
+      float ones = vNum - tens * 10.0;
+      float num = tens > 0.0
+        ? max(digit(vec2(nb.x * 1.6 + 1.0, nb.y), tens), digit(vec2(nb.x * 1.6, nb.y), ones))
+        : digit(vec2(nb.x * 1.6 + 0.5, nb.y), ones);
+      c = mix(c, vNumCol, num);
+      // Soft fabric folds near the waist and under the arms.
+      float fold = 0.04 * sin(u * 60.0 + v * 9.0) * (1.0 - smoothstep(0.0, 0.25, v));
+      c *= 1.0 - fold - 0.06 * (1.0 - smoothstep(0.0, 0.08, v));
+      diffuseColor.rgb = c;
+    }`,
   });
+}
+
+function headMaterial(): THREE.MeshStandardMaterial {
+  return litMaterial({
+    groundAO: true,
+    roughness: 0.62,
+    fragDecl: 'float blob(vec2 p, vec2 c, vec2 r) { vec2 d = (p - c) / r; return 1.0 - smoothstep(0.7, 1.0, dot(d, d)); }',
+    diffuseHook: /* glsl */ `{
+      // Simple, calm face: brows, eyes, a hint of nose and mouth. Front of the head is u = 0.25.
+      vec2 f = vec2((vUv2.x - 0.25) * 4.0, vUv2.y);
+      vec3 skin = diffuseColor.rgb;
+      vec3 c = skin;
+      float eyes = blob(vec2(abs(f.x), f.y), vec2(0.17, 0.535), vec2(0.045, 0.022));
+      float brows = blob(vec2(abs(f.x), f.y), vec2(0.18, 0.6), vec2(0.07, 0.012));
+      float mouth = blob(f, vec2(0.0, 0.395), vec2(0.08, 0.008));
+      float nose = blob(f, vec2(0.0, 0.47), vec2(0.03, 0.05));
+      float cheek = blob(vec2(abs(f.x), f.y), vec2(0.27, 0.45), vec2(0.08, 0.06));
+      c *= 1.0 - nose * 0.12;
+      c = mix(c, skin * vec3(1.05, 0.92, 0.9), cheek * 0.25);
+      c = mix(c, skin * 0.45, brows * 0.85);
+      c = mix(c, vec3(0.08, 0.06, 0.05), eyes * 0.9);
+      c = mix(c, skin * vec3(0.7, 0.5, 0.48), mouth * 0.7);
+      // Ears: a touch darker at the sides.
+      float ear = blob(vec2(abs(vUv2.x - 0.5) , vUv2.y), vec2(0.25, 0.5), vec2(0.04, 0.06));
+      c *= 1.0 - ear * 0.15;
+      diffuseColor.rgb = c;
+    }`,
+  });
+}
+
+function sleeveMaterial(): THREE.MeshStandardMaterial {
+  return litMaterial({
+    groundAO: true,
+    roughness: 0.78,
+    vertDecl: 'attribute vec3 aTrim; attribute vec3 aSkin; varying vec3 vTrim; varying vec3 vSkin;',
+    vertBody: 'vTrim = aTrim; vSkin = aSkin;',
+    fragDecl: `${KIT_DECL} varying vec3 vSkin;`,
+    diffuseHook: /* glsl */ `{
+      float v = vUv2.y;
+      vec3 c = diffuseColor.rgb;
+      c = mix(c, vTrim, band(v, 0.43, 0.5));
+      c = mix(c, vSkin, step(0.5, v));
+      diffuseColor.rgb = c;
+    }`,
+  });
+}
+
+function forearmMaterial(): THREE.MeshStandardMaterial {
+  return litMaterial({
+    groundAO: true,
+    roughness: 0.66,
+    vertDecl: 'attribute vec3 aAlt; varying vec3 vAlt;',
+    vertBody: 'vAlt = aAlt;',
+    fragDecl: 'varying vec3 vAlt;',
+    diffuseHook: 'diffuseColor.rgb = mix(diffuseColor.rgb, vAlt, smoothstep(0.66, 0.7, vUv2.y));',
+  });
+}
+
+function trimmedMaterial(hook: string, roughness = 0.8): THREE.MeshStandardMaterial {
+  return litMaterial({ groundAO: true, roughness, ...TRIM_VERT, fragDecl: KIT_DECL, diffuseHook: hook });
 }
 
 export class PlayersView {
   readonly group = new THREE.Group();
   private parts = {} as Record<PartName, Part>;
   private contact: THREE.InstancedMesh;
-  private sun: THREE.InstancedMesh;
+  private flood: THREE.InstancedMesh;
   private ring: THREE.Mesh;
   private marker: THREE.Mesh;
   private n: number;
+  private hidden = new THREE.Matrix4().makeScale(0, 0, 0);
 
   // scratch
   private e = new THREE.Euler();
@@ -117,40 +360,77 @@ export class PlayersView {
   private q = new THREE.Quaternion();
   private v = new THREE.Vector3();
   private s = new THREE.Vector3();
+  private yAxis = new THREE.Vector3(0, 1, 0);
   private pose: DivePose = { roll: 0, lift: 0 };
 
   constructor(match: Match) {
-    const players = match.players;
-    this.n = players.length;
+    this.n = match.players.length;
     const geos = buildGeometries();
-    // The hair cap is open underneath, so an inverted hull would show its inside: no outline.
-    const outlineParts: PartName[] = ['torso', 'pelvis', 'head', 'upperArm', 'forearm', 'shortsLeg', 'thigh', 'shin', 'boot'];
-    const per: Record<PartName, number> = { torso: 1, pelvis: 1, head: 1, hair: 1, upperArm: 2, forearm: 2, shortsLeg: 2, thigh: 2, shin: 2, boot: 2 };
-    const mat = toonMaterial();
+    const per: Record<PartName, number> = {
+      torso: 1,
+      pelvis: 1,
+      neck: 1,
+      head: 1,
+      hairShort: 1,
+      hairCurly: 1,
+      hairBun: 1,
+      upperArm: 2,
+      forearm: 2,
+      shortsLeg: 2,
+      thigh: 2,
+      shin: 2,
+      boot: 2,
+    };
+    const skin = litMaterial({ groundAO: true, roughness: 0.62 });
+    const hair = litMaterial({ groundAO: true, roughness: 0.9 });
+    const cloth = litMaterial({ groundAO: true, roughness: 0.8 });
+    const mats: Record<PartName, THREE.Material> = {
+      torso: torsoMaterial(numberTexture()),
+      pelvis: cloth,
+      neck: skin,
+      head: headMaterial(),
+      hairShort: hair,
+      hairCurly: hair,
+      hairBun: hair,
+      upperArm: sleeveMaterial(),
+      forearm: forearmMaterial(),
+      shortsLeg: trimmedMaterial('diffuseColor.rgb = mix(diffuseColor.rgb, vTrim, (1.0 - smoothstep(0.015, 0.025, abs(vUv2.x - 0.25))) * 0.9 + band(vUv2.y, 0.9, 1.0) * 0.6);'),
+      thigh: skin,
+      shin: trimmedMaterial('diffuseColor.rgb = mix(diffuseColor.rgb, vTrim, band(vUv2.y, 0.07, 0.11) + band(vUv2.y, 0.14, 0.17));'),
+      boot: trimmedMaterial('diffuseColor.rgb = mix(diffuseColor.rgb, vTrim, 1.0 - smoothstep(0.018, 0.03, vWorldPos.y));', 0.5),
+    };
+    // Open tubes (shorts legs) are seen from inside at some angles.
+    mats.shortsLeg.side = THREE.DoubleSide;
     for (const name of Object.keys(geos) as PartName[]) {
       const count = this.n * per[name];
-      const mesh = new THREE.InstancedMesh(geos[name], mat, count);
+      const geo = geos[name];
+      const add = (attr: string, size: number) => geo.setAttribute(attr, new THREE.InstancedBufferAttribute(new Float32Array(count * size), size));
+      if (name === 'torso') {
+        add('aTrim', 3);
+        add('aNumCol', 3);
+        add('aNum', 1);
+      } else if (name === 'upperArm') {
+        add('aTrim', 3);
+        add('aSkin', 3);
+      } else if (name === 'forearm') add('aAlt', 3);
+      else if (name === 'shortsLeg' || name === 'shin' || name === 'boot') add('aTrim', 3);
+      const mesh = new THREE.InstancedMesh(geo, mats[name], count);
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       mesh.frustumCulled = false;
-      let outline: THREE.InstancedMesh | null = null;
-      if (outlineParts.includes(name)) {
-        const t = name === 'torso' || name === 'pelvis' ? 0.022 : name === 'head' || name === 'hair' ? 0.018 : 0.015;
-        outline = new THREE.InstancedMesh(geos[name], outlineMaterial(t), count);
-        outline.instanceMatrix = mesh.instanceMatrix; // share the matrices
-        outline.frustumCulled = false;
-        this.group.add(outline);
-      }
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
       this.group.add(mesh);
-      this.parts[name] = { mesh, outline, perPlayer: per[name] };
+      this.parts[name] = { mesh, perPlayer: per[name] };
     }
     this.applyColors(match);
 
-    // Shadows: a contact blob and a long late-afternoon shadow per player.
+    // Contact shadows (soft ambient occlusion under the feet) and the faint fan of
+    // floodlight shadows that grows as the evening comes on.
     const sGeo = new THREE.PlaneGeometry(1, 1);
     sGeo.rotateX(-Math.PI / 2);
-    this.contact = new THREE.InstancedMesh(sGeo, shadowMaterial(0.42, false), this.n);
-    this.sun = new THREE.InstancedMesh(sGeo, shadowMaterial(0.3, true), this.n);
-    for (const m of [this.contact, this.sun]) {
+    this.contact = new THREE.InstancedMesh(sGeo, blobMaterial(0.5), this.n);
+    this.flood = new THREE.InstancedMesh(sGeo, blobMaterial(0.2, { elongated: true, floodScaled: true }), this.n * PYLONS.length);
+    for (const m of [this.contact, this.flood]) {
       m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       m.frustumCulled = false;
       m.renderOrder = 1;
@@ -158,14 +438,14 @@ export class PlayersView {
     }
 
     // Controlled player indicator.
-    const ringGeo = new THREE.RingGeometry(0.5, 0.64, 32);
+    const ringGeo = new THREE.RingGeometry(0.52, 0.64, 40);
     ringGeo.rotateX(-Math.PI / 2);
-    this.ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffd447, transparent: true, opacity: 0.95, depthWrite: false }));
+    this.ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffd447, transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false }));
     this.ring.renderOrder = 2;
     this.group.add(this.ring);
-    const mk = new THREE.ConeGeometry(0.16, 0.3, 3);
+    const mk = new THREE.ConeGeometry(0.15, 0.28, 3);
     mk.rotateX(Math.PI);
-    this.marker = new THREE.Mesh(mk, new THREE.MeshBasicMaterial({ color: 0xffd447 }));
+    this.marker = new THREE.Mesh(mk, new THREE.MeshBasicMaterial({ color: 0xffd447, toneMapped: false }));
     this.group.add(this.marker);
   }
 
@@ -175,21 +455,45 @@ export class PlayersView {
       const part = this.parts[name];
       for (let k = 0; k < part.perPlayer; k++) part.mesh.setColorAt(p.id * part.perPlayer + k, c.setHex(hex));
     };
-    const boots = [0x1a1a1a, 0xf2f2f2, 0x1a1a1a, 0x2c2c2c, 0xd94c2e, 0x1a1a1a];
+    const attr = (name: PartName, a: string, p: Player, hex: number) => {
+      const part = this.parts[name];
+      const ba = part.mesh.geometry.getAttribute(a) as THREE.InstancedBufferAttribute;
+      c.setHex(hex);
+      for (let k = 0; k < part.perPlayer; k++) ba.setXYZ(p.id * part.perPlayer + k, c.r, c.g, c.b);
+      ba.needsUpdate = true;
+    };
+    const boots = [0x1b1b1d, 0xf0efe9, 0x1b1b1d, 0x2a3346, 0xc8452e, 0x1b1b1d, 0x2f6b4f];
+    const soles = [0xd9d6cc, 0x2a2a2a, 0xe0b23c, 0xe8e6df, 0xf2f0ea, 0xc8452e, 0xe8e6df];
+    const num = this.parts.torso.mesh.geometry.getAttribute('aNum') as THREE.InstancedBufferAttribute;
     for (const p of match.players) {
       const kit = match.teams[p.team].info.kit;
       const gk = p.role === 'GK';
-      set('torso', p, gk ? kit.gkShirt : kit.shirt);
-      set('upperArm', p, gk ? kit.gkShirt : kit.shirt2);
-      set('pelvis', p, gk ? kit.gkShorts : kit.shorts);
-      set('shortsLeg', p, gk ? kit.gkShorts : kit.shorts);
-      set('shin', p, gk ? kit.gkShirt : kit.socks);
+      const shirt = gk ? kit.gkShirt : kit.shirt;
+      const trim = gk ? kit.gkShorts : kit.shirt2;
+      const shorts = gk ? kit.gkShorts : kit.shorts;
+      set('torso', p, shirt);
+      attr('torso', 'aTrim', p, trim);
+      // Numbers in the trim colour unless that's too close to the shirt.
+      attr('torso', 'aNumCol', p, gk ? 0x1d1d1d : kit.shirt2 === kit.shirt ? 0xffffff : kit.shirt2);
+      num.setX(p.id, gk ? 1 : p.index + 1);
+      set('upperArm', p, shirt);
+      attr('upperArm', 'aTrim', p, trim);
+      attr('upperArm', 'aSkin', p, gk ? shirt : p.look.skin);
+      set('forearm', p, gk ? shirt : p.look.skin);
+      attr('forearm', 'aAlt', p, gk ? 0xf2f0ea : p.look.skin);
+      set('pelvis', p, shorts);
+      set('shortsLeg', p, shorts);
+      attr('shortsLeg', 'aTrim', p, gk ? shirt : kit.shirt2 === kit.shorts ? kit.shirt : kit.shirt2);
+      set('shin', p, gk ? kit.gkShorts : kit.socks);
+      attr('shin', 'aTrim', p, gk ? kit.gkShirt : kit.shirt2);
+      set('neck', p, p.look.skin);
       set('head', p, p.look.skin);
-      set('forearm', p, gk ? 0xf0efe8 : p.look.skin);
       set('thigh', p, p.look.skin);
-      set('hair', p, p.look.hair);
+      for (const hp of HAIR_PARTS) set(hp, p, p.look.hair);
       set('boot', p, boots[p.id % boots.length]);
+      attr('boot', 'aTrim', p, soles[p.id % soles.length]);
     }
+    num.needsUpdate = true;
     for (const name of Object.keys(this.parts) as PartName[]) {
       const m = this.parts[name].mesh;
       if (m.instanceColor) m.instanceColor.needsUpdate = true;
@@ -440,14 +744,21 @@ export class PlayersView {
       const build = p.look.build;
       this.put('pelvis', id, P, build, 1, 1);
       this.put('torso', id, C, build, 1, 1);
+      this.chain(this.j1, C, 0, 0.58, 0, 0, 0, 0);
+      this.put('neck', id, this.j1);
 
-      // Head.
+      // Head and hair.
       this.chain(this.j1, C, 0, 0.6, 0, headPitch - leanF * 0.4, -twist * 0.5, 0);
       this.put('head', id, this.j1);
-      if (p.look.hairStyle === 3) this.put('hair', id, this.j1, 0.001, 0.001, 0.001);
-      else if (p.look.hairStyle === 1) this.put('hair', id, this.j1, 1.02, 0.86, 1.02);
-      else if (p.look.hairStyle === 2) this.put('hair', id, this.j1, 1.12, 1.12, 1.12);
-      else this.put('hair', id, this.j1);
+      const style = p.look.hairStyle;
+      const parts = this.parts;
+      parts.hairShort.mesh.setMatrixAt(id, this.hidden);
+      parts.hairCurly.mesh.setMatrixAt(id, this.hidden);
+      parts.hairBun.mesh.setMatrixAt(id, this.hidden);
+      if (style === 0) this.put('hairShort', id, this.j1);
+      else if (style === 1) this.put('hairShort', id, this.j1, 0.985, 0.95, 0.985);
+      else if (style === 2) this.put('hairCurly', id, this.j1);
+      else this.put('hairBun', id, this.j1);
 
       // Arms (left = +x local).
       for (let sd = 0; sd < 2; sd++) {
@@ -455,7 +766,7 @@ export class PlayersView {
         const swing = sd === 0 ? armL : armR;
         const out = sd === 0 ? armOutL : armOutR;
         const elbow = sd === 0 ? elbowL : elbowR;
-        this.chain(this.j1, C, side * 0.205 * build, 0.5, 0, -swing, 0, side * out);
+        this.chain(this.j1, C, side * 0.198 * build, 0.5, 0, -swing, 0, side * out);
         this.put('upperArm', id * 2 + sd, this.j1);
         this.chain(this.j2, this.j1, 0, -0.29, 0, -elbow, 0, 0);
         this.put('forearm', id * 2 + sd, this.j2);
@@ -467,7 +778,7 @@ export class PlayersView {
         const hip = sd === 0 ? hipL : hipR;
         const knee = sd === 0 ? kneeL : kneeR;
         const out = sd === 0 ? legOutL : legOutR;
-        this.chain(this.j1, P, side * 0.095, -0.03, 0, -hip, 0, side * out);
+        this.chain(this.j1, P, side * 0.092, -0.03, 0, -hip, 0, side * out);
         this.put('shortsLeg', id * 2 + sd, this.j1);
         this.put('thigh', id * 2 + sd, this.j1);
         this.chain(this.j2, this.j1, 0, -THIGH, 0, knee, 0, 0);
@@ -478,27 +789,33 @@ export class PlayersView {
         this.put('boot', id * 2 + sd, this.j3);
       }
 
-      // Shadows.
+      // Contact shadow.
       this.q.identity();
       this.v.set(x, 0.015, z);
-      this.s.set(0.85, 1, 0.85);
+      const lying = p.action === 'slide' || p.action === 'dive' ? 1.5 : 1;
+      this.s.set(0.8 * lying, 1, 0.8 * lying);
       this.sm.compose(this.v, this.q, this.s);
       this.contact.setMatrixAt(id, this.sm);
-      const sx = SUN_DIR.x;
-      const sz = SUN_DIR.z;
-      const sl = Math.hypot(sx, sz);
-      const len = 1.75 * h * (lift > 0 ? 1.1 : 1);
-      this.q.setFromAxisAngle(this.v.set(0, 1, 0), Math.atan2(sx / sl, sz / sl));
-      this.v.set(x + (sx / sl) * len * 0.5, 0.012, z + (sz / sl) * len * 0.5);
-      const lying = p.action === 'slide' || p.action === 'dive' ? 1.6 : 1;
-      this.s.set(0.55 * lying, 1, len);
-      this.sm.compose(this.v, this.q, this.s);
-      this.sun.setMatrixAt(id, this.sm);
+
+      // Floodlight shadows: one faint, long shadow away from each pylon.
+      for (let k = 0; k < PYLONS.length; k++) {
+        let dx = x - PYLONS[k][0];
+        let dz = z - PYLONS[k][1];
+        const d = Math.hypot(dx, dz);
+        dx /= d;
+        dz /= d;
+        const len = clamp((1.8 * h * d) / 43, 1.2, 3.0);
+        this.q.setFromAxisAngle(this.yAxis, Math.atan2(dx, dz));
+        this.v.set(x + dx * len * 0.5, 0.011 + k * 0.0005, z + dz * len * 0.5);
+        this.s.set(0.75 * lying, 1, len);
+        this.sm.compose(this.v, this.q, this.s);
+        this.flood.setMatrixAt(id * PYLONS.length + k, this.sm);
+      }
     }
 
     for (const name of Object.keys(this.parts) as PartName[]) this.parts[name].mesh.instanceMatrix.needsUpdate = true;
     this.contact.instanceMatrix.needsUpdate = true;
-    this.sun.instanceMatrix.needsUpdate = true;
+    this.flood.instanceMatrix.needsUpdate = true;
 
     // Controlled player ring + marker.
     const c = match.controlled;
@@ -507,7 +824,7 @@ export class PlayersView {
     this.ring.position.set(cx, 0.02, cz);
     const pulse = match.switchT < 0.3 ? 1 + (0.3 - match.switchT) * 2 : 1;
     this.ring.scale.setScalar(pulse);
-    this.marker.position.set(cx, 2.35 * c.look.height + Math.sin(time * 4) * 0.05, cz);
+    this.marker.position.set(cx, 2.3 * c.look.height + Math.sin(time * 4) * 0.05, cz);
     this.marker.rotation.y = time * 1.5;
     const show = match.phase !== 'fulltime' && !match.autoPlay;
     this.ring.visible = show;

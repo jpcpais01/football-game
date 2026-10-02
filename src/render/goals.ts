@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { PITCH } from '../sim/constants';
-import { outlineMaterial, toonMaterial } from './look';
+import { SHARED, litMaterial } from './look';
 
 /** Goal frames plus a shader net that ripples where the ball hits it. */
 export interface Goals {
@@ -95,6 +95,7 @@ function netMaterial(): THREE.ShaderMaterial {
       uHit: { value: new THREE.Vector4(0, 0, 0, -10) }, // local xyz, time
       uStrength: { value: 0 },
       uTime: { value: 0 },
+      uFlood: SHARED.uFlood,
     },
     vertexShader: /* glsl */ `
       attribute vec3 aOut;
@@ -116,6 +117,7 @@ function netMaterial(): THREE.ShaderMaterial {
     `,
     fragmentShader: /* glsl */ `
       varying vec2 vUv;
+      uniform float uFlood;
       void main() {
         vec2 g = vUv / 0.14;
         vec2 f = abs(fract(g) - 0.5);
@@ -125,8 +127,11 @@ function netMaterial(): THREE.ShaderMaterial {
         float line = max(1.0 - lx, 1.0 - ly);
         // When the mesh is tiny on screen, fade to a soft haze instead of moiré.
         float far = smoothstep(0.25, 0.8, max(w.x, w.y));
-        float a = mix(line * 0.85, 0.28, far);
-        gl_FragColor = vec4(vec3(0.95, 0.95, 0.93), a);
+        float a = mix(line * 0.8, 0.24, far);
+        // Warm daylight on the net, cooler and brighter under the floodlights.
+        vec3 c = mix(vec3(0.86, 0.84, 0.8), vec3(0.95, 0.97, 1.0), uFlood);
+        gl_FragColor = vec4(c, a);
+        #include <tonemapping_fragment>
         #include <colorspace_fragment>
       }
     `,
@@ -135,8 +140,7 @@ function netMaterial(): THREE.ShaderMaterial {
 
 export function createGoals(): Goals {
   const group = new THREE.Group();
-  const postMat = toonMaterial({ color: 0xf4f3ee });
-  const outMat = outlineMaterial(0.025);
+  const postMat = litMaterial({ color: 0xf4f3ee, roughness: 0.35 });
   const nets: THREE.ShaderMaterial[] = [];
   const pr = PITCH.postRadius;
   const hw = PITCH.goalHalfWidth;
@@ -148,21 +152,17 @@ export function createGoals(): Goals {
     for (const s of [-1, 1]) {
       const post = new THREE.Mesh(postGeo, postMat);
       post.position.set(0, (h + pr) / 2, s * hw);
+      post.castShadow = true;
       g.add(post);
-      const po = new THREE.Mesh(postGeo, outMat);
-      po.position.copy(post.position);
-      g.add(po);
     }
     const barGeo = new THREE.CylinderGeometry(pr, pr, hw * 2 + pr * 2, 10);
     barGeo.rotateX(Math.PI / 2);
     const bar = new THREE.Mesh(barGeo, postMat);
     bar.position.set(0, h, 0);
+    bar.castShadow = true;
     g.add(bar);
-    const bo = new THREE.Mesh(barGeo, outMat);
-    bo.position.copy(bar.position);
-    g.add(bo);
     // Thin back supports.
-    const supMat = new THREE.MeshLambertMaterial({ color: 0xcfd0cc });
+    const supMat = litMaterial({ color: 0xcfd0cc, roughness: 0.5 });
     const supGeo = new THREE.CylinderGeometry(0.025, 0.025, Math.hypot(NET_DEPTH - ROOF_DEPTH, h), 6);
     for (const s of [-1, 1]) {
       const sup = new THREE.Mesh(supGeo, supMat);
