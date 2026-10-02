@@ -5,12 +5,20 @@ import type { Atmosphere } from './atmosphere';
 import { SHARED, litMaterial } from './look';
 
 /**
- * A big European night. An enclosed two-tier bowl wraps the pitch (open only on the near
- * side, behind the camera): a lower tier, a glazed hospitality band, an upper tier and a
- * continuous roof whose inner edge carries the floodlights. The home ultras pack the end
- * behind the left goal — standing, bouncing in rhythm, flags flying, scarves up, flares —
- * and greet each half with a card-mosaic tifo. LED ribbons run along the tier fronts and
- * banners hang off the railings, all moving in the shared wind.
+ * An old English ground on a big night: four separate stands tight to the touchlines, the
+ * corners filled in with quadrants, no running track, no bowl.
+ * - The far side is the great main stand: three tiers, two rows of executive boxes, the
+ *   club's name picked out in white seats in the top tier, and a tall cantilever roof with
+ *   the TV gantry slung under it.
+ * - The ends and the corners are two tiers under a lower roof. Where the main stand rises
+ *   above them its side is a glazed curtain wall, the way grounds grow one stand at a time.
+ * - Cantilever roofs, no pillars: steel girders ride on top of the roof sheet, a band of
+ *   translucent panels at the front lets the light in, rafters run underneath, and the
+ *   floodlights are a line of lamps along the roof front with the club name on the fascia.
+ * - Club-coloured seats, aisle steps and vomitory tunnels in the tiers; LED boards on the
+ *   tier fronts; big screens hung in the corners; a low open paddock on the camera side.
+ * The home fans pack the end behind the left goal (standing, bouncing, flags, scarves, a
+ * card tifo at kick-off); banners hang off the railings, all moving in the shared wind.
  *
  * The crowd is drawn procedurally in the tier shader (tens of thousands of fans for one
  * draw call per tier) and lit by the same evening light as everything else.
@@ -42,31 +50,41 @@ const U = {
   uTifoOn: { value: 0 },
 };
 
-// ------------------------------------------------------------------ the bowl
+// ------------------------------------------------------------------ the ground
 
-/** Front of the lower tier: a rounded rectangle around the pitch. */
+/** Front of the stands: a rectangle round the pitch with tight quadrant corners. */
 const BOWL_X = PITCH.halfL + 8.5;
 const BOWL_Z = PITCH.halfW + 7.5;
-const BOWL_R = 12;
+const BOWL_R = 10;
 
-/** Cross-section, as (offset back from the front edge, height). */
+/** Cross-sections, as (offset back from the front edge, height). */
 const LOWER: [number, number][] = [[0.4, 1.4], [20, 11.5]];
-const UPPER: [number, number][] = [[21.5, 15.8], [46, 34]];
-const ROOF_EDGE = 10;
-const ROOF_H = 41.5;
+/** Second tier (ends, corners; the main stand's middle tier). */
+const UPPER: [number, number][] = [[21.5, 15.8], [38, 28.5]];
+/** Ends / corners roof: back top and front edge (the front rises a little, cantilevered). */
+const ROOF_BACK: [number, number] = [40, 33.2];
+const ROOF_EDGE = 8;
+const ROOF_H = 34.4;
+/** Main stand: third tier and its higher roof. */
+const TOP: [number, number][] = [[39.6, 32.4], [58, 46]];
+const MAIN_BACK: [number, number] = [60, 50.8];
+const MAIN_EDGE = 11;
+const MAIN_H = 52.5;
+/** Roof height at offset o on a roof running from `back` to (edge, h). */
+const roofAt = (back: [number, number], edge: number, h: number, o: number) => back[1] + ((o - back[0]) / (edge - back[0])) * (h - back[1]);
 
-/** A point on the bowl's front edge with its outward normal and the section it's in. */
+/** A point on the stands' front edge with its outward normal and the section it's in. */
 interface PathPt {
   x: number;
   z: number;
   nx: number;
   nz: number;
-  /** 0 = main stands, 1 = home end (ultras), 2 = away end. */
+  /** 0 = main stand side, 1 = home end (ultras), 2 = away end. */
   zone: number;
 }
 
 /**
- * The bowl's front edge, from part-way round the near-left corner, behind the home goal,
+ * The stands' front edge, from part-way round the near-left corner, behind the home goal,
  * along the far side and behind the away goal to part-way round the near-right corner.
  */
 function bowlPath(): PathPt[] {
@@ -87,14 +105,22 @@ function bowlPath(): PathPt[] {
     for (let i = 1; i < n; i++) pts.push({ x: x0 + ((x1 - x0) * i) / n, z: z0 + ((z1 - z0) * i) / n, nx, nz, zone });
   };
   const P = Math.PI;
-  arc(-cx, cz, 0.78 * P, P, () => 1);
+  arc(-cx, cz, 0.7 * P, P, () => 1);
   line(-BOWL_X, cz, -BOWL_X, -cz, -1, 0, 1);
   arc(-cx, -cz, P, 1.5 * P, (a) => (a < 1.22 * P ? 1 : 0));
   line(-cx, -BOWL_Z, cx, -BOWL_Z, 0, -1, 0);
   arc(cx, -cz, 1.5 * P, 2 * P, (a) => (a > 1.78 * P ? 2 : 0));
   line(BOWL_X, -cz, BOWL_X, cz, 1, 0, 2);
-  arc(cx, cz, 2 * P, 2.22 * P, () => 2);
+  arc(cx, cz, 2 * P, 2.3 * P, () => 2);
   return pts;
+}
+
+/** Splits the path into the part before the main stand, the main stand straight, and after. */
+function splitPath(path: PathPt[]): { left: PathPt[]; main: PathPt[]; right: PathPt[] } {
+  const i0 = path.findIndex((p) => p.nz < -0.999);
+  let i1 = i0;
+  while (i1 + 1 < path.length && path[i1 + 1].nz < -0.999) i1++;
+  return { left: path.slice(0, i0 + 1), main: path.slice(i0, i1 + 1), right: path.slice(i1) };
 }
 
 /** Point at (offset, height) behind path point p. */
@@ -160,21 +186,20 @@ function zoneRange(path: PathPt[], o: number, zone: number): [number, number] {
   return [u0, u1];
 }
 
-/** Closes the open ends of the bowl with the cross-section's outline (same attributes as a strip). */
-function bowlCaps(path: PathPt[]): THREE.BufferGeometry {
-  const outline = [
-    [0, 0], [0, 1.4], [0.4, 1.4], [20, 11.5], [22, 11.5], [22, 14.5], [21, 14.5], [21, 15.8], [21.5, 15.8], [46, 34], [46, 40], [48, 40], [48, 0],
-  ].map(([o, h]) => new THREE.Vector2(o, h));
+/** A flat wall in the section plane at each of `pts` with the given (offset, height) outline. */
+function caps(pts: PathPt[], outlinePts: [number, number][]): THREE.BufferGeometry {
+  const outline = outlinePts.map(([o, h]) => new THREE.Vector2(o, h));
   const tris = THREE.ShapeUtils.triangulateShape(outline, []);
   const pos: number[] = [];
+  const uv: number[] = [];
   const v = new THREE.Vector3();
-  for (const p of [path[0], path[path.length - 1]]) {
-    for (const t of tris) for (const k of t) pos.push(...at(p, outline[k].x, outline[k].y, v).toArray());
+  for (const p of pts) {
+    for (const t of tris) for (const k of t) pos.push(...at(p, outline[k].x, outline[k].y, v).toArray()), uv.push(outline[k].x, outline[k].y);
   }
   const geo = new THREE.BufferGeometry();
   const n = pos.length / 3;
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  geo.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(n * 2), 2));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   geo.setAttribute('aHome', new THREE.Float32BufferAttribute(new Float32Array(n), 1));
   geo.setAttribute('aAway', new THREE.Float32BufferAttribute(new Float32Array(n), 1));
   geo.setIndex([...Array(n).keys()]);
@@ -225,6 +250,16 @@ interface CrowdOpts {
   tifo?: { tex: THREE.Texture; rect: THREE.Vector4 };
   /** Upper-tier card stunt: alternating colour bands all around. */
   stripes?: boolean;
+  /** Seat colour (empty seats, the gaps between fans). */
+  seat?: number;
+  /** Aisle steps: every `spacing` metres along the tier, `width` wide. */
+  aisles?: [number, number];
+  /** Vomitories (the tunnels up into the tier): spacing along it, and their v range. */
+  voms?: [number, number, number];
+  /** Words spelled out in white seats: texture (alpha = letters) and its rect in uv metres. */
+  letters?: { tex: THREE.Texture; rect: THREE.Vector4 };
+  /** Share of seats taken (the ends and the main stand are always full). */
+  fill?: number;
 }
 
 function crowdMaterial(o: CrowdOpts): THREE.ShaderMaterial {
@@ -239,6 +274,13 @@ function crowdMaterial(o: CrowdOpts): THREE.ShaderMaterial {
       uTifoRect: { value: o.tifo?.rect ?? new THREE.Vector4(0, 1, 0, 1) },
       uHasTifo: { value: o.tifo ? 1 : 0 },
       uStripes: { value: o.stripes ? 1 : 0 },
+      uSeat: { value: new THREE.Color(o.seat ?? 0x2a3044) },
+      uAisle: { value: new THREE.Vector2(...(o.aisles ?? [0, 0])) },
+      uVom: { value: new THREE.Vector3(...(o.voms ?? [0, 0, 0])) },
+      uLetters: { value: o.letters?.tex ?? null },
+      uLetterRect: { value: o.letters?.rect ?? new THREE.Vector4(0, 1, 0, 1) },
+      uHasLetters: { value: o.letters ? 1 : 0 },
+      uFill: { value: o.fill ?? 1 },
     },
     vertexShader: /* glsl */ `
       attribute float aHome;
@@ -262,11 +304,11 @@ function crowdMaterial(o: CrowdOpts): THREE.ShaderMaterial {
       varying float vDist;
       varying float vHome;
       varying float vAway;
-      uniform float uTime, uExcite, uFogNear, uFogFar, uFlood, uHaze, uTifoOn, uHasTifo, uStripes;
-      uniform vec2 uShade;
-      uniform vec3 uA, uB, uFog, uLight;
-      uniform sampler2D uTifo;
-      uniform vec4 uTifoRect;
+      uniform float uTime, uExcite, uFogNear, uFogFar, uFlood, uHaze, uTifoOn, uHasTifo, uStripes, uHasLetters, uFill;
+      uniform vec2 uShade, uAisle;
+      uniform vec3 uA, uB, uFog, uLight, uSeat, uVom;
+      uniform sampler2D uTifo, uLetters;
+      uniform vec4 uTifoRect, uLetterRect;
 
       float hash(vec2 p) { return fract(sin(dot(p, vec2(41.3, 289.1))) * 15731.743); }
 
@@ -278,14 +320,24 @@ function crowdMaterial(o: CrowdOpts): THREE.ShaderMaterial {
         vec2 g = vUv / seat;
         vec2 cell = floor(g);
         vec2 f = fract(g);
-        float occ = step(hash(cell), mix(mix(0.92, 0.86, awayEnd), 1.0, ultra));
+        float occ = step(hash(cell), mix(mix(0.92, 0.86, awayEnd), 1.0, ultra) * uFill);
+        // The tier's fixtures: aisle steps, vomitory tunnels, seats spelling the club's name.
+        float aisle = uAisle.x > 0.0 ? step(abs(fract(vUv.x / uAisle.x) - 0.5) * uAisle.x, uAisle.y * 0.5) : 0.0;
+        float vom = uVom.x > 0.0
+          ? step(abs(fract(vUv.x / uVom.x + 0.25) - 0.5) * uVom.x, 1.5) * step(uVom.y, vUv.y) * step(vUv.y, uVom.z) : 0.0;
+        float letter = 0.0;
+        if (uHasLetters > 0.5) {
+          vec2 lt = (vUv - uLetterRect.xz) / (uLetterRect.yw - uLetterRect.xz);
+          if (lt.x > 0.0 && lt.x < 1.0 && lt.y > 0.0 && lt.y < 1.0) letter = texture2D(uLetters, lt).a;
+        }
+        occ *= 1.0 - max(aisle, max(vom, step(0.5, letter)));
         float awayShare = mix(mix(0.22, 0.95, awayEnd), 0.02, ultra);
 
         // Far away a fan is smaller than a pixel: only the stand's average colour shows, so
         // skip drawing individual fans there (most of the bowl, most of the time).
         float px = max(fwidth(g.x), fwidth(g.y));
         float detail = 1.0 - smoothstep(0.2, 0.7, px);
-        vec3 seatAvg = vec3(0.16, 0.19, 0.27);
+        vec3 seatAvg = uSeat;
         vec3 avg = mix(seatAvg, mix(uA, uB, awayShare) * 0.75 + 0.06, mix(0.55, 0.8, max(ultra, awayEnd)));
         vec3 c = avg;
         vec3 club = mix(uA, uB, awayShare);
@@ -322,6 +374,11 @@ function crowdMaterial(o: CrowdOpts): THREE.ShaderMaterial {
           c = mix(avg, fan, detail);
         }
         c = mix(c, avg, 0.05 + 0.1 * uHaze);
+        // Fixtures over the fans: white letter seats, concrete steps, dark tunnel mouths.
+        vec3 stepsCol = vec3(0.4, 0.41, 0.43) * (0.82 + 0.18 * step(0.5, fract(vUv.y / 0.82)));
+        c = mix(c, vec3(0.86, 0.85, 0.82) * (0.9 + 0.1 * step(0.5, fract(vUv.y / 0.82))), letter);
+        c = mix(c, stepsCol, aisle * (1.0 - letter));
+        c = mix(c, vec3(0.02, 0.022, 0.03), vom);
 
         // Card display: every fan holds one card, together they make the picture.
         if (uTifoOn > 0.001) {
@@ -565,19 +622,149 @@ function alongRoof(path: PathPt[], every: number, geo: THREE.BufferGeometry, mat
   return mesh;
 }
 
-/** Roof inner-edge lamp positions (corners and the far side): beams, glows, flood shadows. */
+/** Floodlight banks along the roof fronts (ends, corners, main stand): beams and glows. */
 function lampSpots(): THREE.Vector3[] {
   const cx = BOWL_X - BOWL_R;
   const cz = BOWL_Z - BOWL_R;
   const r = (BOWL_R + ROOF_EDGE + 1) * Math.SQRT1_2;
+  const ex = BOWL_X + ROOF_EDGE + 1;
+  const mz = -(BOWL_Z + MAIN_EDGE + 1);
   return [
     new THREE.Vector3(-cx - r, ROOF_H - 2, -cz - r),
     new THREE.Vector3(cx + r, ROOF_H - 2, -cz - r),
-    new THREE.Vector3(-26, ROOF_H - 2, -(BOWL_Z + ROOF_EDGE + 1)),
-    new THREE.Vector3(26, ROOF_H - 2, -(BOWL_Z + ROOF_EDGE + 1)),
-    new THREE.Vector3(-(BOWL_X + ROOF_EDGE + 1), ROOF_H - 2, 18),
-    new THREE.Vector3(BOWL_X + ROOF_EDGE + 1, ROOF_H - 2, 18),
+    new THREE.Vector3(-ex, ROOF_H - 2, -14),
+    new THREE.Vector3(-ex, ROOF_H - 2, 18),
+    new THREE.Vector3(ex, ROOF_H - 2, -14),
+    new THREE.Vector3(ex, ROOF_H - 2, 18),
+    new THREE.Vector3(-30, MAIN_H - 2, mz),
+    new THREE.Vector3(0, MAIN_H - 2, mz),
+    new THREE.Vector3(30, MAIN_H - 2, mz),
   ];
+}
+
+/** Roof sheeting seen from below: rafters across, purlins along, a little weathering. */
+function roofMaterial(color: number): THREE.MeshStandardMaterial {
+  const m = litMaterial({
+    color,
+    roughness: 0.75,
+    diffuseHook: `{
+      float rafter = 1.0 - smoothstep(0.0, 0.18, abs(fract(vUv2.x / 7.5) - 0.5) * 7.5);
+      float purlin = 1.0 - smoothstep(0.0, 0.08, abs(fract(vUv2.y / 2.6) - 0.5) * 2.6);
+      float sheet = 0.93 + 0.07 * step(0.5, fract(vUv2.x / 0.9));
+      diffuseColor.rgb *= sheet * (1.0 - 0.35 * rafter) * (1.0 - 0.18 * purlin);
+    }`,
+  });
+  m.side = THREE.DoubleSide;
+  return m;
+}
+
+/** The roof front fascia: the club's name repeated along it, painted on the club colour. */
+function fasciaMaterial(home: number, name: string): THREE.MeshStandardMaterial {
+  const cv = document.createElement('canvas');
+  cv.width = 1024;
+  cv.height = 64;
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.anisotropy = 4;
+  // uv is in metres: one sign every 48 m along, 2.2 m tall.
+  tex.repeat.set(1 / 48, 1 / 2.2);
+  const c = new THREE.Color(home).multiplyScalar(0.55);
+  const bg = '#' + c.getHexString();
+  const draw = () => {
+    const g = cv.getContext('2d')!;
+    g.fillStyle = bg;
+    g.fillRect(0, 0, 1024, 64);
+    g.fillStyle = 'rgba(0,0,0,0.25)';
+    g.fillRect(0, 0, 1024, 5);
+    g.fillRect(0, 59, 1024, 5);
+    g.fillStyle = '#f4f0e6';
+    g.font = '800 40px "Barlow Condensed", "Arial Narrow", sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText(name.toUpperCase().split('').join(' '), 512, 34, 900);
+    tex.needsUpdate = true;
+  };
+  draw();
+  void document.fonts?.ready.then(draw);
+  const m = litMaterial({ roughness: 0.55 });
+  m.map = tex;
+  m.side = THREE.DoubleSide;
+  return m;
+}
+
+/** Glazed curtain wall (the main stand's flanks): mullions, warm stairwell lights at night. */
+function curtainMaterial(): THREE.MeshStandardMaterial {
+  const m = litMaterial({
+    color: 0x2c333d,
+    roughness: 0.35,
+    metalness: 0.2,
+    diffuseHook: `{
+      vec2 g = vec2(vUv2.x / 2.4, vUv2.y / 3.2);
+      float mull = max(1.0 - smoothstep(0.0, 0.06, abs(fract(g.x) - 0.5) * 2.0 - 0.9), 1.0 - smoothstep(0.0, 0.08, abs(fract(g.y) - 0.5) * 2.0 - 0.86));
+      float lit = step(0.72, fract(sin(dot(floor(g), vec2(12.9, 78.2))) * 43758.5));
+      diffuseColor.rgb = mix(diffuseColor.rgb + vec3(1.0, 0.78, 0.5) * lit * uFlood * 0.5, vec3(0.62, 0.64, 0.66), mull);
+    }`,
+  });
+  m.side = THREE.DoubleSide;
+  return m;
+}
+
+/** The ground's big screens, hung under the corner roofs: crest and name, glowing at night. */
+function screenMaterial(club: StadiumClub, home: number): THREE.MeshBasicMaterial {
+  const cv = document.createElement('canvas');
+  cv.width = 512;
+  cv.height = 288;
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  let crest: CanvasImageSource | null = null;
+  const hex = '#' + home.toString(16).padStart(6, '0');
+  const draw = () => {
+    const g = cv.getContext('2d')!;
+    const grd = g.createLinearGradient(0, 0, 0, 288);
+    grd.addColorStop(0, '#0b1024');
+    grd.addColorStop(1, '#1a1640');
+    g.fillStyle = grd;
+    g.fillRect(0, 0, 512, 288);
+    g.fillStyle = hex;
+    g.fillRect(0, 244, 512, 44);
+    if (crest) drawCrest(g, crest, 256, 112, 170);
+    g.fillStyle = '#ffffff';
+    g.font = '800 34px "Barlow Condensed", "Arial Narrow", sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText((club.name ?? 'GAMENIGHT').toUpperCase(), 256, 268, 480);
+    // LED pixel grid.
+    g.fillStyle = 'rgba(0,0,0,0.22)';
+    for (let x = 0; x < 512; x += 4) g.fillRect(x, 0, 1, 288);
+    for (let y = 0; y < 288; y += 4) g.fillRect(0, y, 512, 1);
+    tex.needsUpdate = true;
+  };
+  draw();
+  void document.fonts?.ready.then(draw);
+  void club.crest?.then((img) => ((crest = img), draw()));
+  return new THREE.MeshBasicMaterial({ map: tex, toneMapped: false, side: THREE.DoubleSide });
+}
+
+/** Club name in big letters, for spelling out in the seats (alpha = letters). */
+function lettersTexture(name: string): THREE.CanvasTexture {
+  const cv = document.createElement('canvas');
+  cv.width = 1024;
+  cv.height = 128;
+  const tex = new THREE.CanvasTexture(cv);
+  const draw = () => {
+    const g = cv.getContext('2d')!;
+    g.clearRect(0, 0, 1024, 128);
+    g.fillStyle = '#fff';
+    g.font = '800 118px "Barlow Condensed", "Arial Narrow", sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText(name.toUpperCase().split('').join(' '), 512, 68, 1000);
+    tex.needsUpdate = true;
+  };
+  draw();
+  void document.fonts?.ready.then(draw);
+  return tex;
 }
 
 let glowTex: THREE.Texture | null = null;
@@ -1367,16 +1554,23 @@ export function createStadium(homeColor: number, awayColor: number, club: Stadiu
   apron.renderOrder = 2;
   group.add(apron);
 
-  // ---- the bowl
+  // ---- the stands
   const path = bowlPath();
+  const { left, main, right } = splitPath(path);
+  const ends = [left, right];
   const concrete = litMaterial({ color: 0x8b8f96, roughness: 0.9 });
   concrete.side = THREE.DoubleSide;
-  const roofMat = litMaterial({ color: 0x2b2f36, roughness: 0.7 });
-  roofMat.side = THREE.DoubleSide;
-  const fascia = litMaterial({ color: 0x15171c, roughness: 0.5 });
-  fascia.side = THREE.DoubleSide;
+  const darkConcrete = litMaterial({ color: 0x5c6068, roughness: 0.9 });
+  darkConcrete.side = THREE.DoubleSide;
+  const roofMat = roofMaterial(0x30353d);
+  const panels = litMaterial({ color: 0xaab6c0, roughness: 0.3, metalness: 0.1, emissive: 0x151a20 });
+  panels.side = THREE.DoubleSide;
+  const fascia = fasciaMaterial(homeColor, club.name ?? 'GAMENIGHT');
   const roofLight = new THREE.MeshBasicMaterial({ color: 0xfff1d6, toneMapped: false, side: THREE.DoubleSide });
   const ribbon = ribbonMaterial(homeColor);
+  const glass = glassMaterial();
+  const curtain = curtainMaterial();
+  const seat = new THREE.Color(homeColor).multiplyScalar(0.62).getHex();
 
   const homeU = zoneRange(path, LOWER[0][0], 1);
   const lowerSlope = Math.hypot(LOWER[1][0] - LOWER[0][0], LOWER[1][1] - LOWER[0][1]);
@@ -1384,56 +1578,170 @@ export function createStadium(homeColor: number, awayColor: number, club: Stadiu
     home: homeColor,
     away: awayColor,
     shade: [9, 17],
+    seat,
+    aisles: [15, 1.1],
+    voms: [30, 7.2, 10.2],
     tifo: { tex: tifoTexture(homeColor, club), rect: new THREE.Vector4(homeU[0] + 1, homeU[1] - 1, 0.6, lowerSlope - 0.4) },
   });
-  const upperCrowd = crowdMaterial({ home: homeColor, away: awayColor, shade: [-2, 12], stripes: true });
+  const upperCrowd = crowdMaterial({ home: homeColor, away: awayColor, shade: [-2, 10], stripes: true, seat, aisles: [15, 1.1] });
+  // The main stand's top tier: the club name spelled out in white seats along the back rows.
+  const mainLen = Math.hypot(main[main.length - 1].x - main[0].x, main[main.length - 1].z - main[0].z);
+  const topSlope = Math.hypot(TOP[1][0] - TOP[0][0], TOP[1][1] - TOP[0][1]);
+  const topCrowd = crowdMaterial({
+    home: homeColor,
+    away: awayColor,
+    shade: [-2, 6],
+    seat,
+    aisles: [15, 1.1],
+    fill: 0.9,
+    letters: { tex: lettersTexture(club.name ?? 'GAMENIGHT'), rect: new THREE.Vector4(mainLen * 0.08, mainLen * 0.92, topSlope * 0.5, topSlope * 0.92) },
+  });
 
-  // Strips sharing a material are merged: one draw per material for the whole bowl.
+  // Strips sharing a material are merged: one draw per material for the whole ground.
   const byMat = new Map<THREE.Material, THREE.BufferGeometry[]>();
-  const strip = (a: [number, number], b: [number, number], mat: THREE.Material) => {
+  const add = (mat: THREE.Material, g: THREE.BufferGeometry) => {
     const list = byMat.get(mat) ?? [];
-    list.push(ringStrip(path, a, b));
+    list.push(g);
     byMat.set(mat, list);
   };
-  strip([0, 0], [0, 1.4], ribbon); // pitch-level ribbon on the stand front
-  strip([0, 1.4], LOWER[0], concrete);
-  strip(LOWER[0], LOWER[1], lowerCrowd);
-  strip(LOWER[1], [22, 11.5], concrete);
-  strip([22, 11.5], [22, 14.5], glassMaterial());
-  strip([22, 14.5], [21, 14.5], concrete);
-  strip([21, 14.5], [21, 15.8], ribbon); // upper-tier balcony ribbon
-  strip([21, 15.8], UPPER[0], concrete);
-  strip(UPPER[0], UPPER[1], upperCrowd);
-  strip(UPPER[1], [46, 40], concrete);
-  strip([48, 40], [ROOF_EDGE, ROOF_H], roofMat);
-  strip([ROOF_EDGE, ROOF_H], [ROOF_EDGE, ROOF_H - 2.2], fascia);
-  strip([ROOF_EDGE + 0.3, ROOF_H - 2.25], [ROOF_EDGE + 3, ROOF_H - 2.05], roofLight);
-  byMat.get(concrete)!.push(bowlCaps(path));
+  const strip = (pts: PathPt[], a: [number, number], b: [number, number], mat: THREE.Material) => add(mat, ringStrip(pts, a, b));
+
+  // Lower and middle tiers all the way round (ends, corners and the main stand alike).
+  strip(path, [0, 0], [0, 1.4], ribbon); // LED boards on the stand front
+  strip(path, [0, 1.4], LOWER[0], concrete);
+  strip(path, LOWER[0], LOWER[1], lowerCrowd);
+  strip(path, LOWER[1], [22, 11.5], concrete);
+  strip(path, [22, 11.5], [22, 14.5], glass); // executive boxes
+  strip(path, [22, 14.5], [21, 14.5], concrete);
+  strip(path, [21, 14.5], [21, 15.8], ribbon); // balcony LED
+  strip(path, [21, 15.8], UPPER[0], concrete);
+  strip(path, UPPER[0], UPPER[1], upperCrowd);
+
+  // Ends and corners: back wall and the lower roof.
+  const roofPanelO = ROOF_EDGE + 5;
+  for (const pts of ends) {
+    strip(pts, UPPER[1], [38, 32.5], darkConcrete);
+    strip(pts, [38, 32.5], ROOF_BACK, darkConcrete);
+    strip(pts, ROOF_BACK, [roofPanelO, roofAt(ROOF_BACK, ROOF_EDGE, ROOF_H, roofPanelO)], roofMat);
+    strip(pts, [roofPanelO, roofAt(ROOF_BACK, ROOF_EDGE, ROOF_H, roofPanelO)], [ROOF_EDGE, ROOF_H], panels);
+    strip(pts, [ROOF_EDGE, ROOF_H - 2.2], [ROOF_EDGE, ROOF_H], fascia); // bottom up, so the lettering stands upright
+    strip(pts, [ROOF_EDGE + 0.3, ROOF_H - 2.25], [ROOF_EDGE + 3, ROOF_H - 2.05], roofLight);
+  }
+
+  // The main stand rises on: second boxes, the top tier, the high roof.
+  const mainPanelO = MAIN_EDGE + 6;
+  strip(main, UPPER[1], [40, 28.5], concrete);
+  strip(main, [40, 28.5], [40, 31.3], glass);
+  strip(main, [40, 31.3], [39.2, 31.3], concrete);
+  strip(main, [39.2, 31.3], [39.2, 32.4], ribbon);
+  strip(main, [39.2, 32.4], TOP[0], concrete);
+  strip(main, TOP[0], TOP[1], topCrowd);
+  strip(main, TOP[1], [58, 50], darkConcrete);
+  strip(main, [58, 50], MAIN_BACK, darkConcrete);
+  strip(main, MAIN_BACK, [mainPanelO, roofAt(MAIN_BACK, MAIN_EDGE, MAIN_H, mainPanelO)], roofMat);
+  strip(main, [mainPanelO, roofAt(MAIN_BACK, MAIN_EDGE, MAIN_H, mainPanelO)], [MAIN_EDGE, MAIN_H], panels);
+  strip(main, [MAIN_EDGE, MAIN_H - 2.4], [MAIN_EDGE, MAIN_H], fascia);
+  strip(main, [MAIN_EDGE + 0.3, MAIN_H - 2.45], [MAIN_EDGE + 3.4, MAIN_H - 2.2], roofLight);
+
+  // Open near ends of the corners: the section in concrete.
+  add(darkConcrete, caps([path[0], path[path.length - 1]], [
+    [0, 0], [0, 1.4], [0.4, 1.4], [20, 11.5], [22, 11.5], [22, 14.5], [21, 14.5], [21, 15.8], [21.5, 15.8], [38, 28.5], [38, 32.5], [40, 33.2], [42, 33.2], [42, 0],
+  ]));
+  // The main stand's flanks above the corner roofs: glazed curtain walls.
+  add(curtain, caps([main[0], main[main.length - 1]], [
+    [38, 0], [60, 0], [60, MAIN_BACK[1]], [MAIN_EDGE, MAIN_H], [MAIN_EDGE, roofAt(ROOF_BACK, ROOF_EDGE, ROOF_H, MAIN_EDGE) + 0.2], [38, 33.2],
+  ]));
   for (const [mat, geos] of byMat) group.add(new THREE.Mesh(geos.length > 1 ? mergeGeometries(geos)! : geos[0], mat));
 
-  // Trusses under the roof and floodlight banks along its inner edge.
-  const tmpA = new THREE.Vector3();
-  const tmpB = new THREE.Vector3();
-  const q = new THREE.Quaternion();
+  // ---- steel: girders riding on top of the roofs, posts down to the sheeting. Beams and
+  // posts only (a Vierendeel frame), one instanced draw for the whole ground.
+  const steel = litMaterial({ color: 0x4a5058, roughness: 0.55, metalness: 0.3 });
+  const beams: THREE.Matrix4[] = [];
   const zAxis = new THREE.Vector3(0, 0, 1);
-  group.add(
-    alongRoof(path, 3, new THREE.BoxGeometry(0.4, 0.9, 1), litMaterial({ color: 0x3a3f47, roughness: 0.6 }), (p, m) => {
-      at(p, 46, 39.4, tmpA);
-      at(p, ROOF_EDGE + 0.5, ROOF_H - 1.2, tmpB);
-      const len = tmpA.distanceTo(tmpB);
-      q.setFromUnitVectors(zAxis, tmpB.clone().sub(tmpA).normalize());
-      m.compose(tmpA.add(tmpB).multiplyScalar(0.5), q, new THREE.Vector3(1, 1, len));
-    }),
-  );
+  const q = new THREE.Quaternion();
+  const beam = (a: THREE.Vector3, b: THREE.Vector3, w: number, h: number) => {
+    const len = a.distanceTo(b);
+    if (len < 0.05) return;
+    q.setFromUnitVectors(zAxis, b.clone().sub(a).normalize());
+    beams.push(new THREE.Matrix4().compose(a.clone().add(b).multiplyScalar(0.5), q, new THREE.Vector3(w, h, len)));
+  };
+  const girders = (pts: PathPt[], back: [number, number], edge: number, h: number, every: number, lift: number) => {
+    const offs = [back[0] - 1, (back[0] + edge) * 0.5, edge + 2];
+    const tops: THREE.Vector3[][] = [];
+    pts.forEach((p, i) => {
+      if (i % every !== 0 && i !== pts.length - 1) return;
+      const row = offs.map((o) => at(p, o, roofAt(back, edge, h, o) + lift));
+      // Transverse girder above the roof, and its posts down to the sheet.
+      beam(row[0], row[2], 0.45, 0.9);
+      for (let k = 0; k < offs.length; k++) beam(row[k], at(p, offs[k], roofAt(back, edge, h, offs[k])), 0.3, 0.3);
+      tops.push(row);
+    });
+    // Longitudinal chords tying the girders together.
+    for (let i = 1; i < tops.length; i++) for (let k = 0; k < 3; k++) beam(tops[i - 1][k], tops[i][k], 0.35, 0.6);
+  };
+  for (const pts of ends) girders(pts, ROOF_BACK, ROOF_EDGE, ROOF_H, 3, 2.6);
+  girders(main, MAIN_BACK, MAIN_EDGE, MAIN_H, 3, 3.4);
+  const steelMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), steel, beams.length);
+  beams.forEach((m, i) => steelMesh.setMatrixAt(i, m));
+  steelMesh.instanceMatrix.needsUpdate = true;
+  group.add(steelMesh);
+
+  // Floodlight lamps along the roof fronts.
+  const tmpA = new THREE.Vector3();
   const lampGeo = new THREE.PlaneGeometry(3.4, 1.1);
-  group.add(
-    alongRoof(path, 2, lampGeo, lampMaterial(), (p, m) => {
-      at(p, ROOF_EDGE + 1.2, ROOF_H - 2.6, tmpA);
-      // Face the centre of the pitch, tilted down.
-      const e = new THREE.Euler(-0.75, Math.atan2(-p.nx, -p.nz), 0, 'YXZ');
-      m.compose(tmpA, q.setFromEuler(e), new THREE.Vector3(1, 1, 1));
-    }),
-  );
+  const lampMat = lampMaterial();
+  for (const [pts, edge, h] of [[left, ROOF_EDGE, ROOF_H], [right, ROOF_EDGE, ROOF_H], [main, MAIN_EDGE, MAIN_H]] as [PathPt[], number, number][]) {
+    group.add(
+      alongRoof(pts, 2, lampGeo, lampMat, (p, m) => {
+        at(p, edge + 1.2, h - 2.7, tmpA);
+        // Face the centre of the pitch, tilted down.
+        const e = new THREE.Euler(-0.75, Math.atan2(-p.nx, -p.nz), 0, 'YXZ');
+        m.compose(tmpA, q.setFromEuler(e), new THREE.Vector3(1, 1, 1));
+      }),
+    );
+  }
+
+  // ---- fixtures: TV gantry under the main roof, big screens in the corners, the paddock.
+  const fixtures = new THREE.Group();
+  const gantryMat = litMaterial({ color: 0x23272e, roughness: 0.6 });
+  const mid = main[Math.floor(main.length / 2)];
+  const gantry = new THREE.Mesh(new THREE.BoxGeometry(34, 1.6, 2.2), gantryMat);
+  gantry.position.copy(at(mid, MAIN_EDGE + 9, roofAt(MAIN_BACK, MAIN_EDGE, MAIN_H, MAIN_EDGE + 9) - 2.6));
+  fixtures.add(gantry);
+  for (let k = -3; k <= 3; k++) {
+    const cam = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.6, 1.1), gantryMat);
+    cam.position.copy(gantry.position).add(new THREE.Vector3(k * 4.6, 1.1, 0.6));
+    fixtures.add(cam);
+  }
+  const screenMat = screenMaterial(club, homeColor);
+  const corners = [left, right].map((pts) => {
+    // The corner quadrant's middle: where the path normal is diagonal.
+    return pts.reduce((b, p) => (Math.abs(Math.abs(p.nx) - Math.abs(p.nz)) < Math.abs(Math.abs(b.nx) - Math.abs(b.nz)) && p.nz < 0 ? p : b), pts[Math.floor(pts.length / 2)]);
+  });
+  for (const p of corners) {
+    const scr = new THREE.Mesh(new THREE.PlaneGeometry(10.5, 5.9), screenMat);
+    scr.position.copy(at(p, ROOF_EDGE + 2.5, ROOF_H - 6.2));
+    scr.rotation.set(-0.2, Math.atan2(-p.nx, -p.nz), 0, 'YXZ');
+    scr.userData.live = true;
+    fixtures.add(scr);
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(11.2, 6.5, 0.5), gantryMat);
+    frame.position.copy(scr.position).addScaledVector(new THREE.Vector3(p.nx, 0, p.nz), 0.3);
+    frame.rotation.copy(scr.rotation);
+    fixtures.add(frame);
+  }
+  group.add(bakeStatic(fixtures));
+
+  // The paddock on the near side, under the camera: a low open terrace and its wall.
+  const near: PathPt[] = [];
+  const cxN = BOWL_X - BOWL_R - 8;
+  for (let x = -cxN; x <= cxN + 0.01; x += 4) near.push({ x, z: BOWL_Z, nx: 0, nz: 1, zone: 0 });
+  const paddockCrowd = crowdMaterial({ home: homeColor, away: awayColor, shade: [99, 100], seat, aisles: [15, 1.1], fill: 0.85 });
+  const paddock = new Map<THREE.Material, THREE.BufferGeometry[]>([
+    [ribbon, [ringStrip(near, [0, 0], [0, 1.2])]],
+    [concrete, [ringStrip(near, [0, 1.2], [0.4, 1.2]), ringStrip(near, [11, 5.6], [11, 7.4]), caps([near[0], near[near.length - 1]], [[0, 0], [0, 1.2], [0.4, 1.2], [11, 5.6], [11, 7.4], [12, 7.4], [12, 0]])]],
+    [paddockCrowd, [ringStrip(near, [0.4, 1.2], [11, 5.6])]],
+  ]);
+  for (const [mat, geos] of paddock) group.add(new THREE.Mesh(mergeGeometries(geos)!, mat));
 
   const spots = lampSpots();
   // Lamp glows: one instanced, camera-facing quad per bank (one draw for all of them).
