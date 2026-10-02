@@ -26,8 +26,8 @@ const PER_BENCH = 7;
 
 const THIGH = 0.43;
 const SHIN = 0.42;
-/** Ankle joint above the ground (skeleton units). */
-const ANKLE_Y = 0.06;
+/** Ankle joint above the ground (skeleton units; just clear of the renderer's ground guard). */
+const ANKLE_Y = 0.075;
 
 type Want = 'sit' | 'stand' | 'squat' | 'warm';
 type React = 'none' | 'cheer' | 'despair' | 'groan' | 'appeal' | 'clap' | 'sulk';
@@ -61,17 +61,17 @@ const zero = (): Shape => ({ thL: 1.4, thR: 1.4, ftL: 0.4, ftR: 0.4, loL: 0.14, 
 
 type Arms = [aL: number, aR: number, eL: number, eR: number, oL: number, oR: number, rL: number, rR: number];
 const ARMS = {
-  thighs: [-0.42, -0.4, 0.55, 0.6, 0.14, 0.12, 0, 0] as Arms,
-  knees: [-0.3, -0.32, 1.25, 1.2, 0.06, 0.05, -0.35, -0.3] as Arms,
+  thighs: [0.42, 0.4, 0.55, 0.6, 0.14, 0.12, 0, 0] as Arms,
+  knees: [0.3, 0.32, 1.25, 1.2, 0.06, 0.05, -0.35, -0.3] as Arms,
   folded: [0.5, 0.45, 1.95, 1.8, 0.06, 0.04, -1.45, -1.4] as Arms,
-  clasped: [-0.62, -0.6, 0.45, 0.45, -0.06, -0.06, 0, 0] as Arms,
-  hips: [0.2, 0.2, 1.6, 1.6, 0.62, 0.62, -0.9, -0.9] as Arms,
-  behind: [0.42, 0.42, 0.85, 0.85, 0.08, 0.08, -0.8, -0.8] as Arms,
-  head: [-2.3, -2.25, 2.05, 2.0, 0.85, 0.85, 0, 0] as Arms,
-  up: [-2.8, -2.75, 0.3, 0.3, 0.45, 0.45, 0, 0] as Arms,
-  appeal: [-0.6, -0.65, 0.6, 0.55, 0.9, 0.9, 0.5, 0.5] as Arms,
-  clap: [-0.85, -0.85, 1.35, 1.35, 0.22, 0.22, -0.3, -0.3] as Arms,
-  squat: [-0.75, -0.7, 0.95, 0.9, 0.28, 0.26, -0.2, -0.2] as Arms,
+  clasped: [0.62, 0.6, 0.45, 0.45, -0.06, -0.06, 0, 0] as Arms,
+  hips: [-0.2, -0.2, 1.6, 1.6, 0.62, 0.62, -0.9, -0.9] as Arms,
+  behind: [-0.42, -0.42, 0.85, 0.85, 0.08, 0.08, -0.8, -0.8] as Arms,
+  head: [2.3, 2.25, 2.05, 2.0, 0.85, 0.85, 0, 0] as Arms,
+  up: [2.8, 2.75, 0.3, 0.3, 0.45, 0.45, 0, 0] as Arms,
+  appeal: [0.6, 0.65, 0.6, 0.55, 0.9, 0.9, 0.5, 0.5] as Arms,
+  clap: [0.85, 0.85, 1.35, 1.35, 0.22, 0.22, -0.3, -0.3] as Arms,
+  squat: [0.75, 0.7, 0.95, 0.9, 0.28, 0.26, -0.2, -0.2] as Arms,
 };
 
 /** The sitting styles: thighs, feet, spread, trunk, arms. */
@@ -228,8 +228,8 @@ export class Benches {
       o.kneeL = solve(c.thL, c.ftL);
       o.kneeR = solve(c.thR, c.ftR);
       // Feet flat on the floor (or heels down for a leg stretched out).
-      o.ankleL = o.kneeL > 0.8 ? 0.35 * st : 0;
-      o.ankleR = o.kneeR > 0.8 ? 0.35 * st : 0;
+      o.ankleL = -0.35 * smoothstep(0.6, 1, o.kneeL) * st;
+      o.ankleR = -0.35 * smoothstep(0.6, 1, o.kneeR) * st;
     } else {
       // Squatting at the line: on the toes, knees out, shins leaning forward.
       const th = 1.85;
@@ -238,7 +238,7 @@ export class Benches {
       o.hipY = ANKLE_Y + SHIN * leg * Math.cos(a) + THIGH * leg * Math.cos(th) + 0.03;
       o.hipL = o.hipR = th;
       o.kneeL = o.kneeR = th + a;
-      o.ankleL = o.ankleR = 0.2 * sq;
+      o.ankleL = o.ankleR = -0.7 * sq;
     }
     o.legOutL = c.loL;
     o.legOutR = c.loR;
@@ -499,7 +499,7 @@ export class Benches {
       w = lerp(w, 1, k);
       switch (s.react) {
         case 'cheer': {
-          arms = s.v === 1 ? ([-2.65, -0.4, 0.4, 1.9, 0.5, 0.3, 0, 0] as Arms) : ARMS.up;
+          arms = s.v === 1 ? ([2.65, 0.4, 0.4, 1.9, 0.5, 0.3, 0, 0] as Arms) : ARMS.up;
           const jump = Math.max(0, Math.sin((t + s.ph) * 7.5));
           if (standing > 0.95) s.lift = 0.09 * jump * jump * k;
           g.flex -= 0.2 * k;
@@ -540,7 +540,7 @@ export class Benches {
       const osc = Math.sin((t + s.ph) * (s.v === 2 ? 2.2 : 1.5));
       if (s.v === 0) {
         g.flex += 0.65 * k;
-        arms = [-0.95, -0.9, 0.1, 0.12, 0.06, 0.06, 0, 0];
+        arms = [0.95, 0.9, 0.1, 0.12, 0.06, 0.06, 0, 0];
       } else if (s.v === 1) {
         arms = ARMS.up;
         g.side += 0.35 * osc * k;

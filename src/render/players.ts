@@ -1890,7 +1890,7 @@ export class PlayersView {
       const headLag = this.sec[id * SEC.count + SEC.headRoll];
 
       // Feet plant during the stance of a stride (not while an action poses the legs).
-      const legsFree = p.action === 'none' && lift < 0.01 && !cel && !(match.phase === 'goal' && match.scorer === p);
+      const legsFree = p.action === 'none' && lift < 0.01 && !cel && !(match.phase === 'goal' && match.scorer === p) && !(bp && bp.legs > 0.01);
       this.ikOn[id] += ((legsFree ? 1 : 0) - this.ikOn[id]) * (1 - Math.exp(-dt * 10));
 
       // ---------------- body physics: a springy spine driven by the movement

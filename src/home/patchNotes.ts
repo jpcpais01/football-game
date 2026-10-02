@@ -1,5 +1,6 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.67', note: 'Living benches: seven real substitutes in each dugout, in team kit with their own bodies. Mostly sat, each his own way, they get up to stretch, walk out to watch, squat at the line, warm up, lean in for chances, clutch heads at misses and leap up for goals.' },
   { v: '0.66', note: 'Livelier players: arms and heads swing with speed-ups, stops and turns, shoulders and neck move, and feet plant on the grass, rolling heel to toe instead of sliding. Catches, carries and throw-ins no longer reach behind the back; instep strikes point the toes.' },
   { v: '0.65', note: 'Your aim counts: a pass goes to a team-mate within about 40° of where the stick points, a through ball too, now also played along the stick’s own line. Nobody there? It goes into the space you aimed at, never off the other way.' },
   { v: '0.64', note: 'Offside is called. Strayed beyond the last defender when a teammate plays it, then touch the ball, and the linesman’s flag goes up: indirect free kick to the defenders. Not from throw-ins, corners or goal kicks. The computer’s forwards hold their runs and leave the ball when caught.' },
