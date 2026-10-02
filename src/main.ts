@@ -75,7 +75,8 @@ const TOD = params.has('tod') ? Number(params.get('tod')) : -1;
 const SHOWCASE = params.has('showcase');
 // ?crowd=-1 / 1: hold the goal crowd shot on the home / away end (for looking at the stands).
 const CROWD_SHOT = Number(params.get('crowd')) || 0;
-// ?corner=near / far: your team gets a corner a moment after kick-off (for the corner camera).
+// ?corner=near / far: your team gets a corner a moment after kick-off (for the corner camera);
+// gk / gk-opp / fk-opp: a goal kick (yours / theirs) or their free kick on the edge of your box.
 const DEBUG_CORNER = params.get('corner');
 let debugCornerDone = false;
 
@@ -851,7 +852,11 @@ function frame(now: number): void {
   if (DEBUG_CORNER && !debugCornerDone && playing && match.phase === 'play' && match.clock > 2) {
     debugCornerDone = true;
     const t = match.humanTeam;
-    match.startSetPiece('corner', t, PITCH.halfL * match.teams[t].dir, (DEBUG_CORNER === 'far' ? -1 : 1) * PITCH.halfW);
+    const o = 1 - t;
+    if (DEBUG_CORNER === 'gk') match.startSetPiece('goalkick', t, -PITCH.halfL * match.teams[t].dir + match.teams[t].dir * 5.5, 4);
+    else if (DEBUG_CORNER === 'gk-opp') match.startSetPiece('goalkick', o, -PITCH.halfL * match.teams[o].dir + match.teams[o].dir * 5.5, -4);
+    else if (DEBUG_CORNER === 'fk-opp') match.startSetPiece('freekick', o, PITCH.halfL * match.teams[o].dir - match.teams[o].dir * 22, 6);
+    else match.startSetPiece('corner', t, PITCH.halfL * match.teams[t].dir, (DEBUG_CORNER === 'far' ? -1 : 1) * PITCH.halfW);
   }
   terraces.update(running ? dt : 0, match);
   stadium.update(now / 1000, match.excitement, atmo, tifo, terraces);

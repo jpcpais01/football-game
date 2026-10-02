@@ -1761,7 +1761,7 @@ export class PlayersView {
     this.ring.scale.setScalar(pulse);
     this.marker.position.set(cx, 2.3 * c.look.height + Math.sin(time * 4) * 0.05, cz);
     this.marker.rotation.y = time * 1.5;
-    const show = match.phase !== 'fulltime' && !match.autoPlay && !match.aimingShot;
+    const show = match.phase !== 'fulltime' && !match.autoPlay && !match.deadBallView;
     this.ring.visible = show;
     this.marker.visible = show;
   }

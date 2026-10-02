@@ -229,20 +229,22 @@ export class CameraRig {
 
   /**
    * Lining up a free kick or penalty: the camera drops in behind the taker, over the
-   * shoulder away from the ball, looking down the line of the shot at the goal. The
-   * moment he sets off on his run-up it eases back up to the broadcast view.
+   * shoulder away from the ball, looking down the line of the shot at the goal (or up the
+   * pitch, for a goal kick). The same for the other side's dead balls once their taker is
+   * lined up (Match.deadBallView). The moment he sets off on his run-up it eases back up
+   * to the broadcast view.
    */
   private updatePov(match: Match, alpha: number, dt: number): void {
-    const want = match.aimingShot ? 1 : 0;
+    const view = match.deadBallView;
+    const want = view ? 1 : 0;
     const sp = match.setPiece;
-    if (want && sp) {
-      const t = sp.taker;
+    if (view && sp) {
+      const t = view.taker;
       const tx = lerp(t.prevPos.x, t.pos.x, alpha);
       const tz = lerp(t.prevPos.z, t.pos.z, alpha);
-      const aim = match.aimPoint()!;
-      // Down the line from the taker to the goal (biased a little toward the aim).
-      const gx = aim.x;
-      const gz = aim.z * 0.35;
+      // Down the line from the taker to what he's looking at.
+      const gx = view.x;
+      const gz = view.z;
       let ux = gx - tx;
       let uz = gz - tz;
       const n = Math.hypot(ux, uz) || 1;
@@ -254,9 +256,11 @@ export class CameraRig {
       // right shoulder): the taker sits to one side of the frame, ball and goal stay clear.
       const side = t.foot;
       const h = t.look.height;
-      this.povPos.set(tx - ux * 2.7 + rx * side * 1.05, 1.95 * h, tz - uz * 2.7 + rz * side * 1.05);
+      // (A goal kick: a little higher, to see the pitch opening out ahead.)
+      const gk = view.kind === 'goalkick';
+      this.povPos.set(tx - ux * 2.7 + rx * side * 1.05, (gk ? 2.25 : 1.95) * h, tz - uz * 2.7 + rz * side * 1.05);
       // Look between the ball and the goal mouth: ball low in the frame, goal and wall above it.
-      const k = sp.kind === 'penalty' ? 0.75 : 0.62;
+      const k = sp.kind === 'penalty' ? 0.75 : gk ? 0.3 : 0.62;
       this.povLook.set(lerp(sp.x, gx, k), 1.05, lerp(sp.z, gz, k));
     }
     // Quick cut in, a smooth crane back out as he runs up.

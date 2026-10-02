@@ -1291,7 +1291,9 @@ export class AI {
       p.lookAt = runUp ? null : p.lookTarget;
       if (sp.kind === 'throw' && m.heldBy !== p) m.catchBall(p);
       const human = p.team === m.humanTeam && !m.autoPlay;
-      const wait = human ? (runUp || sp.kind === 'corner' ? 20 : 7) : runUp ? 2.6 : sp.kind === 'freekick' ? 1.8 : 1.3;
+      // (In a real match, the other side's goal kick takes a moment longer: the camera drops
+      // in behind the keeper to watch it.)
+      const wait = human ? (runUp || sp.kind === 'corner' ? 20 : 7) : runUp ? 2.6 : sp.kind === 'freekick' ? 1.8 : m.autoPlay ? 1.3 : 2.6;
       if (sp.t > wait && !p.plan) this.planSetPiece(p);
       return;
     }

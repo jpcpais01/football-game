@@ -519,6 +519,31 @@ export class Match {
   }
 
   /** Aim point of a dead-ball shot in world coordinates. */
+  /**
+   * A dead ball worth watching from behind the taker: your goal kicks, your free kicks and
+   * penalties while you aim, and the other side's goal kicks, direct free kicks and
+   * penalties once their taker has lined up. Who's taking it and the point he's looking at
+   * (null when there's nothing to show — and from the moment he starts his run-up).
+   */
+  get deadBallView(): { taker: Player; x: number; z: number; kind: SetPieceKind } | null {
+    const sp = this.setPiece;
+    if (!sp || this.autoPlay || this.phase !== 'setpiece') return null;
+    const t = sp.taker;
+    if (t.plan || t.action !== 'none' || t.speed > 0.8) return null;
+    const human = sp.team === this.humanTeam;
+    if (human && t !== this.controlled) return null;
+    const dir = this.teams[sp.team].dir;
+    if (sp.kind === 'goalkick') return { taker: t, x: sp.x + dir * 40, z: sp.z * 0.3, kind: sp.kind };
+    if (sp.kind !== 'penalty' && !sp.direct) return null;
+    if (human) {
+      const aim = this.aimingShot ? this.aimPoint() : null;
+      return aim ? { taker: t, x: aim.x, z: aim.z * 0.35, kind: sp.kind } : null;
+    }
+    // Theirs: lined up (at the ball, or standing at the top of his run-up), eyes on our goal.
+    if (Math.hypot(t.pos.x - sp.x, t.pos.z - sp.z) > 8) return null;
+    return { taker: t, x: PITCH.halfL * dir, z: (sp.aimZ ?? 0) * 0.35, kind: sp.kind };
+  }
+
   aimPoint(): { x: number; y: number; z: number } | null {
     const sp = this.setPiece;
     if (!sp || sp.aimZ === undefined) return null;
