@@ -5,7 +5,7 @@ import { clamp, lerp } from '../sim/vec';
 
 const CAM_PITCH_DEG = 21;
 /** Pixel art looks down more steeply: a cleaner, more readable top-down-ish framing. */
-const PIXEL_PITCH_DEG = 30;
+const PIXEL_PITCH_DEG = 27;
 
 export const CAMERA_PRESETS = { close: 33, normal: 40, far: 48 } as const;
 export type CameraPreset = keyof typeof CAMERA_PRESETS;
