@@ -1,5 +1,6 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.58', note: 'A 90s game-night look for the menus: pixel type, square pixel-cornered panels with hard shadows, banded colours and CRT scanlines.' },
   { v: '0.57', note: 'Celebrate your goals: after scoring, the four buttons pick the move. Knee slide, aeroplane, the SIUU leap and a backflip.' },
   { v: '0.56', note: 'The crowd peaks when your team has the ball within 20 m of goal: at least half its roar, full roar when the player is running at goal, fast. Patch notes on the home screen.' },
   { v: '0.55', note: 'Corner camera frames the whole box and goal, taker at the edge. In attack the camera leans toward the goal. Rainy nights a little gentler, fewer puddles.' },
