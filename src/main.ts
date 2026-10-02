@@ -106,7 +106,9 @@ rig.baseDist = CAMERA_PRESETS[cameraPreset];
 
 // Graphics: the pixel-art look (default), pixel art in a fixed palette, or full-resolution HD.
 type Graphics = 'pixel' | 'palette' | 'hd';
-const GRAPHICS: Graphics[] = ['pixel', 'palette', 'hd'];
+// Palette and HD are retired for now (still fully working): put them back in this list to
+// bring the Graphics / Palette options back to the pause menu.
+const GRAPHICS: Graphics[] = ['pixel'];
 const isGraphics = (g: string | null): g is Graphics => GRAPHICS.includes(g as Graphics);
 let graphics: Graphics = isGraphics(params.get('gfx')) ? (params.get('gfx') as Graphics) : 'pixel';
 let paletteIdx = 0;
@@ -191,6 +193,7 @@ pauseMenu.innerHTML = `
     <button class="palette ghost">Palette</button>
     <button class="camera ghost">Camera: Normal</button>
     <button class="sound ghost">Sound: on</button>
+    <button class="stats ghost wide">FPS counter: off</button>
     <button class="fan ghost wide">Your banner: add photo</button>
   </div>`;
 ui.appendChild(pauseMenu);
@@ -254,12 +257,22 @@ function updateCharge(alpha: number): void {
   const shot = btn === 2;
   // Pass / Through: the bar is the pass weight (full at 0.6 s); blue once slid up (lofted).
   const p = shot ? Math.min(1.15, hold / 0.85) / 1.15 : Math.min(1, hold / 0.6);
-  chargeFill.style.transform = `scaleX(${p.toFixed(3)})`;
+  // Dead-ball shot (aiming at the reticle): a gauge whose green peak is the best power —
+  // full pace without sending it over (power ~0.92 of 1.15 on the bar's scale).
+  const dead = shot && aimScreen !== null;
+  charge.classList.toggle('dead', dead);
+  if (dead) {
+    chargeFill.style.transform = '';
+    chargeFill.style.clipPath = `inset(0 ${((1 - p) * 100).toFixed(1)}% 0 0)`;
+  } else {
+    chargeFill.style.clipPath = '';
+    chargeFill.style.transform = `scaleX(${p.toFixed(3)})`;
+  }
   charge.classList.toggle('shot', shot);
   charge.classList.toggle('over', shot && hold > 0.85);
   charge.classList.toggle('lofted', !shot && inp.swipe[btn]);
   chargeTick.style.display = shot ? '' : 'none';
-  chargeTick.style.left = `${(1 / 1.15) * 100}%`;
+  chargeTick.style.left = `${((dead ? 0.92 : 1) / 1.15) * 100}%`;
   let x: number;
   let y: number;
   if (aimScreen) {
@@ -280,7 +293,29 @@ function updateCharge(alpha: number): void {
 
 const fpsEl = document.createElement('div');
 fpsEl.className = 'fps';
-if (DEBUG) ui.appendChild(fpsEl);
+ui.appendChild(fpsEl);
+// FPS / frame-time readout: a pause-menu setting (always on with ?debug).
+let showStats = DEBUG;
+try {
+  showStats = showStats || localStorage.getItem('stats') === '1';
+} catch {
+  /* keep default */
+}
+const statsBtn = pauseMenu.querySelector('.stats') as HTMLButtonElement;
+const applyStats = () => {
+  fpsEl.style.display = showStats ? '' : 'none';
+  statsBtn.textContent = `FPS counter: ${showStats ? 'on' : 'off'}`;
+};
+applyStats();
+statsBtn.addEventListener('click', () => {
+  showStats = !showStats;
+  applyStats();
+  try {
+    localStorage.setItem('stats', showStats ? '1' : '0');
+  } catch {
+    /* ignore */
+  }
+});
 
 let playing = false;
 let paused = false;
@@ -367,6 +402,7 @@ weatherBtn.addEventListener('click', () => {
 });
 const graphicsBtn = pauseMenu.querySelector('.graphics') as HTMLButtonElement;
 const paletteBtn = pauseMenu.querySelector('.palette') as HTMLButtonElement;
+if (GRAPHICS.length < 2) graphicsBtn.style.display = 'none';
 const applyGraphics = () => {
   graphicsBtn.textContent = `Graphics: ${graphics === 'pixel' ? 'Pixel' : graphics === 'palette' ? 'Palette' : 'HD'}`;
   rig.pixelHeight = pixelLook() ? pixelPass.pixelHeight : 0;
@@ -673,14 +709,21 @@ function frame(now: number): void {
   cpuAvg += (performance.now() - t0 - cpuAvg) * 0.05;
   adaptQuality(frameMs, now);
 
-  if (DEBUG) {
+  if (showStats) {
     fpsFrames++;
     if (now - fpsT > 500) {
+      const fps = Math.round((fpsFrames * 1000) / (now - fpsT));
+      const ms = ((now - fpsT) / fpsFrames).toFixed(1);
       const info = renderer.info.render;
-      fpsEl.textContent = `${Math.round((fpsFrames * 1000) / (now - fpsT))} fps · ${info.calls} calls · ${(info.triangles / 1000).toFixed(0)}k tris · dpr ${dpr.toFixed(2)} · cpu ${cpuAvg.toFixed(2)}ms`;
+      fpsEl.textContent = DEBUG
+        ? `${fps} fps · ${ms} ms · ${info.calls} calls · ${(info.triangles / 1000).toFixed(0)}k tris · dpr ${dpr.toFixed(2)} · cpu ${cpuAvg.toFixed(2)}ms`
+        : `${fps} fps · ${ms} ms`;
       fpsFrames = 0;
       fpsT = now;
     }
+  } else {
+    fpsFrames = 0;
+    fpsT = now;
   }
 }
 requestAnimationFrame(frame);
