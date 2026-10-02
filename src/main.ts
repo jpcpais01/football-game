@@ -13,6 +13,7 @@ import { BallView } from './render/ballView';
 import { CAMERA_PRESETS, CameraRig, type CameraPreset } from './render/cameraRig';
 import { Atmosphere } from './render/atmosphere';
 import { PixelPass } from './render/pixelPass';
+import { PALETTES } from './render/palettes';
 import { Particles } from './render/particles';
 import { Officials } from './render/officials';
 import { SHARED } from './render/look';
@@ -86,16 +87,22 @@ try {
 }
 rig.baseDist = CAMERA_PRESETS[cameraPreset];
 
-// Graphics: the pixel-art look (default) or full-resolution HD.
-type Graphics = 'pixel' | 'hd';
-let graphics: Graphics = params.get('gfx') === 'hd' ? 'hd' : 'pixel';
+// Graphics: the pixel-art look (default), pixel art in a fixed palette, or full-resolution HD.
+type Graphics = 'pixel' | 'palette' | 'hd';
+const GRAPHICS: Graphics[] = ['pixel', 'palette', 'hd'];
+const isGraphics = (g: string | null): g is Graphics => GRAPHICS.includes(g as Graphics);
+let graphics: Graphics = isGraphics(params.get('gfx')) ? (params.get('gfx') as Graphics) : 'pixel';
+let paletteIdx = 0;
 try {
   const saved = localStorage.getItem('graphics');
-  if (!params.has('gfx') && (saved === 'pixel' || saved === 'hd')) graphics = saved;
+  if (!params.has('gfx') && isGraphics(saved)) graphics = saved;
+  paletteIdx = Math.min(PALETTES.length - 1, Math.max(0, Number(localStorage.getItem('palette')) || 0));
 } catch {
   /* keep default */
 }
 const pixelPass = new PixelPass();
+/** Both pixel looks render through the pixel pass. */
+const pixelLook = () => graphics !== 'hd';
 
 // Match weather: evening (golden hour into floodlights) or a sunny day.
 try {
@@ -153,6 +160,7 @@ pauseMenu.innerHTML = `
     <button class="quit ghost">Quit to menu</button>
     <button class="weather ghost">Match: Evening</button>
     <button class="graphics ghost">Graphics: Pixel</button>
+    <button class="palette ghost">Palette</button>
     <button class="camera ghost">Camera: Normal</button>
     <button class="sound ghost">Sound: on</button>
     <button class="fan ghost wide">Your banner: add photo</button>
@@ -308,18 +316,53 @@ weatherBtn.addEventListener('click', () => {
   }
 });
 const graphicsBtn = pauseMenu.querySelector('.graphics') as HTMLButtonElement;
+const paletteBtn = pauseMenu.querySelector('.palette') as HTMLButtonElement;
 const applyGraphics = () => {
-  graphicsBtn.textContent = `Graphics: ${graphics === 'pixel' ? 'Pixel' : 'HD'}`;
-  rig.pixelHeight = graphics === 'pixel' ? pixelPass.pixelHeight : 0;
+  graphicsBtn.textContent = `Graphics: ${graphics === 'pixel' ? 'Pixel' : graphics === 'palette' ? 'Palette' : 'HD'}`;
+  rig.pixelHeight = pixelLook() ? pixelPass.pixelHeight : 0;
+  pixelPass.setPalette(graphics === 'palette' ? PALETTES[paletteIdx] : null);
+  paletteBtn.style.display = graphics === 'palette' ? '' : 'none';
+  pauseMenu.classList.toggle('has-palette', graphics === 'palette');
+  paletteBtn.innerHTML = `<span class="pal-arrow">‹</span>${PALETTES[paletteIdx].name}<span class="pal-arrow">›</span>`;
+  paletteBtn.title = `Palette ${paletteIdx + 1} of ${PALETTES.length} · tap or swipe`;
 };
 graphicsBtn.addEventListener('click', () => {
-  graphics = graphics === 'pixel' ? 'hd' : 'pixel';
+  graphics = GRAPHICS[(GRAPHICS.indexOf(graphics) + 1) % GRAPHICS.length];
   applyGraphics();
   try {
     localStorage.setItem('graphics', graphics);
   } catch {
     /* ignore */
   }
+});
+// Palette: tap for the next one, or swipe across the button either way.
+const setPaletteIdx = (i: number) => {
+  paletteIdx = (i + PALETTES.length) % PALETTES.length;
+  applyGraphics();
+  try {
+    localStorage.setItem('palette', String(paletteIdx));
+  } catch {
+    /* ignore */
+  }
+};
+let palSwipeX = -1;
+let palSwiped = false;
+paletteBtn.addEventListener('pointerdown', (e) => {
+  palSwipeX = e.clientX;
+  palSwiped = false;
+});
+paletteBtn.addEventListener('pointermove', (e) => {
+  if (palSwipeX < 0 || palSwiped) return;
+  const dx = e.clientX - palSwipeX;
+  if (Math.abs(dx) > 36) {
+    palSwiped = true;
+    setPaletteIdx(paletteIdx + (dx < 0 ? 1 : -1));
+  }
+});
+paletteBtn.addEventListener('pointerup', () => (palSwipeX = -1));
+paletteBtn.addEventListener('click', () => {
+  if (!palSwiped) setPaletteIdx(paletteIdx + 1);
+  palSwiped = false;
 });
 const cameraBtn = pauseMenu.querySelector('.camera') as HTMLButtonElement;
 const cameraLabel = () => (cameraBtn.textContent = `Camera: ${cameraPreset[0].toUpperCase()}${cameraPreset.slice(1)}`);
@@ -567,12 +610,12 @@ function frame(now: number): void {
   updateCharge(alpha);
   updateAim();
 
-  particles.setScale(graphics === 'pixel' ? pixelPass.pixelHeight : renderer.domElement.height, rig.camera.fov);
+  particles.setScale(pixelLook() ? pixelPass.pixelHeight : renderer.domElement.height, rig.camera.fov);
   particles.update(running ? dt : 0, now / 1000, match, rig.focusX, rig.focusZ);
   // A full-screen menu covers the stadium: don't spend the battery drawing it.
   if (home.opaque) {
     /* skip */
-  } else if (graphics === 'pixel') pixelPass.render(renderer, scene, rig.camera, SHARED.uFlood.value, atmo.weather === 'sunny' ? 0.35 : 1, rig.subPixelX, rig.subPixelY);
+  } else if (pixelLook()) pixelPass.render(renderer, scene, rig.camera, SHARED.uFlood.value, atmo.weather === 'sunny' ? 0.35 : 1, rig.subPixelX, rig.subPixelY);
   else renderer.render(scene, rig.camera);
   cpuAvg += (performance.now() - t0 - cpuAvg) * 0.05;
   adaptQuality(frameMs, now);

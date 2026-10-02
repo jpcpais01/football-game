@@ -1,4 +1,7 @@
 import * as THREE from 'three';
+import { hexRGB, oklab, type Palette } from './palettes';
+
+const MAX_PAL = 32;
 
 /**
  * Pixel-art presentation. The world is rendered at a low resolution into an HDR target
@@ -52,6 +55,15 @@ export class PixelPass {
         uNight: { value: 0 },
         uExposure: { value: 1 },
         uCool: { value: 1 },
+        // Palette mode (off = the smooth-banded look).
+        uPalOn: { value: 0 },
+        uPalN: { value: 0 },
+        uPal: { value: Array.from({ length: MAX_PAL }, () => new THREE.Vector3()) },
+        uPalRGB: { value: Array.from({ length: MAX_PAL }, () => new THREE.Vector3()) },
+        uDither: { value: 1 },
+        uPreSat: { value: 1 },
+        uPreCon: { value: 1 },
+        uGrain: { value: 0 },
       },
       vertexShader: /* glsl */ `
         varying vec2 vUv;
@@ -62,6 +74,50 @@ export class PixelPass {
         uniform sampler2D tDepth;
         uniform vec2 uRes;
         uniform float uNear, uFar, uLevels, uNight, uCool, uExposure;
+        uniform float uPalOn, uDither, uPreSat, uPreCon, uGrain;
+        uniform int uPalN;
+        uniform vec3 uPal[${MAX_PAL}];
+        uniform vec3 uPalRGB[${MAX_PAL}];
+
+        vec3 toOklab(vec3 c) {
+          c = pow(max(c, 0.0), vec3(2.2));
+          float l = pow(0.4122214708 * c.r + 0.5363325363 * c.g + 0.0514459929 * c.b, 1.0 / 3.0);
+          float m = pow(0.2119034982 * c.r + 0.6806995451 * c.g + 0.1073969566 * c.b, 1.0 / 3.0);
+          float s = pow(0.0883024619 * c.r + 0.2817188376 * c.g + 0.6299787005 * c.b, 1.0 / 3.0);
+          return vec3(0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+                      1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+                      0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s);
+        }
+
+        // Snap to the palette: the nearest colour (lightness weighted a little more, so
+        // shading reads right), ordered-dithered toward the second nearest by how far
+        // along the way to it the true colour sits.
+        vec3 paletteMap(vec3 c, float th) {
+          vec3 w = vec3(1.4, 1.0, 1.0);
+          vec3 p = toOklab(c);
+          float d1 = 1e9;
+          float d2 = 1e9;
+          int i1 = 0;
+          int i2 = 0;
+          for (int i = 0; i < ${MAX_PAL}; i++) {
+            if (i >= uPalN) break;
+            vec3 q = (uPal[i] - p) * w;
+            float d = dot(q, q);
+            if (d < d1) {
+              d2 = d1; i2 = i1;
+              d1 = d; i1 = i;
+            } else if (d < d2) {
+              d2 = d; i2 = i;
+            }
+          }
+          vec3 a = uPal[i1] * w;
+          vec3 ab = uPal[i2] * w - a;
+          float t = clamp(dot(p * w - a, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
+          // Like a pixel artist: colours near a palette entry stay flat, and the dither
+          // only fills the real in-between zones (half-way = a clean 50% checker).
+          float mixAmt = clamp((t - 0.14) / 0.36, 0.0, 1.0) * 0.5 * uDither;
+          return mixAmt > th ? uPalRGB[i2] : uPalRGB[i1];
+        }
         uniform vec3 uOutline;
         varying vec2 vUv;
 
@@ -156,13 +212,24 @@ export class PixelPass {
           // Light and shadow split: warm light, cool shade, a little stronger than before.
           c *= mix(vec3(0.94, 0.98, 1.08), vec3(1.05, 1.01, 0.95), smoothstep(0.2, 0.75, l2));
 
-          // Quantise with an ordered dither: gradients turn into crisp pixel bands.
-          float b = bayer4(px) - 0.5;
-          c = floor(c * uLevels + 0.5 + b * 0.85) / uLevels;
-
-          // Outlines in a deeper shade of the object's own colour (not a flat dark line).
-          vec3 ink = c * c * vec3(0.55, 0.5, 0.7);
-          c = mix(c, ink, edge * 0.9);
+          float th = bayer4(px);
+          if (uPalOn > 0.5) {
+            // Palette: grade for the palette, darken the outlines first so they land on the
+            // palette's own shadow colours, then snap every pixel to it.
+            float pl = dot(c, vec3(0.299, 0.587, 0.114));
+            c = mix(vec3(pl), c, uPreSat);
+            c = (c - 0.5) * uPreCon + 0.5;
+            c = mix(c, c * c * vec3(0.55, 0.5, 0.7), edge * 0.9);
+            c = paletteMap(clamp(c, 0.0, 1.0), th);
+            // Printed looks: the paper shows through a little.
+            if (uGrain > 0.0) c *= 1.0 - uGrain * fract(sin(dot(px, vec2(12.9898, 78.233))) * 43758.5453);
+          } else {
+            // Quantise with an ordered dither: gradients turn into crisp pixel bands.
+            c = floor(c * uLevels + 0.5 + (th - 0.5) * 0.85) / uLevels;
+            // Outlines in a deeper shade of the object's own colour (not a flat dark line).
+            vec3 ink = c * c * vec3(0.55, 0.5, 0.7);
+            c = mix(c, ink, edge * 0.9);
+          }
           gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
         }
       `,
@@ -188,6 +255,24 @@ export class PixelPass {
     this.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.mat);
     this.quad.frustumCulled = false;
     this.scene.add(this.quad);
+  }
+
+  /** Palette look (null = the smooth-banded pixel look). */
+  setPalette(p: Palette | null): void {
+    const u = this.mat.uniforms;
+    u.uPalOn.value = p ? 1 : 0;
+    if (!p) return;
+    const n = Math.min(MAX_PAL, p.colors.length);
+    u.uPalN.value = n;
+    for (let i = 0; i < n; i++) {
+      const rgb = hexRGB(p.colors[i]);
+      (u.uPalRGB.value as THREE.Vector3[])[i].set(...rgb);
+      (u.uPal.value as THREE.Vector3[])[i].set(...oklab(rgb));
+    }
+    u.uDither.value = p.dither;
+    u.uPreSat.value = p.sat;
+    u.uPreCon.value = p.contrast;
+    u.uGrain.value = p.grain;
   }
 
   /** Low-res size for a screen of w×h CSS pixels. */
