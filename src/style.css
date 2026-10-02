@@ -345,3 +345,11 @@ html, body {
 @keyframes aim-pulse { 50% { transform: scale(0.7); opacity: 0.6; } }
 
 .menu.pause button.quit.armed { background: #c8393b; border-color: #c8393b; color: #fff; }
+
+/* Pause menu: pixel fineness slider. */
+.menu.pause .fine {
+  display: flex; align-items: center; gap: 10px; padding: 6px 12px; border: 2px solid rgba(244, 239, 227, 0.4); border-radius: 4px;
+  font-weight: 800; font-size: 15px; letter-spacing: 0.08em; text-transform: uppercase;
+}
+.menu.pause .fine input { flex: 1; min-width: 0; accent-color: var(--accent); height: 26px; }
+.menu.pause .fine em { font-style: normal; font-weight: 600; font-size: 12px; letter-spacing: 0.06em; color: var(--ink-dim); white-space: nowrap; }

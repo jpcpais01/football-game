@@ -11,6 +11,14 @@ const MAX_PAL = 32;
  *    and an ordered-dither quantise so gradients become pixel bands.
  * 2. A blit to the screen: crisp nearest-neighbour pixels, scrolled by the camera's
  *    sub-pixel remainder. One texture read per screen pixel.
+ *
+ * Crispness:
+ * - Every art pixel is an exact whole number of *device* pixels (the canvas runs at the
+ *   screen's true resolution in this mode, which costs one texture read per pixel), so
+ *   there are no uneven 2-and-3-pixel columns and no browser smoothing.
+ * - The world is rendered at 2x the art resolution and each art pixel keeps the one of
+ *   its four samples closest to their average: pure colours and hard edges (no blended
+ *   halo), but no single-sample speckle or shimmer from grass, crowd and line detail.
  * Every screen pixel inside an art pixel would compute the same colour anyway, so doing
  * the work per art pixel gives the identical picture for a fraction of the fill cost.
  * The HUD and controls are DOM, so they stay sharp.
@@ -24,8 +32,14 @@ export class PixelPass {
   private quad: THREE.Mesh;
   private mat: THREE.ShaderMaterial;
   private blit: THREE.ShaderMaterial;
-  /** Low-res height in pixels. */
-  height = 380;
+  /** Wanted art height in pixels (the real one is the nearest whole-number fit). */
+  height = 288;
+  /** Supersampling of the world render (2 = 2x2 samples per art pixel, 1 = off). */
+  ss = 2;
+  private artW = 4;
+  private artH = 4;
+  private devW = 4;
+  private devH = 4;
 
   constructor() {
     this.target = new THREE.WebGLRenderTarget(4, 4, {
@@ -48,6 +62,7 @@ export class PixelPass {
         tColor: { value: this.target.texture },
         tDepth: { value: this.target.depthTexture },
         uRes: { value: new THREE.Vector2(4, 4) },
+        uSS: { value: 2 },
         uNear: { value: 1 },
         uFar: { value: 1500 },
         uLevels: { value: 22 },
@@ -73,6 +88,7 @@ export class PixelPass {
         uniform sampler2D tColor;
         uniform sampler2D tDepth;
         uniform vec2 uRes;
+        uniform float uSS;
         uniform float uNear, uFar, uLevels, uNight, uCool, uExposure;
         uniform float uPalOn, uDither, uPreSat, uPreCon, uGrain;
         uniform int uPalN;
@@ -155,7 +171,29 @@ export class PixelPass {
           // Rendered at the low resolution: this fragment is exactly one art pixel.
           vec2 px = gl_FragCoord.xy;
           vec2 uv = px / uRes;
-          vec3 c = texture2D(tColor, uv).rgb;
+          vec3 c;
+          if (uSS > 1.5) {
+            // Four samples of this art pixel: keep the one nearest their mean, so the pixel is
+            // a real colour from the scene (hard edges) but a stable, representative one.
+            vec2 st = 1.0 / (uRes * 2.0);
+            vec2 b0 = (floor(px) * 2.0 + 0.5) * st;
+            vec3 s0 = texture2D(tColor, b0).rgb;
+            vec3 s1 = texture2D(tColor, b0 + vec2(st.x, 0.0)).rgb;
+            vec3 s2 = texture2D(tColor, b0 + vec2(0.0, st.y)).rgb;
+            vec3 s3 = texture2D(tColor, b0 + st).rgb;
+            vec3 mean = (s0 + s1 + s2 + s3) * 0.25;
+            float d0 = dot(s0 - mean, s0 - mean);
+            float d1 = dot(s1 - mean, s1 - mean);
+            float d2 = dot(s2 - mean, s2 - mean);
+            float d3 = dot(s3 - mean, s3 - mean);
+            c = s0;
+            float best = d0;
+            if (d1 < best) { best = d1; c = s1; }
+            if (d2 < best) { best = d2; c = s2; }
+            if (d3 < best) { c = s3; }
+          } else {
+            c = texture2D(tColor, uv).rgb;
+          }
 
           // Silhouette outlines: this pixel is clearly nearer than a neighbour.
           float d = linDepth(uv);
@@ -167,16 +205,16 @@ export class PixelPass {
           // Soft glow: bright neighbours bleed light (white kits in the sun, chalk, LEDs,
           // sparkles). Cheap because the image is already low resolution.
           vec3 bloom = vec3(0.0);
-          const int TAPS = 12;
-          vec2 offs[12];
-          offs[0] = vec2(2.0, 0.0); offs[1] = vec2(-2.0, 0.0); offs[2] = vec2(0.0, 2.0); offs[3] = vec2(0.0, -2.0);
-          offs[4] = vec2(1.5, 1.5); offs[5] = vec2(-1.5, 1.5); offs[6] = vec2(1.5, -1.5); offs[7] = vec2(-1.5, -1.5);
-          offs[8] = vec2(4.0, 0.0); offs[9] = vec2(-4.0, 0.0); offs[10] = vec2(0.0, 3.5); offs[11] = vec2(0.0, -3.5);
+          // A tight glow (a pixel or two), so bright things bloom without smearing.
+          const int TAPS = 8;
+          vec2 offs[8];
+          offs[0] = vec2(1.0, 0.0); offs[1] = vec2(-1.0, 0.0); offs[2] = vec2(0.0, 1.0); offs[3] = vec2(0.0, -1.0);
+          offs[4] = vec2(2.0, 0.0); offs[5] = vec2(-2.0, 0.0); offs[6] = vec2(0.0, 2.0); offs[7] = vec2(0.0, -2.0);
           for (int k = 0; k < TAPS; k++) {
             vec3 sc = texture2D(tColor, uv + offs[k] * e).rgb;
-            bloom += max(sc - vec3(0.7), 0.0);
+            bloom += max(sc - vec3(0.75), 0.0);
           }
-          c += bloom / float(TAPS) * 1.15;
+          c += bloom / float(TAPS) * 0.8;
 
           vec3 nb = (texture2D(tColor, uv + vec2(e.x, 0.0)).rgb + texture2D(tColor, uv - vec2(e.x, 0.0)).rgb +
                      texture2D(tColor, uv + vec2(0.0, e.y)).rgb + texture2D(tColor, uv - vec2(0.0, e.y)).rgb) * 0.25;
@@ -236,7 +274,8 @@ export class PixelPass {
             if (uGrain > 0.0) c *= 1.0 - uGrain * fract(sin(dot(px, vec2(12.9898, 78.233))) * 43758.5453);
           } else {
             // Quantise with an ordered dither: gradients turn into crisp pixel bands.
-            c = floor(c * uLevels + 0.5 + (th - 0.5) * 0.85) / uLevels;
+            // Light dither: flat bands, with the checker only right at each band's edge.
+            c = floor(c * uLevels + 0.5 + (th - 0.5) * 0.4) / uLevels;
             // Outlines in a deeper shade of the object's own colour (not a flat dark line).
             vec3 ink = c * c * vec3(0.55, 0.5, 0.7);
             c = mix(c, ink, edge * 0.9);
@@ -250,7 +289,13 @@ export class PixelPass {
     this.blit = new THREE.ShaderMaterial({
       depthTest: false,
       depthWrite: false,
-      uniforms: { tPost: { value: this.post.texture }, uRes: this.mat.uniforms.uRes, uSub: { value: new THREE.Vector2() } },
+      uniforms: {
+        tPost: { value: this.post.texture },
+        uRes: this.mat.uniforms.uRes,
+        uSub: { value: new THREE.Vector2() },
+        uScale: { value: 1 },
+        uOffset: { value: new THREE.Vector2() },
+      },
       vertexShader: /* glsl */ `
         varying vec2 vUv;
         void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }
@@ -259,8 +304,14 @@ export class PixelPass {
         uniform sampler2D tPost;
         uniform vec2 uRes;
         uniform vec2 uSub;
-        varying vec2 vUv;
-        void main() { gl_FragColor = texture2D(tPost, (floor(vUv * uRes + uSub) + 0.5) / uRes); }
+        uniform vec2 uOffset;
+        uniform float uScale;
+        // Every art pixel is exactly uScale x uScale device pixels; the scroll moves in whole
+        // device pixels, so edges never smear.
+        void main() {
+          vec2 art = floor((gl_FragCoord.xy + uOffset + floor(uSub * uScale + 0.5)) / uScale);
+          gl_FragColor = texture2D(tPost, (art + 0.5) / uRes);
+        }
       `,
     });
     this.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.mat);
@@ -286,17 +337,40 @@ export class PixelPass {
     u.uGrain.value = p.grain;
   }
 
-  /** Low-res size for a screen of w×h CSS pixels. */
+  /**
+   * Art resolution for a drawing buffer of w x h *device* pixels: the whole-number pixel
+   * size nearest the wanted art height, the art covering the screen (the odd leftover
+   * device pixels are split between the edges).
+   */
   resize(w: number, h: number): void {
-    const lh = Math.round(Math.min(this.height, h));
-    const lw = Math.max(1, Math.round((w / h) * lh));
-    this.target.setSize(lw, lh);
+    this.devW = w;
+    this.devH = h;
+    const scale = Math.max(1, Math.round(h / this.height));
+    const lw = Math.ceil(w / scale);
+    const lh = Math.ceil(h / scale);
+    this.artW = lw;
+    this.artH = lh;
+    this.target.setSize(lw * this.ss, lh * this.ss);
     this.post.setSize(lw, lh);
     (this.mat.uniforms.uRes.value as THREE.Vector2).set(lw, lh);
+    this.mat.uniforms.uSS.value = this.ss;
+    this.blit.uniforms.uScale.value = scale;
+    (this.blit.uniforms.uOffset.value as THREE.Vector2).set(Math.floor((lw * scale - w) / 2), Math.floor((lh * scale - h) / 2));
+  }
+
+  /** Turn supersampling on or off (performance), keeping the same art resolution. */
+  setSupersample(ss: number): void {
+    if (ss === this.ss) return;
+    this.ss = ss;
+    this.resize(this.devW, this.devH);
   }
 
   get pixelHeight(): number {
-    return this.target.height;
+    return this.artH;
+  }
+
+  get pixelWidth(): number {
+    return this.artW;
   }
 
   render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera, night: number, cool = 1, subX = 0, subY = 0): void {

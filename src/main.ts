@@ -130,6 +130,18 @@ try {
   /* keep default */
 }
 const pixelPass = new PixelPass();
+// Pixel fineness (pause menu slider): the art height, from chunky to fine.
+const FINENESS = [180, 216, 250, 288, 330, 380, 440];
+let fineIdx = 3;
+try {
+  const f = Number(localStorage.getItem('pixelFine'));
+  if (localStorage.getItem('pixelFine') !== null && f >= 0 && f < FINENESS.length) fineIdx = f;
+} catch {
+  /* keep default */
+}
+// The pixel look draws its art pixels at the screen's true resolution (whole device pixels
+// each, no browser smoothing); the 3D work is at art resolution, so this costs ~nothing.
+const deviceDpr = Math.min(window.devicePixelRatio || 1, 3);
 /** Both pixel looks render through the pixel pass. */
 const pixelLook = () => graphics !== 'hd';
 
@@ -205,6 +217,7 @@ pauseMenu.innerHTML = `
     <button class="palette ghost">Palette</button>
     <button class="camera ghost">Camera: Normal</button>
     <button class="sound ghost">Sound: on</button>
+    <label class="fine wide"><span>Pixels</span><input class="fine-in" type="range" min="0" max="${FINENESS.length - 1}" step="1"><em>Chunky ‹ › Fine</em></label>
     <button class="stats ghost wide">FPS counter: off</button>
     <button class="fan ghost wide">Your banner: add photo</button>
   </div>`;
@@ -428,7 +441,7 @@ const applyGraphics = () => {
 };
 graphicsBtn.addEventListener('click', () => {
   graphics = GRAPHICS[(GRAPHICS.indexOf(graphics) + 1) % GRAPHICS.length];
-  applyGraphics();
+  onResize();
   try {
     localStorage.setItem('graphics', graphics);
   } catch {
@@ -474,6 +487,18 @@ cameraBtn.addEventListener('click', () => {
   cameraLabel();
   try {
     localStorage.setItem('camera', cameraPreset);
+  } catch {
+    /* ignore */
+  }
+});
+const fineRow = pauseMenu.querySelector('.fine') as HTMLElement;
+const fineIn = pauseMenu.querySelector('.fine-in') as HTMLInputElement;
+fineIn.value = String(fineIdx);
+fineIn.addEventListener('input', () => {
+  fineIdx = Number(fineIn.value);
+  onResize();
+  try {
+    localStorage.setItem('pixelFine', String(fineIdx));
   } catch {
     /* ignore */
   }
@@ -531,11 +556,13 @@ document.addEventListener('contextmenu', (e) => e.preventDefault());
 function onResize(): void {
   const w = window.innerWidth;
   const h = window.innerHeight;
+  if (!FIXED_DPR) renderer.setPixelRatio(pixelLook() ? deviceDpr : dpr);
   renderer.setSize(w, h);
   rig.setAspect(w / h);
-  // ~240-320 px tall: chunky enough to read as pixel art, players still ~10 px tall.
-  pixelPass.height = Math.round(Math.min(320, Math.max(240, h * 0.72)));
-  pixelPass.resize(w, h);
+  pixelPass.height = FINENESS[fineIdx];
+  pixelPass.resize(renderer.domElement.width, renderer.domElement.height);
+  renderer.domElement.style.imageRendering = pixelLook() ? 'pixelated' : '';
+  fineRow.style.display = pixelLook() ? '' : 'none';
   applyGraphics();
   rotate.classList.toggle('show', playing && h > w && matchMedia('(pointer: coarse)').matches);
 }
@@ -626,6 +653,13 @@ function adaptQuality(frameMs: number, now: number): void {
   if (FIXED_DPR) return;
   frameAvg += (frameMs - frameAvg) * 0.05;
   if (now < perfCheckAt) return;
+  if (pixelLook()) {
+    // Pixel look: the resolution is the art; struggling devices drop the supersampling.
+    if (frameAvg > 19.5 && pixelPass.ss > 1) pixelPass.setSupersample(1), (perfCheckAt = now + 4000);
+    else if (frameAvg < 12 && pixelPass.ss < 2) pixelPass.setSupersample(2), (perfCheckAt = now + 8000);
+    else perfCheckAt = now + 1000;
+    return;
+  }
   if (frameAvg > 19.5 && dpr > 0.75) {
     dpr = Math.max(0.75, dpr - 0.15);
     renderer.setPixelRatio(dpr);
