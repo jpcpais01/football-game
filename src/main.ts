@@ -484,6 +484,8 @@ function frame(now: number): void {
 
   officials.update(match, running ? dt : 0);
   rig.cinematic = !playing || match.phase === 'halftime' || match.phase === 'fulltime';
+  // A 4-second shot of the scoring side's fans going wild after each goal.
+  rig.crowdShot = playing && match.phase === 'goal' && match.phaseT < 4 && match.scorer ? (match.scorer.team === 0 ? -1 : 1) : 0;
   rig.update(match, alpha, dt, now / 1000);
   playersView.update(match, alpha, now / 1000);
   ballView.update(match, alpha, running ? dt : 0);
