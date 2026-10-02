@@ -355,7 +355,7 @@ export class Player {
       } else if (run !== null) {
         want = run;
       }
-      const turnRate = (11 - nsp * 0.75) * (0.85 + 0.3 * this.attrs.agility);
+      const turnRate = (12.5 - nsp * 0.65) * (0.85 + 0.3 * this.attrs.agility);
       const d = angleDiff(this.facing, want);
       const step = turnRate * dt;
       const turn = clamp(d, -step, step);
