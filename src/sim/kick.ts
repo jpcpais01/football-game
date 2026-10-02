@@ -96,9 +96,11 @@ function loftLanding(from: V3, fx: number, fz: number, speed: number, angle: num
   b.onGround = false;
   let t = 0;
   while (t < 6) {
+    // Coming down onto the grass: the step that bounces it has already flipped vel.y.
+    const falling = b.vel.y <= 0;
     b.step(DT);
     t += DT;
-    if (b.vel.y <= 0 && b.pos.y <= 0.115) break;
+    if (falling && b.pos.y <= 0.115) break;
   }
   out.t = t;
   out.x = b.pos.x;

@@ -143,7 +143,7 @@ export class Hud {
       const k = m.setPiece.kind;
       const mine = m.setPiece.team === m.humanTeam;
       banner =
-        k === 'corner' ? 'Corner'
+        k === 'corner' ? (mine ? 'Corner · Stick: aim · Pass: whip · Shoot: float · Through: short' : 'Corner')
         : k === 'throw' ? 'Throw-in'
         : k === 'goalkick' ? 'Goal kick'
         : k === 'penalty' ? (mine ? 'Penalty · Stick: aim · Hold Shoot' : 'Penalty')

@@ -37,6 +37,10 @@ export interface KickPlan {
   /** Dead-ball shots aimed on the goal mouth: across (world z) and height (m). */
   aimZ?: number;
   aimY?: number;
+  /** Corner delivery aimed at a landing spot on the pitch; floated (high) or whipped. */
+  landX?: number;
+  landZ?: number;
+  float?: boolean;
   targetId: number; // receiver, -1 for none
   expires: number; // sim time
 }

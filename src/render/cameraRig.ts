@@ -112,8 +112,14 @@ export class CameraRig {
     // After a goal: follow the scorer's celebration (then the crowd shot, then back to the field).
     const goal = match.phase === 'goal' && match.scorer && match.phaseT < GOAL_SEQ.back;
     const c = goal ? match.scorer! : match.controlled;
-    const cx = lerp(c.prevPos.x, c.pos.x, alpha);
-    const cz = lerp(c.prevPos.z, c.pos.z, alpha);
+    let cx = lerp(c.prevPos.x, c.pos.x, alpha);
+    let cz = lerp(c.prevPos.z, c.pos.z, alpha);
+    // Aiming a corner: frame the ring in the box along with the taker at the flag.
+    const aimT = match.aimingCorner ? match.setPiece?.target : undefined;
+    if (aimT) {
+      cx = aimT.x;
+      cz = aimT.z;
+    }
 
     // Visible ground half-extents around the look point.
     const pitch = this.pitch();
@@ -132,7 +138,7 @@ export class CameraRig {
 
     // Subject: the led ball, pulled toward the active player (less when he's far from it).
     const cd = Math.hypot(cx - bx, cz - bz);
-    const wc = goal ? 1 : 0.4 * (1 - clamp((cd - 8) / 22, 0, 1));
+    const wc = goal ? 1 : aimT ? 0.55 : 0.4 * (1 - clamp((cd - 8) / 22, 0, 1));
     let sx = bx + this.leadX + (cx - bx - this.leadX) * wc;
     let sz = bz + this.leadZ + (cz - bz - this.leadZ) * wc;
     // Composition: subject above centre (controls cover the bottom).
