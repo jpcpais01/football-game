@@ -16,7 +16,7 @@ export function createPitch(): THREE.Mesh {
 
   const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.92, metalness: 0 });
   mat.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, SHARED);
+    Object.assign(shader.uniforms, SHARED, { uTimeC: SHARED.uTime });
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vGrassWorld;')
       .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvGrassWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;');
@@ -29,6 +29,7 @@ export function createPitch(): THREE.Mesh {
         uniform float uFlood;
         uniform vec3 uShadeTint;
         uniform vec3 uFloodColor;
+        uniform float uTime;
         ${STAND_SHADOW_GLSL}
         const float HL = ${PITCH.halfL.toFixed(2)};
         const float HW = ${PITCH.halfW.toFixed(2)};
@@ -93,6 +94,11 @@ export function createPitch(): THREE.Mesh {
             float wear = clamp(wb * (0.55 + fbm(p * 0.6) * 0.9), 0.0, 1.0);
             col = mix(col, vec3(0.52, 0.48, 0.34), wear * 0.45);
           }
+          // Wind over the grass: soft lighter waves rolling across the pitch.
+          vec2 wd = normalize(uWind);
+          float wph = dot(p, wd) * 0.21 - uTime * 1.5 + fbm(p * 0.045) * 5.0;
+          float wave = smoothstep(0.35, 1.0, sin(wph)) * (0.6 + 0.4 * sin(dot(p, vec2(-wd.y, wd.x)) * 0.05 + uTime * 0.3));
+          col *= 1.0 + wave * 0.075;
           float outside = clamp(step(HL, abs(p.x)) + step(HW, abs(p.y)), 0.0, 1.0);
           col = mix(col, base * 0.96, outside * 0.6);
           // Chalk.
@@ -119,8 +125,13 @@ export function createPitch(): THREE.Mesh {
         `#include <lights_fragment_end>
         {
           float sh = standShadow(vGrassWorld);
-          reflectedLight.directDiffuse *= 1.0 - sh * 0.94;
-          reflectedLight.directSpecular *= 1.0 - sh * 0.94;
+          float sun = (1.0 - sh * 0.94) * (1.0 - cloudShadow(vGrassWorld) * 0.5);
+          reflectedLight.directDiffuse *= sun;
+          reflectedLight.directSpecular *= sun;
+          // Dew glinting under the floodlights.
+          vec2 gc = floor(vGrassWorld.xz * 7.0);
+          float glint = step(0.9975, cHash(gc + floor(uTime * 1.3 + cHash(gc) * 5.0))) * (1.0 - gLine);
+          reflectedLight.directSpecular += uFloodColor * glint * uDew * 2.5;
           reflectedLight.indirectDiffuse += diffuseColor.rgb * uShadeTint * sh * 0.28;
           // Floodlight pools: a touch brighter through the middle, falling off to the corners.
           vec2 q = vGrassWorld.xz / vec2(HL, HW);

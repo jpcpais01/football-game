@@ -12,6 +12,7 @@ import { BallView } from './render/ballView';
 import { CAMERA_PRESETS, CameraRig, type CameraPreset } from './render/cameraRig';
 import { Atmosphere } from './render/atmosphere';
 import { PixelPass } from './render/pixelPass';
+import { Particles } from './render/particles';
 import { SHARED } from './render/look';
 import { Controls } from './ui/controls';
 import { Hud } from './ui/hud';
@@ -61,6 +62,8 @@ const playersView = new PlayersView(match);
 scene.add(playersView.group);
 const ballView = new BallView();
 scene.add(ballView.group);
+const particles = new Particles(match.teams[0].info.kit.shirt, match.teams[1].info.kit.shirt);
+scene.add(particles.points);
 const rig = new CameraRig(window.innerWidth / window.innerHeight);
 if (params.has('showcase')) rig.distOverride = 9;
 // Camera setting (Close / Normal / Far), remembered on this device.
@@ -353,6 +356,7 @@ function handleEvents(now: number): void {
     }
     if (e.net > 0) audio.net(e.net);
     if (e.goal >= 0) {
+      particles.confetti(rig.focusX, e.goal as 0 | 1);
       audio.goal();
       rig.bump(0.4);
       const scorer = match.scorer;
@@ -363,6 +367,10 @@ function handleEvents(now: number): void {
     audio.setExcitement(match.excitement);
   }
   if (e.net > 0) goals.impact(e.netX, e.netY, e.netZ, e.net, simTime);
+  // Strikes rip up a little grass.
+  for (const k of e.kicks) {
+    if (k > 0.45 && match.ball.pos.y < 1) particles.grassBurst(match.ball.pos.x, match.ball.pos.z, k, match.ball.vel.x * 0.04, match.ball.vel.z * 0.04);
+  }
   if (match.phase !== lastPhase) {
     if (playing && match.phase === 'halftime') hud.showCaption('HALF TIME', `${match.teams[0].score} – ${match.teams[1].score}`, 3, now);
     if (playing && match.phase === 'fulltime') {
@@ -471,6 +479,8 @@ function frame(now: number): void {
   if (playing) hud.update(match, now / 1000);
   updateCharge(alpha);
 
+  particles.setScale(graphics === 'pixel' ? pixelPass.pixelHeight : renderer.domElement.height, rig.camera.fov);
+  particles.update(running ? dt : 0, now / 1000, match, rig.focusX, rig.focusZ);
   if (graphics === 'pixel') pixelPass.render(renderer, scene, rig.camera, SHARED.uFlood.value, atmo.weather === 'sunny' ? 0.35 : 1);
   else renderer.render(scene, rig.camera);
   cpuAvg += (performance.now() - t0 - cpuAvg) * 0.05;

@@ -32,6 +32,12 @@ export const SHARED = {
   /** Floodlight colour (slightly cool white). */
   uFloodColor: { value: new THREE.Color(0xe8eeff) },
   uTime: { value: 0 },
+  /** The one shared wind (xz direction × strength): grass, flags, banners, particles. */
+  uWind: { value: new THREE.Vector2(0.85, 0.35) },
+  /** Strength of drifting cloud shadows on the pitch (sunny ≈ 1). */
+  uClouds: { value: 0.5 },
+  /** Sun colour for the warm rim light. */
+  uSunColor: { value: new THREE.Color(0xffe2b8) },
 };
 
 export const COLORS = {
@@ -44,6 +50,20 @@ export const COLORS = {
 /** GLSL: 0 = lit by the sun, 1 = inside the near stand's shadow. Needs uShadowZ0. */
 export const STAND_SHADOW_GLSL = /* glsl */ `
 uniform float uShadowZ0;
+uniform vec2 uWind;
+uniform float uClouds;
+uniform float uTimeC;
+float cHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float cNoise(vec2 p) {
+  vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(cHash(i), cHash(i + vec2(1, 0)), u.x), mix(cHash(i + vec2(0, 1)), cHash(i + vec2(1, 1)), u.x), u.y);
+}
+/** Soft shadows of clouds drifting over the ground with the wind (0 = clear, 1 = shaded). */
+float cloudShadow(vec3 wp) {
+  vec2 q = wp.xz * 0.016 - uWind * uTimeC * 0.012;
+  float n = cNoise(q) * 0.65 + cNoise(q * 2.3 + 7.1) * 0.35;
+  return smoothstep(0.5, 0.72, n) * uClouds;
+}
 float standShadow(vec3 wp) {
   float edge = uShadowZ0 + 0.8 * wp.y + 0.05 * wp.x;
   float s = smoothstep(edge - 1.2, edge + 1.2, wp.z);
@@ -54,7 +74,7 @@ float standShadow(vec3 wp) {
 
 /** Shared uniform declarations for custom ShaderMaterials that want the evening look. */
 export function sharedUniforms(): Record<string, { value: unknown }> {
-  return SHARED as unknown as Record<string, { value: unknown }>;
+  return { ...SHARED, uTimeC: SHARED.uTime } as unknown as Record<string, { value: unknown }>;
 }
 
 export interface LitOptions {
@@ -91,7 +111,7 @@ export function litMaterial(o: LitOptions = {}): THREE.MeshStandardMaterial {
     emissive: o.emissive ?? 0x000000,
   });
   mat.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, SHARED, o.uniforms ?? {});
+    Object.assign(shader.uniforms, SHARED, { uTimeC: SHARED.uTime }, o.uniforms ?? {});
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>\nvarying vec3 vWorldPos;\nvarying vec2 vUv2;\n${o.vertDecl ?? ''}`)
       .replace(
@@ -116,6 +136,7 @@ export function litMaterial(o: LitOptions = {}): THREE.MeshStandardMaterial {
         uniform vec3 uShadeTint;
         uniform vec3 uFloodColor;
         uniform float uTime;
+        uniform vec3 uSunColor;
         ${STAND_SHADOW_GLSL}
         ${o.fragDecl ?? ''}`,
       )
@@ -129,14 +150,15 @@ export function litMaterial(o: LitOptions = {}): THREE.MeshStandardMaterial {
         `#include <lights_fragment_end>
         {
           float sh = standShadow(vWorldPos);
-          reflectedLight.directDiffuse *= 1.0 - sh * 0.94;
-          reflectedLight.directSpecular *= 1.0 - sh * 0.94;
+          float sun = (1.0 - sh * 0.94) * (1.0 - cloudShadow(vWorldPos) * 0.5);
+          reflectedLight.directDiffuse *= sun;
+          reflectedLight.directSpecular *= sun;
           vec3 wn = normalize((vec4(normal, 0.0) * viewMatrix).xyz);
           // Cool sky fill in the shade, floodlight wash from above in the evening.
           reflectedLight.indirectDiffuse += diffuseColor.rgb * uShadeTint * sh * 0.28;
           reflectedLight.indirectDiffuse += diffuseColor.rgb * uFloodColor * uFlood * (0.55 + 0.45 * wn.y) * 0.55;
           ${o.groundAO ? 'float ao = mix(0.62, 1.0, smoothstep(0.0, 0.6, vWorldPos.y)); reflectedLight.indirectDiffuse *= ao; reflectedLight.directDiffuse *= mix(0.85, 1.0, ao);' : ''}
-          ${o.groundAO ? 'float rim = pow(1.0 - max(dot(normal, normalize(vViewPosition)), 0.0), 3.0); reflectedLight.indirectDiffuse += diffuseColor.rgb * rim * (0.18 + uFlood * 0.12);' : ''}
+          ${o.groundAO ? 'float rim = pow(1.0 - max(dot(normal, normalize(vViewPosition)), 0.0), 2.5); reflectedLight.indirectDiffuse += mix(diffuseColor.rgb, uSunColor, 0.55) * rim * (0.32 * sun + uFlood * 0.15);' : ''}
         }`,
       );
   };
@@ -151,7 +173,7 @@ export function blobMaterial(opacity: number, opts: { elongated?: boolean; flood
     polygonOffset: true,
     polygonOffsetFactor: -2,
     polygonOffsetUnits: -2,
-    uniforms: { uOpacity: { value: opacity }, ...SHARED },
+    uniforms: { uOpacity: { value: opacity }, ...SHARED, uTimeC: SHARED.uTime },
     vertexShader: /* glsl */ `
       varying vec2 vUv;
       varying vec3 vWorld;

@@ -95,6 +95,8 @@ export class Atmosphere {
     SHARED.uDew.value = smoothstep(0.55, 1, t);
     this.c2.setHex(0x9fb0cc).lerp(new THREE.Color(0x8a96c4), dusk);
     SHARED.uShadeTint.value.copy(this.c2);
+    SHARED.uClouds.value = lerp(0.55, 0.0, dusk);
+    SHARED.uSunColor.value.copy(this.sun.color);
   }
 
   /** Clear midday: high bright sun, crisp shadows, deep blue sky, almost no haze. */
@@ -121,6 +123,8 @@ export class Atmosphere {
     SHARED.uFlood.value = 0;
     SHARED.uDew.value = 0;
     SHARED.uShadeTint.value.setHex(0xa9c3e8);
+    SHARED.uClouds.value = 1;
+    SHARED.uSunColor.value.copy(this.sun.color);
   }
 
   /** Keeps the shadow map centred on what the camera sees (snapped to texels: no shimmer). */

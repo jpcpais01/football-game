@@ -82,21 +82,41 @@ export class PixelPass {
                          max(linDepth(uv + vec2(0.0, e.y)), linDepth(uv - vec2(0.0, e.y))));
           float edge = step(0.35 + d * 0.06, dn - d) * (1.0 - smoothstep(70.0, 110.0, d));
 
+          // Soft glow: bright neighbours bleed light (white kits in the sun, chalk, LEDs,
+          // sparkles). Cheap because the image is already low resolution.
+          vec3 bloom = vec3(0.0);
+          const int TAPS = 12;
+          vec2 offs[12];
+          offs[0] = vec2(2.0, 0.0); offs[1] = vec2(-2.0, 0.0); offs[2] = vec2(0.0, 2.0); offs[3] = vec2(0.0, -2.0);
+          offs[4] = vec2(1.5, 1.5); offs[5] = vec2(-1.5, 1.5); offs[6] = vec2(1.5, -1.5); offs[7] = vec2(-1.5, -1.5);
+          offs[8] = vec2(4.0, 0.0); offs[9] = vec2(-4.0, 0.0); offs[10] = vec2(0.0, 3.5); offs[11] = vec2(0.0, -3.5);
+          for (int k = 0; k < TAPS; k++) {
+            vec3 sc = texture2D(tColor, uv + offs[k] * e).rgb;
+            bloom += max(sc - vec3(0.85), 0.0);
+          }
+          c += bloom / float(TAPS) * 0.9;
+
           // Filmic tone map, then display gamma.
           c = toneMapping(c);
           c = pow(max(c, 0.0), vec3(1.0 / 2.2));
 
-          // 90s night grade: cool, slightly purple shadows; warm, creamy highlights.
+          // Ghibli palette: lush greens, teal-blue shadows by day (purple-blue at night),
+          // golden highlights, a little more colour overall.
           float l = dot(c, vec3(0.299, 0.587, 0.114));
-          c = mix(c, c * vec3(0.86, 0.84, 1.14), (1.0 - l) * (0.3 + 0.25 * uNight) * uCool);
-          c = mix(c, c * vec3(1.06, 1.0, 0.9), smoothstep(0.55, 1.0, l) * 0.35);
-          c = mix(vec3(l), c, 1.08); // a touch more colour
+          float green = smoothstep(0.0, 0.08, c.g - max(c.r, c.b));
+          c = mix(c, c * vec3(1.03, 1.06, 0.92), green * 0.6);
+          vec3 shade = mix(vec3(0.84, 0.97, 1.1), vec3(0.86, 0.84, 1.14), uNight);
+          c = mix(c, c * shade, (1.0 - l) * (0.32 + 0.2 * uNight) * uCool);
+          c = mix(c, c * vec3(1.07, 1.0, 0.88), smoothstep(0.55, 1.0, l) * 0.4);
+          c = mix(vec3(l), c, 1.12);
 
           // Quantise with an ordered dither: gradients turn into crisp pixel bands.
           float b = bayer4(px) - 0.5;
           c = floor(c * uLevels + 0.5 + b * 0.85) / uLevels;
 
-          c = mix(c, uOutline, edge * 0.8);
+          // Outlines in a deeper shade of the object's own colour (not a flat dark line).
+          vec3 ink = c * vec3(0.42, 0.4, 0.52);
+          c = mix(c, ink, edge * 0.9);
           gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
         }
       `,

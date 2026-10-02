@@ -444,6 +444,24 @@ function lightShafts(): THREE.Group {
   return g;
 }
 
+/** Cloth that ripples in the shared wind (banners, corner flags). `pin` = the fixed edge (x). */
+function windCloth<T extends THREE.Material>(mat: T, amp: number, pinX: number | null): T {
+  const orig = mat.onBeforeCompile.bind(mat);
+  mat.onBeforeCompile = (shader, r) => {
+    orig(shader, r);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform float uTime;\nuniform vec2 uWind;')
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+        float wfree = ${pinX === null ? '1.0' : `clamp(abs(position.x - (${pinX.toFixed(3)})) / 0.4, 0.0, 1.0)`};
+        float wgust = 0.6 + 0.4 * sin(uTime * 0.7 + modelMatrix[3].x * 0.05);
+        transformed.z += (sin(position.x * 2.2 - uTime * 3.2 + modelMatrix[3].x) * 0.6 + sin(position.y * 3.0 + uTime * 2.1) * 0.4) * ${amp.toFixed(3)} * wgust * wfree * length(uWind);`,
+      );
+  };
+  return mat;
+}
+
 /** Hand-painted supporters' banners hung on the stand fronts. */
 function banners(home: number, away: number): THREE.Group {
   const g = new THREE.Group();
@@ -469,10 +487,10 @@ function banners(home: number, away: number): THREE.Group {
     };
     draw();
     void document.fonts?.ready.then(draw);
-    const mat = litMaterial({ roughness: 0.9 });
+    const mat = windCloth(litMaterial({ roughness: 0.9 }), 0.12, null);
     mat.map = tex;
     mat.side = THREE.DoubleSide;
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, w * 0.1875), mat);
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, w * 0.1875, 24, 3), mat);
     return m;
   };
   const spots: [string, string, string, number, number, number, number, number][] = [
@@ -495,7 +513,7 @@ function banners(home: number, away: number): THREE.Group {
 function pitchside(home: number, away: number): THREE.Group {
   const g = new THREE.Group();
   const pole = litMaterial({ color: 0xf2f0e8, roughness: 0.5 });
-  const flagMat = litMaterial({ color: 0xffd447, roughness: 0.8 });
+  const flagMat = windCloth(litMaterial({ color: 0xffd447, roughness: 0.8 }), 0.09, -0.2);
   flagMat.side = THREE.DoubleSide;
   for (const sx of [-1, 1]) {
     for (const sz of [-1, 1]) {
@@ -503,7 +521,7 @@ function pitchside(home: number, away: number): THREE.Group {
       p.position.set(sx * PITCH.halfL, 0.8, sz * PITCH.halfW);
       p.castShadow = true;
       g.add(p);
-      const f = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.3), flagMat);
+      const f = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.3, 6, 2), flagMat);
       f.position.set(sx * PITCH.halfL + 0.2, 1.45, sz * PITCH.halfW);
       f.castShadow = true;
       g.add(f);
