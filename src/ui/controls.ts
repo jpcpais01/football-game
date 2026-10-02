@@ -1,0 +1,234 @@
+import { Btn, type InputState, makeInput } from '../sim/input';
+
+/**
+ * FIFA-Mobile style controls: floating joystick on the left, contextual action buttons
+ * on the right (Pass / Through / Shoot in attack, Switch / Press / Tackle in defence),
+ * plus Sprint. Keyboard works too for desktop testing.
+ */
+
+const LABELS = {
+  attack: ['PASS', 'THROUGH', 'SHOOT'],
+  defend: ['SWITCH', 'PRESS', 'TACKLE'],
+};
+
+export class Controls {
+  readonly input: InputState = makeInput();
+  private root: HTMLElement;
+  private joyBase: HTMLElement;
+  private joyKnob: HTMLElement;
+  private joyId = -1;
+  private joyCx = 0;
+  private joyCy = 0;
+  private joyR = 56;
+  private btnEls: HTMLElement[] = [];
+  private sprintEl: HTMLElement;
+  private btnPointer: number[] = [-1, -1, -1];
+  private btnDownAt: number[] = [0, 0, 0];
+  private sprintPointer = -1;
+  private mode: 'attack' | 'defend' = 'attack';
+  private keys = new Set<string>();
+  private keySprint = false;
+  enabled = true;
+
+  constructor(parent: HTMLElement) {
+    this.root = document.createElement('div');
+    this.root.className = 'controls';
+    this.root.innerHTML = `
+      <div class="joy-zone"></div>
+      <div class="joy-base"><div class="joy-knob"></div></div>
+      <div class="btn btn-sprint"><span>SPRINT</span></div>
+      <div class="btn btn-a"><span>PASS</span></div>
+      <div class="btn btn-b"><span>THROUGH</span></div>
+      <div class="btn btn-c"><span>SHOOT</span><i class="power"></i></div>
+    `;
+    parent.appendChild(this.root);
+    const zone = this.root.querySelector('.joy-zone') as HTMLElement;
+    this.joyBase = this.root.querySelector('.joy-base') as HTMLElement;
+    this.joyKnob = this.root.querySelector('.joy-knob') as HTMLElement;
+    this.btnEls = [this.root.querySelector('.btn-a')!, this.root.querySelector('.btn-b')!, this.root.querySelector('.btn-c')!] as HTMLElement[];
+    this.sprintEl = this.root.querySelector('.btn-sprint') as HTMLElement;
+    this.resetJoyPosition();
+
+    zone.addEventListener('pointerdown', (e) => this.joyStart(e));
+    window.addEventListener('pointermove', (e) => this.joyMove(e), { passive: false });
+    window.addEventListener('pointerup', (e) => this.pointerEnd(e));
+    window.addEventListener('pointercancel', (e) => this.pointerEnd(e));
+
+    this.btnEls.forEach((el, i) => {
+      el.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        if (!this.enabled) return;
+        el.setPointerCapture?.(e.pointerId);
+        this.btnPointer[i] = e.pointerId;
+        this.press(i as Btn);
+      });
+    });
+    this.sprintEl.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      this.sprintEl.setPointerCapture?.(e.pointerId);
+      this.sprintPointer = e.pointerId;
+      this.sprintEl.classList.add('down');
+    });
+
+    window.addEventListener('keydown', (e) => this.key(e, true));
+    window.addEventListener('keyup', (e) => this.key(e, false));
+    window.addEventListener('blur', () => this.releaseAll());
+    window.addEventListener('resize', () => this.resetJoyPosition());
+  }
+
+  setVisible(v: boolean): void {
+    this.root.style.display = v ? '' : 'none';
+    if (!v) this.releaseAll();
+  }
+
+  setMode(mode: 'attack' | 'defend'): void {
+    if (mode === this.mode) return;
+    this.mode = mode;
+    const labels = LABELS[mode];
+    this.btnEls.forEach((el, i) => {
+      (el.querySelector('span') as HTMLElement).textContent = labels[i];
+      el.classList.toggle('defend', mode === 'defend');
+    });
+  }
+
+  /** Per-frame: hold timers and the shot power ring. */
+  update(dt: number): void {
+    const inp = this.input;
+    for (let i = 0; i < 3; i++) {
+      if (inp.held[i]) inp.holdTime[i] += dt;
+    }
+    inp.sprint = this.sprintPointer >= 0 || this.keySprint;
+    // Keyboard movement.
+    if (this.joyId < 0) {
+      let x = 0;
+      let y = 0;
+      if (this.keys.has('ArrowLeft') || this.keys.has('KeyA')) x -= 1;
+      if (this.keys.has('ArrowRight') || this.keys.has('KeyD')) x += 1;
+      if (this.keys.has('ArrowUp') || this.keys.has('KeyW')) y += 1;
+      if (this.keys.has('ArrowDown') || this.keys.has('KeyS')) y -= 1;
+      const m = Math.hypot(x, y);
+      inp.moveX = m > 0 ? x / m : 0;
+      inp.moveY = m > 0 ? y / m : 0;
+    }
+    const c = this.btnEls[2];
+    const p = this.mode === 'attack' && inp.held[2] ? Math.min(1, inp.holdTime[2] / 0.85) : 0;
+    c.style.setProperty('--p', p.toFixed(3));
+    c.classList.toggle('charging', p > 0);
+  }
+
+  private press(i: Btn): void {
+    const inp = this.input;
+    if (inp.held[i]) return;
+    inp.held[i] = true;
+    inp.holdTime[i] = 0;
+    this.btnDownAt[i] = performance.now();
+    inp.events.push({ btn: i, kind: 'down', hold: 0 });
+    this.btnEls[i].classList.add('down');
+  }
+
+  private release(i: Btn): void {
+    const inp = this.input;
+    if (!inp.held[i]) return;
+    inp.held[i] = false;
+    const hold = (performance.now() - this.btnDownAt[i]) / 1000;
+    inp.events.push({ btn: i, kind: 'up', hold });
+    inp.holdTime[i] = 0;
+    this.btnEls[i].classList.remove('down');
+  }
+
+  private releaseAll(): void {
+    for (let i = 0; i < 3; i++) {
+      this.btnPointer[i] = -1;
+      this.release(i as Btn);
+    }
+    this.sprintPointer = -1;
+    this.sprintEl.classList.remove('down');
+    this.joyId = -1;
+    this.input.moveX = 0;
+    this.input.moveY = 0;
+    this.keys.clear();
+    this.keySprint = false;
+    this.resetJoyPosition();
+  }
+
+  private resetJoyPosition(): void {
+    const h = window.innerHeight;
+    this.joyCx = Math.max(110, window.innerWidth * 0.12);
+    this.joyCy = h - Math.max(100, h * 0.26);
+    this.joyBase.style.transform = `translate(${this.joyCx}px, ${this.joyCy}px)`;
+    this.joyKnob.style.transform = 'translate(0px, 0px)';
+    this.joyBase.classList.remove('active');
+  }
+
+  private joyStart(e: PointerEvent): void {
+    e.preventDefault();
+    if (!this.enabled || this.joyId >= 0) return;
+    this.joyId = e.pointerId;
+    this.joyCx = e.clientX;
+    this.joyCy = e.clientY;
+    this.joyBase.style.transform = `translate(${this.joyCx}px, ${this.joyCy}px)`;
+    this.joyBase.classList.add('active');
+    this.joyMove(e);
+  }
+
+  private joyMove(e: PointerEvent): void {
+    if (e.pointerId !== this.joyId) return;
+    e.preventDefault();
+    let dx = e.clientX - this.joyCx;
+    let dy = e.clientY - this.joyCy;
+    const d = Math.hypot(dx, dy);
+    const r = this.joyR;
+    if (d > r) {
+      // Drag the base along so the stick never "runs out".
+      const over = d - r;
+      this.joyCx += (dx / d) * over;
+      this.joyCy += (dy / d) * over;
+      this.joyBase.style.transform = `translate(${this.joyCx}px, ${this.joyCy}px)`;
+      dx = (dx / d) * r;
+      dy = (dy / d) * r;
+    }
+    this.joyKnob.style.transform = `translate(${dx}px, ${dy}px)`;
+    const m = Math.min(1, Math.hypot(dx, dy) / r);
+    const dead = 0.12;
+    const mm = m < dead ? 0 : (m - dead) / (1 - dead);
+    const n = Math.max(1e-6, Math.hypot(dx, dy));
+    this.input.moveX = (dx / n) * mm;
+    this.input.moveY = (-dy / n) * mm;
+  }
+
+  private pointerEnd(e: PointerEvent): void {
+    if (e.pointerId === this.joyId) {
+      this.joyId = -1;
+      this.input.moveX = 0;
+      this.input.moveY = 0;
+      this.resetJoyPosition();
+    }
+    for (let i = 0; i < 3; i++) {
+      if (this.btnPointer[i] === e.pointerId) {
+        this.btnPointer[i] = -1;
+        this.release(i as Btn);
+      }
+    }
+    if (e.pointerId === this.sprintPointer) {
+      this.sprintPointer = -1;
+      this.sprintEl.classList.remove('down');
+    }
+  }
+
+  private key(e: KeyboardEvent, down: boolean): void {
+    if (e.repeat) return;
+    const map: Record<string, Btn> = { KeyJ: Btn.A, KeyK: Btn.B, KeyL: Btn.C, Space: Btn.C };
+    if (e.code in map) {
+      e.preventDefault();
+      if (down) this.press(map[e.code]);
+      else this.release(map[e.code]);
+      return;
+    }
+    if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
+      this.keySprint = down;
+      return;
+    }
+    if (down) this.keys.add(e.code);
+    else this.keys.delete(e.code);
+  }
+}
