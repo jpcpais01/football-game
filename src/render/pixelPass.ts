@@ -35,7 +35,7 @@ export class PixelPass {
   /** Wanted art height in pixels (the real one is the nearest whole-number fit). */
   height = 288;
   /** Supersampling of the world render (2 = 2x2 samples per art pixel, 1 = off). */
-  ss = matchMedia('(pointer: coarse)').matches ? 1 : 2;
+  ss = 2;
   private artW = 4;
   private artH = 4;
   private devW = 4;
