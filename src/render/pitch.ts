@@ -9,14 +9,71 @@ import { SHARED, STAND_SHADOW_GLSL } from './look';
  * - chalk lines, goalmouth wear and fine grain computed per pixel (no textures),
  * - real sun shadows from the players, the stand's shadow, dew sheen in the evening.
  */
-export function createPitch(): THREE.Mesh {
-  const margin = 9;
-  const geo = new THREE.PlaneGeometry(PITCH.length + margin * 2, PITCH.width + margin * 2, 1, 1);
+const MARGIN = 9;
+const SIZE_X = PITCH.length + MARGIN * 2;
+const SIZE_Z = PITCH.width + MARGIN * 2;
+
+const NOISE_GLSL = /* glsl */ `
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float vnoise(vec2 p) {
+  vec2 i = floor(p); vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1, 0)), u.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), u.x), u.y);
+}
+float fbm(vec2 p) { return vnoise(p) * 0.6 + vnoise(p * 2.13) * 0.28 + vnoise(p * 4.7) * 0.12; }
+`;
+
+/**
+ * The grass's noise never changes, so it's computed once on the GPU (the same functions,
+ * the same values) into two textures, instead of ~14 value-noise lookups per pixel every
+ * frame. Fine detail goes in a 2048 map (grain cells are ~14 cm, a texel is 6 cm); the
+ * slow fields in a smaller one. Mipmaps also calm the grain's shimmer in the distance.
+ *  fine:   r = patchiness fbm(p*0.08), g = grain vnoise(p*7), b = wear fbm(p*0.6), a = chalk vnoise(p*3)
+ *  coarse: r = wind fbm(p*0.045),      g = wet vnoise(p*0.5)
+ */
+function bakeNoise(renderer: THREE.WebGLRenderer): { fine: THREE.Texture; coarse: THREE.Texture } {
+  const bake = (w: number, h: number, body: string) => {
+    const rt = new THREE.WebGLRenderTarget(w, h, { generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false });
+    rt.texture.wrapS = rt.texture.wrapT = THREE.ClampToEdgeWrapping;
+    rt.texture.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
+    const mat = new THREE.ShaderMaterial({
+      depthTest: false,
+      depthWrite: false,
+      vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+      fragmentShader: `${NOISE_GLSL}
+        varying vec2 vUv;
+        void main() {
+          // Same world position the pitch shader will look it up at.
+          vec2 p = (vUv - 0.5) * vec2(${SIZE_X.toFixed(2)}, ${SIZE_Z.toFixed(2)});
+          ${body}
+        }`,
+    });
+    const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat);
+    const scene = new THREE.Scene();
+    scene.add(quad);
+    const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    const prev = renderer.getRenderTarget();
+    renderer.setRenderTarget(rt);
+    renderer.render(scene, cam);
+    renderer.setRenderTarget(prev);
+    mat.dispose();
+    quad.geometry.dispose();
+    return rt.texture;
+  };
+  return {
+    fine: bake(2048, 1024, 'gl_FragColor = vec4(fbm(p * 0.08), vnoise(p * 7.0), fbm(p * 0.6), vnoise(p * 3.0));'),
+    coarse: bake(512, 256, 'gl_FragColor = vec4(fbm(p * 0.045), vnoise(p * 0.5), 0.0, 1.0);'),
+  };
+}
+
+export function createPitch(renderer: THREE.WebGLRenderer): THREE.Mesh {
+  const geo = new THREE.PlaneGeometry(SIZE_X, SIZE_Z, 1, 1);
   geo.rotateX(-Math.PI / 2);
+  const noise = bakeNoise(renderer);
 
   const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.92, metalness: 0 });
   mat.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, SHARED, { uTimeC: SHARED.uTime });
+    Object.assign(shader.uniforms, SHARED, { uTimeC: SHARED.uTime, uNoiseFine: { value: noise.fine }, uNoiseCoarse: { value: noise.coarse } });
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vGrassWorld;')
       .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvGrassWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;');
@@ -33,13 +90,8 @@ export function createPitch(): THREE.Mesh {
         ${STAND_SHADOW_GLSL}
         const float HL = ${PITCH.halfL.toFixed(2)};
         const float HW = ${PITCH.halfW.toFixed(2)};
-        float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-        float vnoise(vec2 p) {
-          vec2 i = floor(p); vec2 f = fract(p);
-          vec2 u = f * f * (3.0 - 2.0 * f);
-          return mix(mix(hash(i), hash(i + vec2(1, 0)), u.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), u.x), u.y);
-        }
-        float fbm(vec2 p) { return vnoise(p) * 0.6 + vnoise(p * 2.13) * 0.28 + vnoise(p * 4.7) * 0.12; }
+        uniform sampler2D uNoiseFine;
+        uniform sampler2D uNoiseCoarse;
         float segDist(vec2 p, vec2 a, vec2 b) {
           vec2 pa = p - a, ba = b - a;
           float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
@@ -73,6 +125,9 @@ export function createPitch(): THREE.Mesh {
         float gLine;
         float gWet;
         vec3 grass(vec2 p, vec3 viewDir) {
+          vec2 nuv = p / vec2(${SIZE_X.toFixed(2)}, ${SIZE_Z.toFixed(2)}) + 0.5;
+          vec4 nf = texture2D(uNoiseFine, nuv);
+          vec4 nc = texture2D(uNoiseCoarse, nuv);
           float stripeW = ${(PITCH.length / 18).toFixed(4)};
           float stripe = mod(floor((p.x + HL) / stripeW), 2.0) * 2.0 - 1.0; // -1 / +1
           // Blades lean toward +x or -x: brightness flips with the viewing direction.
@@ -83,20 +138,20 @@ export function createPitch(): THREE.Mesh {
           // Faint cross cut.
           col *= 1.0 + (mod(floor((p.y + HW) / (HW / 3.0)), 2.0) - 0.5) * 0.03;
           // Patchiness and grain.
-          col *= 0.92 + fbm(p * 0.08) * 0.14;
-          col *= 0.95 + vnoise(p * 7.0) * 0.08;
+          col *= 0.92 + nf.r * 0.14;
+          col *= 0.95 + nf.g * 0.08;
           // Wear in the goalmouths, penalty spots and centre.
           vec2 q = vec2(abs(p.x), p.y);
           float wb = (1.0 - smoothstep(0.0, 6.5, length((q - vec2(HL - 3.0, 0.0)) * vec2(1.0, 0.7))))
                    + (1.0 - smoothstep(0.0, 2.0, length(q - vec2(HL - 11.0, 0.0)))) * 0.7
                    + (1.0 - smoothstep(0.0, 4.0, length(p))) * 0.6;
           if (wb > 0.001) {
-            float wear = clamp(wb * (0.55 + fbm(p * 0.6) * 0.9), 0.0, 1.0);
+            float wear = clamp(wb * (0.55 + nf.b * 0.9), 0.0, 1.0);
             col = mix(col, vec3(0.52, 0.48, 0.34), wear * 0.45);
           }
           // Wind over the grass: soft lighter waves rolling across the pitch.
           vec2 wd = normalize(uWind);
-          float wph = dot(p, wd) * 0.21 - uTime * 1.5 + fbm(p * 0.045) * 5.0;
+          float wph = dot(p, wd) * 0.21 - uTime * 1.5 + nc.r * 5.0;
           float wave = smoothstep(0.35, 1.0, sin(wph)) * (0.6 + 0.4 * sin(dot(p, vec2(-wd.y, wd.x)) * 0.05 + uTime * 0.3));
           col *= 1.0 + wave * 0.075;
           float outside = clamp(step(HL, abs(p.x)) + step(HW, abs(p.y)), 0.0, 1.0);
@@ -105,8 +160,8 @@ export function createPitch(): THREE.Mesh {
           float d = linesDist(p);
           float aa = fwidth(d) * 0.8 + 0.01;
           gLine = 1.0 - smoothstep(0.06 - aa, 0.06 + aa, d);
-          col = mix(col, vec3(0.92, 0.92, 0.88) * (0.94 + vnoise(p * 3.0) * 0.06), gLine * 0.9);
-          gWet = (0.6 + 0.4 * vnoise(p * 0.5)) * (1.0 - gLine);
+          col = mix(col, vec3(0.92, 0.92, 0.88) * (0.94 + nf.a * 0.06), gLine * 0.9);
+          gWet = (0.6 + 0.4 * nc.g) * (1.0 - gLine);
           return pow(col, vec3(2.2));
         }`,
       )
