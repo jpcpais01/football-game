@@ -116,7 +116,26 @@ export class ClubScreen {
       </div>
       <h4>Colours</h4>
       <div class="slot-row">${slots.map(([key, label, c]) => `<button class="slot ${this.kitSlot === key ? 'on' : ''}" data-kslot="${key}"><i style="background:${hex(c)}"></i>${label}</button>`).join('')}</div>
-      ${this.swatches(slots.find((x) => x[0] === this.kitSlot)![2])}`;
+      ${this.swatches(slots.find((x) => x[0] === this.kitSlot)![2])}
+      ${this.bannerSection()}`;
+  }
+
+  /** The big drop banner the fans hang over the home end. */
+  private bannerSection(): string {
+    const b = this.club.state.banner;
+    const c = this.club.bannerColors();
+    const choices: [typeof b.color, string][] = [
+      ['main', 'Main colour'],
+      ['secondary', 'Secondary'],
+      ['dark', 'Night'],
+    ];
+    return `
+      <h4>Stand banner</h4>
+      <div class="banner-preview" style="background:${hex(c.bg)};color:${hex(c.fg)};border-color:${hex(c.fg)}">
+        <i>${crestSVG(this.club.state.crest, 'crest tiny')}</i><b class="banner-words">${esc(b.text || 'ONE CLUB · ONE NIGHT')}</b><i>${crestSVG(this.club.state.crest, 'crest tiny')}</i>
+      </div>
+      <label class="name-field banner-field"><span>Words</span><input class="banner-text" maxlength="28" value="${esc(b.text)}" placeholder="ONE CLUB · ONE NIGHT"></label>
+      <div class="chip-row">${choices.map(([k, n]) => `<button class="chip ${b.color === k ? 'on' : ''}" data-bcolor="${k}">${n}</button>`).join('')}</div>`;
   }
 
   // ---------------------------------------------------------------- crest
@@ -181,6 +200,21 @@ export class ClubScreen {
     name.addEventListener('change', () => this.club.rename(name.value));
     name.addEventListener('keydown', (e) => e.key === 'Enter' && name.blur());
 
+    const bt = q('.banner-text') as HTMLInputElement | null;
+    bt?.addEventListener('input', () => {
+      this.club.setBanner({ text: bt.value.toUpperCase().slice(0, 28) });
+      const w = this.el.querySelector('.banner-words');
+      if (w) w.textContent = this.club.state.banner.text || 'ONE CLUB · ONE NIGHT';
+      this.ui.identityChanged();
+    });
+    bt?.addEventListener('keydown', (e) => e.key === 'Enter' && bt.blur());
+    all('[data-bcolor]').forEach((b) =>
+      b.addEventListener('click', () => {
+        this.club.setBanner({ color: b.dataset.bcolor as 'main' | 'secondary' | 'dark' });
+        this.ui.identityChanged();
+        this.render();
+      }),
+    );
     all('[data-pattern]').forEach((b) => b.addEventListener('click', () => this.setKit({ pattern: Number(b.dataset.pattern) })));
     all('[data-kslot]').forEach((b) => b.addEventListener('click', () => ((this.kitSlot = b.dataset.kslot as typeof this.kitSlot), this.render())));
     all('[data-cslot]').forEach((b) => b.addEventListener('click', () => ((this.crestSlot = b.dataset.cslot as typeof this.crestSlot), this.render())));
