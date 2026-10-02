@@ -9,6 +9,8 @@ interface Intercept {
   t: number; // -1 = can't reach in the horizon
   x: number;
   z: number;
+  /** Time in hand there by his real running (runTime): the ball's arrival minus his. */
+  slack: number;
 }
 
 const SAMPLES = 36;
@@ -68,6 +70,7 @@ export class AI {
   private nextDecision: number[] = [];
   private tackleReady: number[] = [];
   private run: { x: number; z: number; until: number }[] = [];
+  private curves: { key: number; t: number[]; s: number[]; v: number[] }[] = [];
   private dribX: number[] = [];
   private dribZ: number[] = [];
   private dribSprint: boolean[] = [];
@@ -109,7 +112,7 @@ export class AI {
       this.seekAt.push(0);
       this.mark.push(null);
       this.offBallT.push(-1);
-      this.intercept.push({ t: -1, x: 0, z: 0 });
+      this.intercept.push({ t: -1, x: 0, z: 0, slack: -9 });
       this.nextDecision.push(0);
       this.tackleReady.push(0);
       this.run.push({ x: 0, z: 0, until: -1 });
@@ -130,29 +133,66 @@ export class AI {
   }
 
   /**
-   * Time for a player to get to (x, z) from his current position and momentum: reaction,
-   * then accelerate toward the spot (his current velocity along that line counts, running
-   * the other way costs a brake), then top speed.
+   * Time for a player to get to (x, z) — the same running he really does (Player.move):
+   * a reaction, the sideways part of his momentum turned onto the line, a brake if he's
+   * going the other way, then the sprint-start curve (explosive first steps, acceleration
+   * fading toward top speed). `reach`: done once he's that close.
    */
-  runTime(q: Player, x: number, z: number, react = 0.15): number {
+  runTime(q: Player, x: number, z: number, react = 0.15, reach = 0): number {
     const dx = x - q.pos.x;
     const dz = z - q.pos.z;
-    const d = Math.hypot(dx, dz);
+    const full = Math.hypot(dx, dz);
+    const d = full - reach;
     if (d < 0.3) return react * 0.5;
-    const ux = dx / d;
-    const uz = dz / d;
-    let v0 = q.vel.x * ux + q.vel.z * uz;
-    let extra = 0;
-    if (v0 < 0) {
-      extra = -v0 / PLAYER.brake;
-      v0 = 0;
+    const ux = dx / full;
+    const uz = dz / full;
+    let v = q.vel.x * ux + q.vel.z * uz;
+    let t = react + (Math.abs(q.vel.x * uz - q.vel.z * ux) / PLAYER.lateral) * 0.6;
+    if (v < 0) {
+      t += -v / PLAYER.brake;
+      v = 0;
     }
+    // Along his sprint curve from a standstill: start where his speed already is.
+    const c = this.sprintCurve(q);
+    const n = c.v.length;
+    let k0 = 0;
+    while (k0 < n - 1 && c.v[k0 + 1] <= v) k0++;
+    const s0 = c.s[k0];
+    const goal = s0 + d;
+    const last = n - 1;
+    if (goal >= c.s[last]) return t + c.t[last] - c.t[k0] + (goal - c.s[last]) / c.v[last];
+    let lo = k0;
+    let hi = last;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (c.s[mid] < goal) lo = mid;
+      else hi = mid;
+    }
+    const f = (goal - c.s[lo]) / Math.max(1e-6, c.s[hi] - c.s[lo]);
+    return t + c.t[lo] + (c.t[hi] - c.t[lo]) * f - c.t[k0];
+  }
+
+  /** A player's sprint from a standstill (Player.move's acceleration), tabulated; cached. */
+  private sprintCurve(q: Player): { t: number[]; s: number[]; v: number[] } {
     const top = q.topSpeed;
     const a = q.accelRate;
-    const ta = Math.max(0, (top - v0) / a);
-    const da = ((v0 + top) / 2) * ta;
-    const t = d <= da ? (-v0 + Math.sqrt(v0 * v0 + 2 * a * d)) / a : ta + (d - da) / top;
-    return react + extra + t;
+    const key = Math.round(top * 50) * 1000 + Math.round(a * 50);
+    const hit = this.curves[q.id];
+    if (hit && hit.key === key) return hit;
+    const c = { key, t: [0], s: [0], v: [0] };
+    const h = 0.05;
+    let v = 0;
+    let s = 0;
+    for (let k = 1; v < top - 0.05 && k < 200; k++) {
+      const v1 = Math.min(top, v + (a * Math.max(0.1, 1 - Math.pow(v / (top + 0.4), 1.6)) + 0.6) * h);
+      s += ((v + v1) / 2) * h;
+      v = v1;
+      c.t.push(k * h);
+      c.s.push(s);
+      c.v.push(v);
+    }
+    this.curves[q.id] = c;
+    return c;
   }
 
   /**
@@ -163,7 +203,20 @@ export class AI {
    */
   meetPoint(p: Player, out: V3): V3 {
     const b = this.m.ball;
-    if (this.m.ballDist(p) < 1.5) return out.set(b.pos.x + b.vel.x * 0.1, 0, b.pos.z + b.vel.z * 0.1);
+    const d = this.m.ballDist(p);
+    if (d < 3) {
+      // Close: get in its way. A ball coming past is met by stepping across onto its line
+      // (the nearest point of its path ahead of it); one at his feet or running away, by
+      // going to where it'll be in a moment.
+      const sp = Math.hypot(b.vel.x, b.vel.z);
+      if (sp > 2) {
+        const ux = b.vel.x / sp;
+        const uz = b.vel.z / sp;
+        const along = (p.pos.x - b.pos.x) * ux + (p.pos.z - b.pos.z) * uz;
+        if (along > 0.3) return out.set(b.pos.x + ux * along, 0, b.pos.z + uz * along);
+      }
+      if (d < 1.5) return out.set(b.pos.x + b.vel.x * 0.1, 0, b.pos.z + b.vel.z * 0.1);
+    }
     const ip = this.intercept[p.id];
     return out.set(ip.x, 0, ip.z);
   }
@@ -281,7 +334,7 @@ export class AI {
           const pdz = (z - b.z) / D;
           const runAlong = Math.max(0, (x - q.pos.x) * pdx + (z - q.pos.z) * pdz) / Math.max(0.3, Math.hypot(x - q.pos.x, z - q.pos.z));
           const relArrive = lofted ? 0 : arrive - q.topSpeed * 0.85 * runAlong;
-          if (relArrive > 8) continue;
+          if (relArrive > 2.5) continue;
           const meet = Math.max(tr, tb);
           // Defenders and keeper: can anyone get to the spot first?
           let spot = 9;
@@ -290,7 +343,7 @@ export class AI {
             const keeper = o.role === 'GK' && this.inOwnBox(o, x, z);
             const reach = keeper ? 1.6 : 0.8;
             const top = o.topSpeed;
-            spot = Math.min(spot, this.runTime(o, x, z, keeper ? 0.12 : 0.25) - reach / top - meet);
+            spot = Math.min(spot, this.runTime(o, x, z, 0.05) - reach / top - meet);
             if (!lofted) {
               // Anyone standing close to the path will simply step across it.
               {
@@ -309,7 +362,7 @@ export class AI {
                 // When the ball really gets there (same physics table as the strike).
                 const tk = rollTimeAt(v0, D * f);
                 if (tk < 0) continue;
-                lane = Math.min(lane, this.runTime(o, px, pz, 0.15) - 0.9 / top - tk);
+                lane = Math.min(lane, this.runTime(o, px, pz, 0.05) - 0.9 / top - tk);
               }
             }
           }
@@ -322,7 +375,7 @@ export class AI {
             clamp((spot - 0.2) / 0.4, -3, 1) * 1.4 +
             (lofted ? 0 : clamp((lane - 0.15) / 0.3, -3, 1) * 1.4) -
             Math.abs(tb - tr) * 0.35 -
-            Math.max(0, relArrive - 3) * 0.3 +
+            Math.max(0, relArrive + 1) * 0.35 +
             q.attrs.pace * 0.25 +
             (q.role === 'FWD' ? 0.2 : 0);
           if (offsideNow) sc -= 4;
@@ -376,6 +429,10 @@ export class AI {
     }
     this.sampleCount = n;
 
+    // Each player's meeting point: the earliest point on the ball's path he could reach at
+    // full stride. Deliberately ambitious — it has him attack the ball instead of waiting
+    // for it (and as he closes in it settles on where they really meet). How much time he
+    // actually has there, by the way he really runs, is the slack: that sets his pace.
     for (const p of m.players) {
       const ip = this.intercept[p.id];
       ip.t = -1;
@@ -396,15 +453,13 @@ export class AI {
         }
         if (d <= Math.max(0, t - 0.2) * top) {
           ip.t = t;
-          ip.x = this.sx[i];
-          ip.z = this.sz[i];
+          bestI = i;
           break;
         }
       }
-      if (ip.t < 0) {
-        ip.x = this.sx[bestI];
-        ip.z = this.sz[bestI];
-      }
+      ip.x = this.sx[bestI];
+      ip.z = this.sz[bestI];
+      ip.slack = bestI * SAMPLE_DT - this.runTime(p, ip.x, ip.z, 0.05, PLAYER.reach * 0.75);
     }
 
     for (let t = 0; t < 2; t++) {
@@ -533,8 +588,10 @@ export class AI {
     const att = m.attackingTeam();
     const run = this.run[p.id];
     if (m.passTarget === p) {
+      // Run with the body where he's going (squaring up to the ball only in the last few
+      // metres, in moveTo): facing a ball played from behind would have him backpedalling.
       this.meetPoint(p, this.tmp);
-      this.moveTo(p, this.tmp.x, this.tmp.z, true, true);
+      this.moveTo(p, this.tmp.x, this.tmp.z, true, false);
       p.sprinting = m.ballDist(p) > 6;
       return;
     }

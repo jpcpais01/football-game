@@ -812,8 +812,8 @@ export class Match {
     }
 
     // Ball seeking: the active player always hunts the ball (meets loose balls and
-    // passes, closes down the carrier). The direction is 70% the seek and 30% the stick;
-    // the stick mostly just nudges the pace (toward the ball = a bit faster).
+    // passes, closes down the carrier). The stick bends the run (up to 30%) only while he
+    // has time in hand; when the meeting is tight the seek is all that counts.
     if (this.owner !== c && !this.pressHeld) {
       const mode = this.seekTarget(c, tmpV);
       if (mode) {
@@ -824,17 +824,23 @@ export class Match {
           const tx = dx / d;
           const tz = dz / d;
           let speed: number;
+          let stickW = 0.3;
           if (mode === 'loose') {
-            // Pace from what the intercept demands: reach the meeting point in time, plus a
-            // margin so we attack the ball rather than wait for it.
+            // Pace from the meeting: flat out when it's tight, otherwise enough to get there
+            // with a little to spare (and attack the ball rather than wait for it).
             const ip = this.ai.intercept[c.id];
             const dI = dist2D(c.pos.x, c.pos.z, ip.x, ip.z);
-            const need = ip.t >= 0 ? dI / Math.max(0.15, ip.t - 0.1) : c.topSpeed;
+            const need = ip.slack < 0.35 ? c.topSpeed : dI / Math.max(0.2, ip.t - 0.3) + 1;
             // A slow or dying ball won't come to us: go and get it.
             const bs = Math.hypot(this.ball.vel.x, this.ball.vel.z);
             const gap = this.ballDist(c);
             const floor = gap > 3 ? PLAYER.jogSpeed + 2.2 : gap > 1 ? PLAYER.jogSpeed + (bs < 3 ? 1 : 0) : bs < 1.5 ? 2.5 : 1.2;
-            speed = Math.max(floor, need + 1.5);
+            speed = Math.max(floor, need);
+            stickW *= clamp((ip.slack - 0.15) / 0.5, 0, 1);
+            // Arrive, don't overrun: no faster than he can pull up in what's left, plus however
+            // fast the spot itself is running away (a ball going away is chased down).
+            const away = Math.max(0, (this.ball.vel.x * tx + this.ball.vel.z * tz) * (gap < 3 ? 1 : 0));
+            speed = Math.min(speed, Math.sqrt(2 * PLAYER.brake * 0.7 * d) + 0.6 + away);
           } else {
             // Close down hard, then ease in tight on the carrier.
             speed = d > 5 ? PLAYER.jogSpeed + 2.2 : Math.min(PLAYER.jogSpeed + 1, d * 3 + 0.8);
@@ -844,14 +850,14 @@ export class Match {
           if (m > 0.12) {
             const sx = input.moveX / m;
             const sz = -input.moveY / m;
-            const nx = tx * 0.7 + sx * 0.3;
-            const nz = tz * 0.7 + sz * 0.3;
+            const nx = tx * (1 - stickW) + sx * stickW;
+            const nz = tz * (1 - stickW) + sz * stickW;
             const n = Math.hypot(nx, nz);
             if (n > 0.05) {
               dirX = nx / n;
               dirZ = nz / n;
             }
-            speed *= 1 + 0.15 * (sx * tx + sz * tz);
+            speed *= 1 + 0.5 * stickW * (sx * tx + sz * tz);
           }
           c.moveX = dirX;
           c.moveZ = dirZ;
