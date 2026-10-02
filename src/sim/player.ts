@@ -22,7 +22,7 @@ export interface Attributes {
   weight: number;
 }
 
-export type ActionKind = 'none' | 'kick' | 'tackle' | 'slide' | 'dive' | 'stumble' | 'header' | 'throw' | 'catch' | 'celebrate';
+export type ActionKind = 'none' | 'kick' | 'tackle' | 'slide' | 'dive' | 'stumble' | 'fall' | 'header' | 'throw' | 'catch' | 'celebrate';
 
 export interface KickPlan {
   type: 'pass' | 'lob' | 'through' | 'shot' | 'clear' | 'cross';
@@ -213,6 +213,14 @@ export class Player {
       } else if (a === 'catch') {
         tx = this.vel.x * 0.4;
         tz = this.vel.z * 0.4;
+      } else if (a === 'fall') {
+        // Knocked down: carried on by the hit, the grass brings him to a stop.
+        const sp = Math.hypot(this.vel.x, this.vel.z);
+        const k = sp > 1e-3 ? Math.max(0, sp - 7 * dt) / sp : 0;
+        this.vel.x *= k;
+        this.vel.z *= k;
+        tx = this.vel.x;
+        tz = this.vel.z;
       } else if (a === 'stumble') {
         tx = this.vel.x * 0.3;
         tz = this.vel.z * 0.3;
@@ -230,7 +238,7 @@ export class Player {
     const top = this.topSpeed;
 
     // Body orientation constrains speed: backpedalling and side-stepping are slower.
-    const passive = this.action === 'slide' || this.action === 'dive';
+    const passive = this.action === 'slide' || this.action === 'dive' || this.action === 'fall';
     if (!passive) {
       const tsp = Math.sqrt(tx * tx + tz * tz);
       if (tsp > 0.1 && this.lookAt) {

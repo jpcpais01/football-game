@@ -1235,6 +1235,40 @@ export class PlayersView {
           }
           break;
         }
+        case 'fall': {
+          // Knocked down: he topples the way the hit sends him (actionDir, in his own frame:
+          // forward over the tackler, back onto his backside, or over sideways), arms out to
+          // break the fall, a moment on the grass, then up onto a knee and back to his feet.
+          const down = smoothstep(0, 0.2, pr);
+          const rise = smoothstep(0.62, 0.9, pr);
+          const lying = down * (1 - rise);
+          const kneel = rise * (1 - smoothstep(0.9, 1, pr));
+          const cf = Math.cos(facing);
+          const sf = Math.sin(facing);
+          const fwd = p.actionDirX * cf + p.actionDirZ * sf;
+          const lft = -p.actionDirX * sf + p.actionDirZ * cf;
+          leanF = lerp(leanF, fwd * 1.3, lying) + 0.45 * kneel;
+          roll += lft * 1.1 * lying;
+          hipY = lerp(hipY, 0.28, lying) + 0.3 * kneel;
+          flexExtra += 0.25 * lying;
+          // Arms reach toward the ground he's falling onto.
+          const reachArm = lerp(-0.6, -1.4, Math.max(0, fwd));
+          armL = lerp(armL, reachArm, lying);
+          armR = lerp(armR, reachArm, lying);
+          armOutL = lerp(armOutL, 0.55 + Math.max(0, lft) * 0.5, lying);
+          armOutR = lerp(armOutR, 0.55 + Math.max(0, -lft) * 0.5, lying);
+          elbowL = elbowR = lerp(elbowL, 0.3, lying);
+          // Legs: bent and splayed on the ground; one knee under him to get up.
+          hipL = lerp(lerp(hipL, 0.55 - fwd * 0.4, lying), 1.15, kneel);
+          kneeL = lerp(lerp(kneeL, 0.9, lying), 1.9, kneel);
+          hipR = lerp(lerp(hipR, 0.35 - fwd * 0.4, lying), 0.7, kneel);
+          kneeR = lerp(lerp(kneeR, 0.5, lying), 0.9, kneel);
+          legOutL = lerp(legOutL, 0.2, lying);
+          legOutR = lerp(legOutR, 0.2, lying);
+          headLook = false;
+          headPitch = -0.2 * lying * fwd;
+          break;
+        }
         case 'stumble': {
           const k = Math.sin(pr * Math.PI);
           leanF += 0.2 * k;

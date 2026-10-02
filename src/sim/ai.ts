@@ -484,7 +484,7 @@ export class AI {
       let best: Player | null = null;
       let bestScore = 0;
       for (const q of m.teams[m.humanTeam].players) {
-        if (q === c || q.role === 'GK' || q.action === 'stumble') continue;
+        if (q === c || q.role === 'GK' || q.action === 'stumble' || q.action === 'fall') continue;
         const qi = this.intercept[q.id];
         const qt = qi.t >= 0 ? qi.t : 9;
         const qd = m.ballDist(q);
@@ -1652,7 +1652,7 @@ export class AI {
     const m = this.m;
     const b = m.ball;
     if (k.touchCooldown > 0 || m.heldBy) return false;
-    if (k.action === 'stumble' || k.action === 'kick' || k.action === 'throw') return false;
+    if (k.action === 'stumble' || k.action === 'fall' || k.action === 'kick' || k.action === 'throw') return false;
     if (!this.inOwnBox(k, b.pos.x, b.pos.z)) return false;
     if (m.owner && m.owner.team === k.team && m.owner !== k) return false;
     // Ball at his feet: he's playing it as an outfielder (no picking it up mid-dribble).

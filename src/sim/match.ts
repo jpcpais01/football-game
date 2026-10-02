@@ -1174,17 +1174,18 @@ export class Match {
         const victim = this.owner && this.owner.team !== p.team ? this.owner
           : this.lastKicker && this.lastKicker.team !== p.team && this.time - this.lastKickTime < 0.6 ? this.lastKicker : null;
         // Contact means real contact: the leg capsule against his legs (not a radius round him).
-        const bodyHit = !!victim && victim.action !== 'stumble' && segDist(victim.pos.x, victim.pos.z, leg) < TACKLE_LEG_R + VICTIM_LEG_R;
+        const bodyHit = !!victim && victim.action !== 'stumble' && victim.action !== 'fall' && segDist(victim.pos.x, victim.pos.z, leg) < TACKLE_LEG_R + VICTIM_LEG_R;
         const ballHit = !this.heldBy && b.pos.y < (slide ? 0.45 : 0.6) && segDist(b.pos.x, b.pos.z, leg) < TACKLE_LEG_R + BALL.radius + 0.04;
-        if (ballHit) {
+        if (ballHit || bodyHit) {
           p.actionDone = true;
-          this.resolveTackle(p, slide, bodyHit);
-        } else if (bodyHit) {
-          // Missed the ball but caught the man.
-          p.actionDone = true;
-          const late = victim !== this.owner;
-          if (this.phase === 'play' && this.rng.next() < this.foulChance(p, victim!, slide, false) + (late ? 0.2 : 0)) this.commitFoul(p, victim!, slide, late);
-          else victim!.startAction('stumble', 0.4, 0, 0);
+          // The leg meets his legs: what that does to him is physics (see legImpact).
+          const knock = bodyHit ? this.legImpact(p, victim!, slide) : 0;
+          if (ballHit) this.resolveTackle(p, slide, bodyHit, knock);
+          else {
+            // Missed the ball but caught the man.
+            const late = victim !== this.owner;
+            if (this.phase === 'play' && this.rng.next() < this.foulChance(p, victim!, slide, false) + (late ? 0.2 : 0) + knock * 0.12) this.commitFoul(p, victim!, slide, late);
+          }
         }
       }
     }
@@ -1205,6 +1206,46 @@ export class Match {
     const from = slide ? -0.15 : 0.15;
     const to = slide ? 0.2 + 0.85 * ext : 0.25 + 0.6 * ext;
     return { ax: p.pos.x + dx * from, az: p.pos.z + dz * from, bx: p.pos.x + dx * to, bz: p.pos.z + dz * to };
+  }
+
+  /**
+   * The tackling leg meets the victim's legs. An inelastic hit: the closing speed of the
+   * leg into him, shared by the two bodies' masses, is the shove his feet get. Taken at the
+   * ankles (a slide) that shove has the most leverage to tip him; a block tackle meets him
+   * higher and less squarely. He resists with strength and footing — braced on two feet
+   * he takes a lot, mid-stride on one foot very little. Past his balance he goes down,
+   * toppling toward where the tackle came from (his feet are swept from under him) and
+   * carried a little by the hit; half of it is a stumble; less, he rides it.
+   * Returns 0 (nothing), 1 (stumble) or 2 (down).
+   */
+  private legImpact(p: Player, victim: Player, slide: boolean): number {
+    const dx = p.actionDirX;
+    const dz = p.actionDirZ;
+    const closing = Math.max(0, (p.vel.x - victim.vel.x) * dx + (p.vel.z - victim.vel.z) * dz);
+    const mp = p.attrs.weight;
+    const mv = victim.attrs.weight;
+    const shove = (closing * mp) / (mp + mv); // m/s given to his feet
+    const leverage = slide ? 1.0 : 0.55;
+    const footing = 1 - clamp(victim.speed / 7, 0, 1); // 1 = planted, 0 = sprinting on one foot
+    const balance = 1.1 + victim.duelStrength * 1.6 + footing * 0.9;
+    const e = shove * leverage;
+    if (e > balance) {
+      const hard = clamp(e - balance, 0, 3);
+      victim.startAction('fall', 1.15 + hard * 0.3, -dx, -dz);
+      victim.vel.x = victim.vel.x * 0.6 + dx * shove * 0.5;
+      victim.vel.z = victim.vel.z * 0.6 + dz * shove * 0.5;
+      victim.touchCooldown = victim.actionDur;
+      victim.plan = null;
+      if (this.owner === victim) this.owner = null;
+      return 2;
+    }
+    if (e > balance * 0.5) {
+      victim.startAction('stumble', 0.35 + (e / balance) * 0.3, 0, 0);
+      victim.vel.x += dx * shove * 0.3;
+      victim.vel.z += dz * shove * 0.3;
+      return 1;
+    }
+    return 0;
   }
 
   /** How the challenge comes in, relative to the victim's run: 1 = straight from behind. */
@@ -1254,8 +1295,8 @@ export class Match {
   private commitFoul(off: Player, victim: Player, slide: boolean, late: boolean): void {
     const x = clamp(victim.pos.x, -PITCH.halfL + 0.5, PITCH.halfL - 0.5);
     const z = clamp(victim.pos.z, -PITCH.halfW + 0.5, PITCH.halfW - 0.5);
-    victim.startAction('stumble', 1.1, 0, 0);
-    victim.touchCooldown = 1.1;
+    if (victim.action !== 'fall') victim.startAction('stumble', 1.1, 0, 0);
+    victim.touchCooldown = Math.max(victim.touchCooldown, 1.1);
     victim.plan = null;
     const severity = (slide ? 0.35 : 0.1) + this.fromBehind(off, victim) * 0.4 + clamp((off.speed - 5) / 4, 0, 1) * 0.25 + (late ? 0.2 : 0);
     const yellow = this.rng.next() < clamp((severity - 0.5) * 1.5, 0, 0.85);
@@ -1282,7 +1323,7 @@ export class Match {
     let mine = 9;
     let theirs = 9;
     for (const p of this.players) {
-      if (p === victim || p.action === 'stumble' || p.action === 'slide') continue;
+      if (p === victim || p.action === 'stumble' || p.action === 'fall' || p.action === 'slide') continue;
       const it = this.ai.intercept[p.id];
       const t = it.t >= 0 ? it.t : 9;
       if (p.team === team) mine = Math.min(mine, t);
@@ -1340,7 +1381,7 @@ export class Match {
     this.whistleFoul(victim.team, x, z, penalty);
   }
 
-  private resolveTackle(p: Player, slide: boolean, bodyHit: boolean): void {
+  private resolveTackle(p: Player, slide: boolean, bodyHit: boolean, knock = 0): void {
     const b = this.ball;
     const carrier = this.owner && this.owner.team !== p.team ? this.owner : null;
     let win = 1;
@@ -1358,7 +1399,7 @@ export class Match {
     }
     this.events.tackle = 1;
     const won = this.rng.next() < win;
-    if (carrier && bodyHit && this.phase === 'play' && this.rng.next() < this.foulChance(p, carrier, slide, won)) {
+    if (carrier && bodyHit && this.phase === 'play' && this.rng.next() < this.foulChance(p, carrier, slide, won) + knock * 0.12) {
       // Through the man (the leg caught him too): the ball doesn't matter, it's a foul.
       this.commitFoul(p, carrier, slide, false);
       if (!this.advantage) {
@@ -1372,7 +1413,7 @@ export class Match {
       const a = Math.atan2(p.actionDirZ, p.actionDirX) + this.rng.gauss() * 0.6;
       const s = keep ? 1.2 : slide ? this.rng.range(5, 9) : this.rng.range(3, 6);
       b.kick(Math.cos(a) * s + p.vel.x * 0.4, 0, Math.sin(a) * s + p.vel.z * 0.4, 0, 0, 0);
-      if (carrier) {
+      if (carrier && carrier.action === 'none') {
         carrier.startAction('stumble', 0.45, 0, 0);
         carrier.touchCooldown = 0.6;
       }
@@ -1632,7 +1673,7 @@ export class Match {
     let bestD = 1e9;
     for (const p of this.players) {
       if (p.touchCooldown > 0) continue;
-      if (p.action === 'stumble' || p.action === 'slide' || p.action === 'dive' || p.action === 'kick' || p.action === 'throw') continue;
+      if (p.action === 'stumble' || p.action === 'fall' || p.action === 'slide' || p.action === 'dive' || p.action === 'kick' || p.action === 'throw') continue;
       const d = this.ballDist(p);
       const headMax = p.headReach;
       const headZone = h > PLAYER.controlHeight && h < headMax;
