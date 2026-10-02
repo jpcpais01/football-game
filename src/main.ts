@@ -565,4 +565,4 @@ function frame(now: number): void {
 requestAnimationFrame(frame);
 
 // Expose for debugging in the console.
-if (DEBUG) (window as unknown as { game: unknown }).game = { get match() { return match; }, renderer, scene, pixelPass, stadium, atmo };
+if (DEBUG) (window as unknown as { game: unknown }).game = { get match() { return match; }, renderer, scene, pixelPass, stadium, atmo, start: startGame };

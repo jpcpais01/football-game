@@ -11,6 +11,7 @@ import { SHARED } from './look';
 
 const MAX = 1400;
 const MOTES = 170;
+const FLOOD_MOTE = new THREE.Color(0.85, 0.9, 1);
 /** Flare spots in the ultras' end (lower tier behind the home goal). */
 const CURVA_FLARES: [number, number][] = [
   [-PITCH.halfL - 19, -8],
@@ -164,7 +165,7 @@ export class Particles {
     const wind = SHARED.uWind.value;
     const flood = SHARED.uFlood.value;
     // Motes: warm sparkles in the sun, cool specks under floodlights.
-    this.c.setRGB(1, 0.94, 0.78).lerp(new THREE.Color(0.85, 0.9, 1), Math.min(1, flood * 1.2));
+    this.c.setRGB(1, 0.94, 0.78).lerp(FLOOD_MOTE, Math.min(1, flood * 1.2));
     const moteR = this.c.r;
     const moteG = this.c.g;
     const moteB = this.c.b;
