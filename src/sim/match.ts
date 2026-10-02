@@ -839,8 +839,18 @@ export class Match {
             stickW *= clamp((ip.slack - 0.15) / 0.5, 0, 1);
             // Arrive, don't overrun: no faster than he can pull up in what's left, plus however
             // fast the spot itself is running away (a ball going away is chased down).
-            const away = Math.max(0, (this.ball.vel.x * tx + this.ball.vel.z * tz) * (gap < 3 ? 1 : 0));
-            speed = Math.min(speed, Math.sqrt(2 * PLAYER.brake * 0.7 * d) + 0.6 + away);
+            // Except for a ball cutting across in front of him that he's late for (it gets to
+            // the spot before he's within reach): that's a step across its line, as quick as
+            // he can, with nothing to overrun. Head-on meetings keep the cap (charging into
+            // the ball makes a heavy touch).
+            const bsp = Math.hypot(this.ball.vel.x, this.ball.vel.z);
+            const toSpot = bsp > 1 ? ((tmpV.x - this.ball.pos.x) * this.ball.vel.x + (tmpV.z - this.ball.pos.z) * this.ball.vel.z) / (bsp * bsp) : -1;
+            const across = bsp > 1 && Math.abs(tx * this.ball.vel.x + tz * this.ball.vel.z) < 0.6 * bsp;
+            const late = across && toSpot > 0 && this.ai.runTime(c, tmpV.x, tmpV.z, 0, PLAYER.reach * 0.75) > toSpot;
+            if (!late) {
+              const away = Math.max(0, (this.ball.vel.x * tx + this.ball.vel.z * tz) * (gap < 3 ? 1 : 0));
+              speed = Math.min(speed, Math.sqrt(2 * PLAYER.brake * 0.7 * d) + 0.6 + away);
+            }
           } else {
             // Close down hard, then ease in tight on the carrier.
             speed = d > 5 ? PLAYER.jogSpeed + 2.2 : Math.min(PLAYER.jogSpeed + 1, d * 3 + 0.8);
