@@ -287,8 +287,7 @@ function frame(now: number): void {
   const running = !paused;
   if (running) {
     controls.update(dt);
-    const att = match.attackingTeam() === match.humanTeam || match.phase === 'kickoff';
-    controls.setMode(att ? 'attack' : 'defend');
+    controls.setMode(match.humanAttacking() ? 'attack' : 'defend');
     acc += dt;
     let steps = 0;
     while (acc >= DT && steps < 12) {

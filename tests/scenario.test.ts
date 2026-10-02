@@ -156,3 +156,60 @@ it('seeking wins over a stick pushed the other way', () => {
   console.log('reached ball against the stick after', t.toFixed(2), 's');
   expect(t).toBeGreaterThan(0);
 });
+
+function emptyPitch(seed: number) {
+  const m = new Match(seed);
+  const input = makeInput();
+  m.phase = 'play';
+  m.setPiece = null;
+  for (const p of m.players) { p.pos.x = p.team === 0 ? -30 + p.index : 45; p.pos.z = (p.index - 5) * 6; p.prevPos.copy(p.pos); }
+  return { m, input };
+}
+
+it('Pass pressed early on an incoming ball fires when it arrives', () => {
+  let ok = 0;
+  for (let trial = 0; trial < 10; trial++) {
+    const { m, input } = emptyPitch(400 + trial);
+    const c = m.teams[0].players[6];
+    c.pos.set(0, 0, 0); c.prevPos.copy(c.pos);
+    m.setControlled(c);
+    m.ball.reset(14, 3 - trial * 0.6);
+    m.ball.kick(-9, 0, -0.2 + trial * 0.04, 0, 0, 0);
+    // Press and release Pass straight away; the ball needs ~1.5 s to arrive.
+    m.step(input);
+    input.events.push({ btn: 0, kind: 'down', hold: 0 }, { btn: 0, kind: 'up', hold: 0.1 });
+    let passed = false;
+    for (let i = 0; i < 120 * 3; i++) {
+      m.step(input);
+      m.takeEvents();
+      if (m.lastKicker === c && m.passTarget && m.passTarget.team === 0) { passed = true; break; }
+    }
+    if (passed) ok++;
+  }
+  console.log('early pass executed', ok, '/ 10');
+  expect(ok).toBe(10);
+});
+
+it('Pass and Shoot fire reliably while dribbling at a sprint', () => {
+  for (const btn of [0, 2] as const) {
+    let ok = 0;
+    let totalT = 0;
+    for (let trial = 0; trial < 10; trial++) {
+      const { m, input } = emptyPitch(500 + trial);
+      const c = m.teams[0].players[9];
+      c.pos.set(5, 0, 0); c.prevPos.copy(c.pos);
+      m.setControlled(c);
+      m.ball.reset(5.6, 0); m.owner = c;
+      input.moveX = 1; input.sprint = true;
+      for (let i = 0; i < 120 + trial * 13; i++) { m.step(input); m.takeEvents(); }
+      input.events.push({ btn, kind: 'down', hold: 0 }, { btn, kind: 'up', hold: btn === 2 ? 0.5 : 0.1 });
+      for (let i = 0; i < 120 * 2; i++) {
+        m.step(input);
+        m.takeEvents();
+        if (m.lastKicker === c && m.time - m.lastKickTime < 0.01) { ok++; totalT += i / 120; break; }
+      }
+    }
+    console.log(btn === 0 ? 'pass' : 'shot', 'while sprinting:', ok, '/ 10, avg delay', (totalT / Math.max(1, ok)).toFixed(2), 's');
+    expect(ok).toBe(10);
+  }
+});

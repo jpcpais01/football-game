@@ -42,6 +42,11 @@ export interface MatchEvents {
 }
 
 const tmpV = new V3();
+/** How long a human Pass/Shoot/Through stays queued waiting for the ball (s). */
+const HUMAN_BUFFER = 2.5;
+/** Extra reach given to the human's strikes so a queued command doesn't miss by inches. */
+const HUMAN_STRIKE_REACH = 1.15;
+const HUMAN_CONTACT_REACH = 1.6;
 
 export class Match {
   readonly ball = new Ball();
@@ -140,6 +145,25 @@ export class Match {
     if (this.setPiece) return this.setPiece.team;
     if (this.passTarget && this.time - this.lastKickTime < 3) return this.passTarget.team;
     return -1;
+  }
+
+  /**
+   * Whether the human's buttons mean attack. Includes loose balls / passes in flight that
+   * our side will reach first, so pressing Pass on an incoming ball queues a pass.
+   */
+  humanAttacking(): boolean {
+    if (this.phase === 'kickoff') return true;
+    const att = this.attackingTeam();
+    if (att === this.humanTeam) return true;
+    if (att >= 0) return false;
+    const mine = this.ai.intercept[this.controlled.id];
+    let theirs = 99;
+    for (const q of this.teams[1 - this.humanTeam].players) {
+      const ip = this.ai.intercept[q.id];
+      if (ip.t >= 0 && ip.t < theirs) theirs = ip.t;
+    }
+    const mt = mine.t >= 0 ? mine.t : 99;
+    return mt <= theirs + 0.25 || this.ballDist(this.controlled) < 1.5;
   }
 
   nearestOpponentDist(p: Player): number {
@@ -252,7 +276,13 @@ export class Match {
   setControlled(p: Player): void {
     if (this.controlled === p) return;
     if (this.controlled) {
-      this.controlled.sprinting = false;
+      const old = this.controlled;
+      old.sprinting = false;
+      // A queued command follows control (e.g. pressed Pass just before the auto-switch).
+      if (old.plan && old.team === p.team && old.action !== 'kick' && old.action !== 'throw' && !p.plan && !this.autoPlay) {
+        p.plan = old.plan;
+        old.plan = null;
+      }
     }
     this.controlled = p;
     this.switchT = 0;
@@ -374,19 +404,20 @@ export class Match {
       input.events.length = 0;
       return;
     }
-    const attacking = this.attackingTeam() === this.humanTeam;
+    const attacking = this.humanAttacking();
     const m = Math.hypot(input.moveX, input.moveY);
     if (m > 0.12) this.noInputT = 0;
     else this.noInputT += DT;
 
     // Buttons.
     for (const ev of input.events) {
-      if (attacking || this.phase === 'kickoff') {
+      if (attacking) {
         if (ev.kind !== 'up') continue;
         const ax = m > 0.12 ? input.moveX / m : Math.cos(c.facing);
         const az = m > 0.12 ? -input.moveY / m : Math.sin(c.facing);
         let plan: KickPlan | null = null;
-        const exp = this.time + 1.0;
+        // Commands stay queued until the ball arrives (e.g. press Pass while it's coming).
+        const exp = this.time + HUMAN_BUFFER;
         if (ev.btn === Btn.A) plan = { type: ev.hold > 0.22 ? 'lob' : 'pass', dirX: ax, dirZ: az, power: 0, targetId: -1, expires: exp };
         else if (ev.btn === Btn.B) plan = { type: 'through', dirX: ax, dirZ: az, power: ev.hold > 0.22 ? 1 : 0, targetId: -1, expires: exp };
         else if (ev.btn === Btn.C) plan = { type: 'shot', dirX: ax, dirZ: az, power: clamp(ev.hold / 0.85, 0.08, 1.15), targetId: -1, expires: exp };
@@ -533,7 +564,7 @@ export class Match {
   private closeControl(): void {
     const c = this.controlled;
     const b = this.ball;
-    if (this.autoPlay || this.owner !== c || this.heldBy || c.plan || c.isBusy() || !b.onGround) return;
+    if (this.autoPlay || this.owner !== c || this.heldBy || c.isBusy() || !b.onGround) return;
     const gap = this.ballDist(c);
     if (gap > 1.8) return;
     const moving = c.wantSpeed > 0.3;
@@ -544,7 +575,7 @@ export class Match {
     const pz = c.pos.z + dz * lead;
     const wantVx = c.vel.x + (px - b.pos.x) * 3.5;
     const wantVz = c.vel.z + (pz - b.pos.z) * 3.5;
-    const k = 1 - Math.exp(-DT * 5);
+    const k = 1 - Math.exp(-DT * 2.5);
     b.vel.x += (wantVx - b.vel.x) * k;
     b.vel.z += (wantVz - b.vel.z) * k;
     // Keep the spin consistent with rolling so the ball doesn't skid oddly.
@@ -658,7 +689,7 @@ export class Match {
   // ------------------------------------------------------------------ actions
 
   /** Can the strike start now, i.e. will the ball be at the foot when the swing lands? */
-  private kickable(p: Player, contactIn = 0.12): boolean {
+  private kickable(p: Player, contactIn = 0.12, reach: number = PLAYER.reach): boolean {
     const b = this.ball;
     if (this.heldBy === p) return true;
     if (this.heldBy) return false;
@@ -666,18 +697,21 @@ export class Match {
     const fx = b.pos.x + b.vel.x * contactIn - (p.pos.x + p.vel.x * 0.8 * contactIn);
     const fz = b.pos.z + b.vel.z * contactIn - (p.pos.z + p.vel.z * 0.8 * contactIn);
     const d = Math.hypot(fx, fz);
-    if (d > PLAYER.reach) return false;
+    if (d > reach) return false;
     if (this.setPiece && this.setPiece.taker !== p) return false;
     return true;
   }
 
   private resolveActions(p: Player): void {
-    // Expire stale plans.
+    const human = p === this.controlled && !this.autoPlay;
+    // Expire stale plans, and drop them if the other side has won the ball.
     if (p.plan && this.time > p.plan.expires) p.plan = null;
+    if (p.plan && ((this.owner && this.owner.team !== p.team) || (this.heldBy && this.heldBy.team !== p.team))) p.plan = null;
 
     // Start a kick when the ball arrives in range.
     const planDur = p.plan ? (p.plan.type === 'shot' ? 0.3 : p.plan.type === 'lob' || p.plan.type === 'cross' || p.plan.type === 'clear' ? 0.27 : 0.2) : 0;
-    if (p.plan && !p.isBusy() && (p.touchCooldown <= 0 || p.sinceTouch > 0.12) && this.kickable(p, planDur * 0.55)) {
+    const reach = human ? HUMAN_STRIKE_REACH : PLAYER.reach;
+    if (p.plan && !p.isBusy() && (p.touchCooldown <= 0 || p.sinceTouch > 0.12) && this.kickable(p, planDur * 0.55, reach)) {
       if (this.setPiece && (this.setPiece.taker !== p || this.setPiece.t < 0.7)) return;
       const plan = p.plan;
       const dur = planDur;
@@ -692,7 +726,9 @@ export class Match {
       p.actionDone = true;
       const plan = p.plan;
       p.plan = null;
-      if (plan && (this.heldBy === p || this.ballDist(p) < PLAYER.reach + 0.35)) this.performKick(p, plan);
+      const contact = human ? HUMAN_CONTACT_REACH : PLAYER.reach + 0.35;
+      if (plan && (this.heldBy === p || (this.ballDist(p) < contact && this.ball.pos.y < 1.3))) this.performKick(p, plan);
+      else if (plan && this.time < plan.expires) p.plan = plan; // missed it: stay queued and try again
     }
 
     if ((p.action === 'tackle' || p.action === 'slide') && !p.actionDone) {
