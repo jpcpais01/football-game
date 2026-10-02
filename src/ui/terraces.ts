@@ -1,6 +1,6 @@
 import type { Match, MatchEvents } from '../sim/match';
 import { PITCH } from '../sim/constants';
-import { smoothstep as smooth } from '../sim/vec';
+import { clamp, smoothstep as smooth } from '../sim/vec';
 
 /**
  * The terraces on a big European night: who's singing what, when the pyro goes up. One
@@ -181,11 +181,24 @@ export class Terraces {
       if (match.phase === 'play' || match.phase === 'setpiece') {
         const gx = PITCH.halfL * match.teams[team].dir;
         const b = match.ball.pos;
-        const near = 1 - smooth(6, 44, Math.hypot(b.x - gx, b.z * 0.8));
-        const own = match.owner ?? match.heldBy;
-        const ours = own ? (own.team === team ? 1 : 0.2) : match.lastTouch?.team === team ? 0.7 : 0.35;
-        want = near * ours;
-        if (match.shotTeam() === team) want = Math.max(want, 0.95);
+        const dist = Math.hypot(b.x - gx, b.z);
+        const own = match.owner;
+        if (own && own.team === team) {
+          // On the ball: inside 20 m of the middle of the goal line the crowd is at least at
+          // half its roar, and a player running at goal, fast, takes it all the way. Further
+          // out it falls away from there.
+          const sp = own.speed;
+          const gd = Math.max(0.5, Math.hypot(gx - own.pos.x, own.pos.z));
+          const toward = sp > 0.3 ? clamp(((gx - own.pos.x) * own.vel.x - own.pos.z * own.vel.z) / (gd * sp), 0, 1) : 0;
+          const drive = toward * smooth(1.5, 6.5, sp);
+          want = (0.5 + 0.5 * drive) * (1 - smooth(20, 50, dist));
+        } else {
+          // Loose, or the other side has it: some of that, less.
+          const near = 1 - smooth(6, 44, Math.hypot(b.x - gx, b.z * 0.8));
+          const theirs = match.owner ?? match.heldBy;
+          want = near * (theirs ? (theirs.team === team ? 0.6 : 0.2) : match.lastTouch?.team === team ? 0.6 : 0.3);
+        }
+        if (match.shotTeam() === team) want = 1;
         if (match.setPiece && match.setPiece.team === team && (match.setPiece.kind === 'penalty' || match.setPiece.kind === 'corner' || match.setPiece.direct)) want = Math.max(want, match.setPiece.kind === 'penalty' ? 0.9 : 0.6);
       }
       const d = this.danger[team];
