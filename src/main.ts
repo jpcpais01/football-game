@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { DT, GOAL_SEQ, MATCH, PITCH } from './sim/constants';
 import { Match } from './sim/match';
 import { createPitch } from './render/pitch';
+import { TurfMarks } from './render/turfMarks';
 import { createStadium } from './render/stadium';
 import { clearFanBanner, loadFanBanner, pickFanBanner } from './ui/fanBanner';
 import { createGoals } from './render/goals';
@@ -65,7 +66,8 @@ const club = new Club();
 let match = new Match(Date.now() & 0xffff, club.matchSetup(Date.now() & 0xffff));
 match.autoPlay = true;
 
-scene.add(createPitch(renderer));
+const turfMarks = new TurfMarks();
+scene.add(createPitch(renderer, turfMarks.texture));
 // The stands wear the club's colours and crest; rebuilt when the kit or crest changes.
 const makeStadium = () => createStadium(club.info().kit.shirt, club.opponentInfo().kit.shirt, { crest: crestCanvas(club.state.crest, 256), name: club.info().name, motto: club.bannerColors() });
 let stadium = makeStadium();
@@ -709,6 +711,7 @@ function frame(now: number): void {
   const tifo = match.phase === 'kickoff' || (match.phase === 'play' && match.clock < 8) ? 1 : 0;
   stadium.setNearStand(rig.groundLevel);
   stadium.update(now / 1000, match.excitement, atmo, tifo);
+  turfMarks.update(match, renderer);
   if (playing) hud.update(match, now / 1000);
   updateAim();
   updateCharge(alpha);

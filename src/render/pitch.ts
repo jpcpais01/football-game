@@ -12,8 +12,9 @@ import { SHARED, STAND_SHADOW_GLSL } from './look';
 const MARGIN = 9;
 const SIZE_X = PITCH.length + MARGIN * 2;
 const SIZE_Z = PITCH.width + MARGIN * 2;
+export { SIZE_X as PITCH_SIZE_X, SIZE_Z as PITCH_SIZE_Z };
 
-const NOISE_GLSL = /* glsl */ `
+export const NOISE_GLSL = /* glsl */ `
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float vnoise(vec2 p) {
   vec2 i = floor(p); vec2 f = fract(p);
@@ -66,14 +67,15 @@ function bakeNoise(renderer: THREE.WebGLRenderer): { fine: THREE.Texture; coarse
   };
 }
 
-export function createPitch(renderer: THREE.WebGLRenderer): THREE.Mesh {
+/** `marks`: the turf's scars (see turfMarks.ts), same mapping as the noise. */
+export function createPitch(renderer: THREE.WebGLRenderer, marks: THREE.Texture): THREE.Mesh {
   const geo = new THREE.PlaneGeometry(SIZE_X, SIZE_Z, 1, 1);
   geo.rotateX(-Math.PI / 2);
   const noise = bakeNoise(renderer);
 
   const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.92, metalness: 0 });
   mat.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, SHARED, { uTimeC: SHARED.uTime, uNoiseFine: { value: noise.fine }, uNoiseCoarse: { value: noise.coarse } });
+    Object.assign(shader.uniforms, SHARED, { uTimeC: SHARED.uTime, uNoiseFine: { value: noise.fine }, uNoiseCoarse: { value: noise.coarse }, uMarks: { value: marks } });
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vGrassWorld;')
       .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvGrassWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;');
@@ -92,6 +94,7 @@ export function createPitch(renderer: THREE.WebGLRenderer): THREE.Mesh {
         const float HW = ${PITCH.halfW.toFixed(2)};
         uniform sampler2D uNoiseFine;
         uniform sampler2D uNoiseCoarse;
+        uniform sampler2D uMarks;
         float segDist(vec2 p, vec2 a, vec2 b) {
           vec2 pa = p - a, ba = b - a;
           float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
@@ -156,12 +159,18 @@ export function createPitch(renderer: THREE.WebGLRenderer): THREE.Mesh {
           col *= 1.0 + wave * 0.075;
           float outside = clamp(step(HL, abs(p.x)) + step(HW, abs(p.y)), 0.0, 1.0);
           col = mix(col, base * 0.96, outside * 0.6);
+          // Slide-tackle scars: grass flattened pale and yellowish, torn down to the soil
+          // (damp dark earth, lighter where it's crumbled), the chalk scuffed off with it.
+          vec2 mk = texture2D(uMarks, nuv).rg;
+          col = mix(col, col * vec3(1.14, 1.1, 0.86), mk.g * 0.55);
+          vec3 soil = mix(vec3(0.27, 0.2, 0.13), vec3(0.42, 0.33, 0.22), nf.g);
+          col = mix(col, soil, mk.r);
           // Chalk.
           float d = linesDist(p);
           float aa = fwidth(d) * 0.8 + 0.01;
-          gLine = 1.0 - smoothstep(0.06 - aa, 0.06 + aa, d);
+          gLine = (1.0 - smoothstep(0.06 - aa, 0.06 + aa, d)) * (1.0 - mk.r * 0.85);
           col = mix(col, vec3(0.92, 0.92, 0.88) * (0.94 + nf.a * 0.06), gLine * 0.9);
-          gWet = (0.6 + 0.4 * nc.g) * (1.0 - gLine);
+          gWet = (0.6 + 0.4 * nc.g) * (1.0 - gLine) * (1.0 - mk.r * 0.7);
           return pow(col, vec3(2.2));
         }`,
       )
