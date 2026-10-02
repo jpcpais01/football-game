@@ -571,6 +571,14 @@ export class Match {
     }
     // Loose ball or a pass in flight: ours to meet, or theirs to intercept.
     if (this.passTarget && this.passTarget.team === c.team && this.passTarget !== c) return null;
+    // A through ball for us: sprint for the planned spot until the ball is nearly there.
+    if (this.passTarget === c) {
+      const rt = this.ai.runTarget(c);
+      if (rt && this.ballDist(c) > 4 && dist2D(c.pos.x, c.pos.z, rt.x, rt.z) > 1) {
+        out.set(rt.x, 0, rt.z);
+        return 'loose';
+      }
+    }
     // Run to where the ball is going (the intercept on its predicted path), not where it
     // is now. Close to the ball, lean back toward the ball itself so the final approach
     // stays tight.
@@ -901,13 +909,41 @@ export class Match {
       spin = r.spin;
       base = 0.09;
       strength = 0.9;
+    } else if (plan.type === 'through') {
+      // Planned through ball: into space so the runner and the ball arrive together.
+      const lofted = !!plan.lofted;
+      const tp = this.ai.planThrough(
+        p,
+        plan.dirX,
+        plan.dirZ,
+        plan.aimed === true,
+        plan.aimed === undefined ? 0.5 : plan.power,
+        lofted,
+        plan.targetId >= 0 ? this.players[plan.targetId] : null,
+      );
+      let r;
+      if (tp) {
+        receiver = tp.receiver;
+        r = lofted ? solveLofted(b.pos, tp.x, tp.z, clamp(22 + dist2D(b.pos.x, b.pos.z, tp.x, tp.z) * 0.3, 26, 40), 45, 0) : solveGroundPass(b.pos, tp.x, tp.z, tp.arrive);
+        this.ai.setRun(receiver, tp.x, tp.z, tp.time + 1.2);
+      } else {
+        // No runner: weighted into space along the stick.
+        const len = 10 + 12 * plan.power;
+        const tx = clamp(b.pos.x + plan.dirX * len, -PITCH.halfL + 2, PITCH.halfL - 2);
+        const tz = clamp(b.pos.z + plan.dirZ * len, -PITCH.halfW + 2, PITCH.halfW - 2);
+        r = lofted ? solveLofted(b.pos, tx, tz, 30, 40, 0) : solveGroundPass(b.pos, tx, tz, 2);
+      }
+      vel = r.vel;
+      spin = r.spin;
+      base = lofted ? 0.04 : 0.028;
+      strength = lofted ? 0.6 : 0.4;
     } else {
       receiver =
         plan.targetId >= 0
           ? this.players[plan.targetId]
           : plan.aimed === false
-            ? this.ai.bestReceiver(p, plan.type === 'through')
-            : this.ai.pickReceiver(p, plan.dirX, plan.dirZ, plan.type === 'through');
+            ? this.ai.bestReceiver(p, false)
+            : this.ai.pickReceiver(p, plan.dirX, plan.dirZ, false);
       if (!receiver) {
         // Nobody there: play it into space.
         const tx = clamp(b.pos.x + plan.dirX * 15, -PITCH.halfL, PITCH.halfL);
@@ -919,43 +955,26 @@ export class Match {
         // Lead the receiver: iterate target with predicted travel time.
         let tx = receiver.pos.x;
         let tz = receiver.pos.z;
-        const through = plan.type === 'through';
-        const lofted = plan.type === 'lob' || plan.type === 'cross' || (through && !!plan.lofted) || fromHands || setPieceKind === 'goalkick';
+        const lofted = plan.type === 'lob' || plan.type === 'cross' || fromHands || setPieceKind === 'goalkick';
         // Pass weight: AI plays a normal weight; a human tap is soft, a full hold is firm.
         const weightK = 0.8 + 0.4 * (plan.aimed === undefined ? 0.5 : plan.power);
-        if (through) {
-          // Into space ahead of the receiver, toward goal.
-          const lead = (6 + this.rng.next() * 3) * (0.75 + 0.5 * (plan.aimed === undefined ? 0.5 : plan.power));
-          const runX = team.dir * 0.85 + receiver.vel.x * 0.05;
-          const runZ = (plan.dirZ * 0.4 + receiver.vel.z * 0.05) * 0.6;
-          const n = Math.hypot(runX, runZ);
-          tx += (runX / n) * lead;
-          tz += (runZ / n) * lead;
-          this.ai.setRun(receiver, tx, tz);
-        }
         if (plan.type === 'cross' || setPieceKind === 'corner') {
           // Into the box toward the receiver, a bit in front of goal.
           tx = clamp(tx, opp - team.dir * 14, opp - team.dir * 5);
           tz = clamp(tz, -8, 8);
         }
         let r = lofted ? solveLofted(b.pos, tx, tz, 30, 25, 0) : solveGroundPass(b.pos, tx, tz, 7);
-        if (!through) {
-          for (let i = 0; i < 2; i++) {
-            const lt = Math.min(r.time, 2.5) * 0.85;
-            const ax = receiver.pos.x + receiver.vel.x * lt;
-            const az = receiver.pos.z + receiver.vel.z * lt;
-            const dd = dist2D(b.pos.x, b.pos.z, ax, az);
-            if (lofted) {
-              const angle = setPieceKind === 'goalkick' ? 34 : fromHands && this.setPiece?.kind === 'throw' ? 18 : clamp(16 + dd * 0.45, 20, 38);
-              r = solveLofted(b.pos, ax, az, angle, 25, 0);
-            } else {
-              r = solveGroundPass(b.pos, ax, az, clamp(5.5 + dd * 0.14, 6, 11) * weightK);
-            }
+        for (let i = 0; i < 2; i++) {
+          const lt = Math.min(r.time, 2.5) * 0.85;
+          const ax = receiver.pos.x + receiver.vel.x * lt;
+          const az = receiver.pos.z + receiver.vel.z * lt;
+          const dd = dist2D(b.pos.x, b.pos.z, ax, az);
+          if (lofted) {
+            const angle = setPieceKind === 'goalkick' ? 34 : fromHands && this.setPiece?.kind === 'throw' ? 18 : clamp(16 + dd * 0.45, 20, 38);
+            r = solveLofted(b.pos, ax, az, angle, 25, 0);
+          } else {
+            r = solveGroundPass(b.pos, ax, az, clamp(5.5 + dd * 0.14, 6, 11) * weightK);
           }
-        } else if (!lofted) {
-          r = solveGroundPass(b.pos, tx, tz, 3.2 * weightK);
-        } else {
-          r = solveLofted(b.pos, tx, tz, 32, 25, 0);
         }
         vel = r.vel;
         spin = r.spin;

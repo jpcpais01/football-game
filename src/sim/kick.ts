@@ -220,3 +220,64 @@ export function predictBallAt(src: Ball, maxT: number, cb: (b: Ball, t: number) 
   }
   return -1;
 }
+
+// ---------------------------------------------------------------------------------------
+// Rolling-pass timing table, built once from the real integrator: for strike speeds
+// 4..20 m/s, how far the ball has rolled and how fast it is going at each moment. Lets the
+// AI plan through balls with exactly the timing the physics will produce.
+
+const TABLE_DT = 1 / 30;
+const TABLE_T = 6;
+let rollTable: { v0: number; d: Float32Array; v: Float32Array }[] | null = null;
+
+function buildRollTable(): { v0: number; d: Float32Array; v: Float32Array }[] {
+  const out: { v0: number; d: Float32Array; v: Float32Array }[] = [];
+  const n = Math.round(TABLE_T / TABLE_DT);
+  const steps = Math.round(TABLE_DT / DT);
+  for (let v0 = 4; v0 <= 20; v0++) {
+    const spin = makeSpin(1, 0, (v0 / 0.11) * 0.55, 0, new V3());
+    const b = loadScratch(new V3(0, 0.11, 0), v0, 0, 0, spin);
+    const d = new Float32Array(n);
+    const v = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      for (let k = 0; k < steps; k++) b.step(DT);
+      d[i] = b.pos.x;
+      v[i] = Math.hypot(b.vel.x, b.vel.z);
+    }
+    out.push({ v0, d, v });
+  }
+  return out;
+}
+
+/**
+ * Ground pass that covers `dist` metres in about `wantT` seconds (strike speed 4..maxV).
+ * Returns the time it really takes and the speed it arrives with, or null if it can't
+ * get there (too far to roll) at any allowed strike speed.
+ */
+export function rollingPass(dist: number, wantT: number, maxV = 19): { v0: number; t: number; arrive: number } | null {
+  if (!rollTable) rollTable = buildRollTable();
+  let best: { v0: number; t: number; arrive: number } | null = null;
+  let bestErr = 1e9;
+  for (const row of rollTable) {
+    if (row.v0 > maxV) break;
+    // First moment it has rolled `dist`.
+    let i = 0;
+    while (i < row.d.length && row.d[i] < dist) i++;
+    if (i >= row.d.length || row.v[i] < 0.8) continue;
+    const t = (i + 1) * TABLE_DT;
+    const err = Math.abs(t - wantT);
+    if (err < bestErr) {
+      bestErr = err;
+      best = { v0: row.v0, t, arrive: row.v[i] };
+    }
+  }
+  return best;
+}
+
+/** Time for a ground pass struck at v0 (from the table) to roll `dist` metres, or -1. */
+export function rollTimeAt(v0: number, dist: number): number {
+  if (!rollTable) rollTable = buildRollTable();
+  const row = rollTable[Math.max(0, Math.min(rollTable.length - 1, Math.round(v0) - 4))];
+  for (let i = 0; i < row.d.length; i++) if (row.d[i] >= dist) return (i + 1) * TABLE_DT;
+  return -1;
+}

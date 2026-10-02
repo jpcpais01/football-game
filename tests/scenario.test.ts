@@ -277,3 +277,21 @@ it('switches to a much closer teammate even while steering', () => {
   expect(switchedAt).toBeGreaterThanOrEqual(0);
   expect(switchedAt).toBeLessThan(1);
 });
+
+it('through ball goes into space ahead of the runner', () => {
+  const m = new Match(700);
+  m.phase = 'play';
+  m.setPiece = null;
+  for (const p of m.players) { p.pos.x = p.team === 0 ? -40 : -10; p.pos.z = (p.index - 5) * 6; p.prevPos.copy(p.pos); }
+  const mid = m.teams[0].players[6];
+  mid.pos.set(0, 0, 0); mid.prevPos.copy(mid.pos);
+  m.ball.reset(0.6, 0); m.owner = mid;
+  const st = m.teams[0].players[9];
+  st.pos.set(14, 0, -4); st.prevPos.copy(st.pos); st.vel.set(6, 0, 0);
+  m.teams[1].players[0].pos.set(51, 0, 0);
+  m.step(makeInput());
+  const tp = m.ai.planThrough(mid, 1, 0, true, 0.5, false, null);
+  expect(tp?.receiver).toBe(st);
+  expect(tp!.x).toBeGreaterThan(st.pos.x + 3); // into space in front of him
+  expect(tp!.arrive).toBeGreaterThan(1.5); // still rolling when he gets there
+});

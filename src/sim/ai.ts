@@ -1,5 +1,5 @@
 import { DT, PITCH, PLAYER } from './constants';
-import { predictBallAt } from './kick';
+import { predictBallAt, rollTimeAt, rollingPass } from './kick';
 import type { Match } from './match';
 import type { Player } from './player';
 import { DIVE_HANDS, DIVE_HIPS, DIVE_RADIUS, divePose, planDive, type DivePose } from './keeperPose';
@@ -66,11 +66,186 @@ export class AI {
     }
   }
 
-  setRun(p: Player, x: number, z: number): void {
+  setRun(p: Player, x: number, z: number, seconds = 3): void {
     const r = this.run[p.id];
     r.x = clamp(x, -PITCH.halfL + 1, PITCH.halfL - 1);
     r.z = clamp(z, -PITCH.halfW + 1, PITCH.halfW - 1);
-    r.until = this.m.time + 3;
+    r.until = this.m.time + seconds;
+  }
+
+  /**
+   * Time for a player to get to (x, z) from his current position and momentum: reaction,
+   * then accelerate toward the spot (his current velocity along that line counts, running
+   * the other way costs a brake), then top speed.
+   */
+  runTime(q: Player, x: number, z: number, react = 0.15): number {
+    const dx = x - q.pos.x;
+    const dz = z - q.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d < 0.3) return react * 0.5;
+    const ux = dx / d;
+    const uz = dz / d;
+    let v0 = q.vel.x * ux + q.vel.z * uz;
+    let extra = 0;
+    if (v0 < 0) {
+      extra = -v0 / PLAYER.brake;
+      v0 = 0;
+    }
+    const top = q.topSpeed;
+    const a = PLAYER.accel * (0.8 + 0.35 * q.attrs.accel);
+    const ta = Math.max(0, (top - v0) / a);
+    const da = ((v0 + top) / 2) * ta;
+    const t = d <= da ? (-v0 + Math.sqrt(v0 * v0 + 2 * a * d)) / a : ta + (d - da) / top;
+    return react + extra + t;
+  }
+
+  /** Active planned run (e.g. onto a through ball), if any. */
+  runTarget(p: Player): { x: number; z: number } | null {
+    const r = this.run[p.id];
+    return r.until > this.m.time ? r : null;
+  }
+
+  /** Second-last defender line (team frame) the given attacking team must stay behind. */
+  offsideLineFor(team: number): number {
+    return this.offside[team];
+  }
+
+  /**
+   * Through ball: the spot in space that a runner reaches at the same moment as the ball,
+   * before any defender or the keeper. Tries every candidate runner, several run lines
+   * (toward goal, straight, his current run, the stick) and lead distances; scores safety,
+   * timing, progress, danger, offside, the stick and the requested weight.
+   */
+  planThrough(
+    p: Player,
+    aimX: number,
+    aimZ: number,
+    aimed: boolean,
+    power: number,
+    lofted: boolean,
+    only: Player | null,
+  ): { receiver: Player; x: number; z: number; arrive: number; time: number } | null {
+    const m = this.m;
+    const team = m.teams[p.team];
+    const dir = team.dir;
+    const gx = PITCH.halfL * dir;
+    const b = m.ball.pos;
+    const opps = m.teams[1 - p.team].players;
+    const line = this.offside[p.team];
+    const prefLead = 5 + 13 * power;
+    const LEADS = [4, 6.5, 9, 12, 15, 19];
+    let best: { receiver: Player; x: number; z: number; arrive: number; time: number } | null = null;
+    let bestS = -1e9;
+    const dirs: [number, number][] = [];
+    for (const q of team.players) {
+      if (q === p || q.role === 'GK') continue;
+      if (only && q !== only) continue;
+      if (q.pos.x * dir < b.x * dir - 12) continue; // well behind the ball: not a through ball
+      if (dist2D(q.pos.x, q.pos.z, b.x, b.z) > 48) continue;
+      const offsideNow = q.pos.x * dir > line + 0.3 && q.pos.x * dir > b.x * dir;
+      // Candidate run lines.
+      dirs.length = 0;
+      {
+        const tx = gx - q.pos.x;
+        const tz = -q.pos.z * 0.6;
+        const n = Math.hypot(tx, tz) || 1;
+        dirs.push([tx / n, tz / n]);
+      }
+      dirs.push([dir, 0]);
+      // Diagonal runs into the channels either side.
+      dirs.push([dir * Math.cos(0.45), Math.sin(0.45)]);
+      dirs.push([dir * Math.cos(0.45), -Math.sin(0.45)]);
+      if (q.speed > 2) dirs.push([q.vel.x / q.speed, q.vel.z / q.speed]);
+      if (aimed) dirs.push([aimX, aimZ]);
+      for (const [ux, uz] of dirs) {
+        if (ux * dir < -0.2) continue; // through balls go forward
+        for (const L of LEADS) {
+          const x = clamp(q.pos.x + ux * L, -PITCH.halfL + 3, PITCH.halfL - 3);
+          const z = clamp(q.pos.z + uz * L, -PITCH.halfW + 1.5, PITCH.halfW - 1.5);
+          // Not into the six-yard box: that's the keeper's ball.
+          if ((gx - x) * dir < PITCH.sixDepth + 1 && Math.abs(z) < PITCH.sixHalfWidth + 1) continue;
+          const D = dist2D(b.x, b.z, x, z);
+          if (D < 6) continue;
+          const tr = this.runTime(q, x, z, 0.12);
+          // Ball: rolling (≈1.2 m/s² of grass + air) or a lofted pass (~flight + a bounce).
+          let tb: number;
+          let arrive = 0;
+          let v0 = 0;
+          if (lofted) {
+            tb = 0.55 + D / 17;
+          } else {
+            // Weight it so the ball gets there a touch before the runner (real physics).
+            const rp = rollingPass(D, Math.max(0.5, tr - 0.15));
+            if (!rp) continue;
+            tb = rp.t;
+            arrive = rp.arrive;
+            v0 = rp.v0;
+          }
+          // What matters for taking it in stride is the ball's speed relative to the runner
+          // (running onto it at full pace, a 12 m/s ball is easy; standing, it isn't).
+          const pdx = (x - b.x) / D;
+          const pdz = (z - b.z) / D;
+          const runAlong = Math.max(0, (x - q.pos.x) * pdx + (z - q.pos.z) * pdz) / Math.max(0.3, Math.hypot(x - q.pos.x, z - q.pos.z));
+          const relArrive = lofted ? 0 : arrive - q.topSpeed * 0.85 * runAlong;
+          if (relArrive > 8) continue;
+          const meet = Math.max(tr, tb);
+          // Defenders and keeper: can anyone get to the spot first?
+          let spot = 9;
+          let lane = 9;
+          for (const o of opps) {
+            const keeper = o.role === 'GK' && this.inOwnBox(o, x, z);
+            const reach = keeper ? 1.6 : 0.8;
+            const top = o.topSpeed;
+            spot = Math.min(spot, this.runTime(o, x, z, keeper ? 0.12 : 0.25) - reach / top - meet);
+            if (!lofted) {
+              // Anyone standing close to the path will simply step across it.
+              {
+                const lx = x - b.x;
+                const lz = z - b.z;
+                const t0 = clamp(((o.pos.x - b.x) * lx + (o.pos.z - b.z) * lz) / (D * D), 0, 1);
+                if (t0 > 0.05 && t0 < 0.97) {
+                  const perp = Math.hypot(o.pos.x - (b.x + lx * t0), o.pos.z - (b.z + lz * t0));
+                  lane = Math.min(lane, (perp - 2.2) * 1.5);
+                }
+              }
+              for (let k = 1; k <= 5; k++) {
+                const f = k / 6;
+                const px = b.x + (x - b.x) * f;
+                const pz = b.z + (z - b.z) * f;
+                // When the ball really gets there (same physics table as the strike).
+                const tk = rollTimeAt(v0, D * f);
+                if (tk < 0) continue;
+                lane = Math.min(lane, this.runTime(o, px, pz, 0.15) - 0.9 / top - tk);
+              }
+            }
+          }
+          const progress = ((x - b.x) * dir) / 20;
+          const threat = 1 - clamp(dist2D(x, z, gx, 0) / 38, 0, 1);
+          let sc =
+            progress * 0.9 +
+            threat * 0.9 +
+            // Must beat every defender and the keeper by a real margin.
+            clamp((spot - 0.2) / 0.4, -3, 1) * 1.4 +
+            (lofted ? 0 : clamp((lane - 0.15) / 0.3, -3, 1) * 1.4) -
+            Math.abs(tb - tr) * 0.35 -
+            Math.max(0, relArrive - 3) * 0.3 +
+            q.attrs.pace * 0.25 +
+            (q.role === 'FWD' ? 0.2 : 0);
+          if (offsideNow) sc -= 4;
+          if (aimed) {
+            const pd = Math.max(0.1, D);
+            const align = ((x - b.x) * aimX + (z - b.z) * aimZ) / pd;
+            sc += align * 2.2 - (align < 0.45 ? 3 : 0);
+            sc -= Math.abs(L - prefLead) / 7;
+          }
+          if (sc > bestS) {
+            bestS = sc;
+            best = { receiver: q, x, z, arrive, time: meet };
+          }
+        }
+      }
+    }
+    return best;
   }
 
   // ------------------------------------------------------------------ perception
@@ -262,6 +437,13 @@ export class AI {
     const att = m.attackingTeam();
     const run = this.run[p.id];
     if (m.passTarget === p) {
+      // On a through ball, sprint for the planned spot; meet the ball once it's close.
+      const rt = this.runTarget(p);
+      if (rt && m.ballDist(p) > 4 && dist2D(p.pos.x, p.pos.z, rt.x, rt.z) > 1) {
+        this.moveTo(p, rt.x, rt.z, true, false);
+        p.sprinting = true;
+        return;
+      }
       const ip = this.intercept[p.id];
       this.moveTo(p, ip.x, ip.z, true, true);
       p.lookTarget.copy(m.ball.pos);
