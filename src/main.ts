@@ -2,7 +2,7 @@ import '@fontsource/barlow-condensed/latin-600.css';
 import '@fontsource/barlow-condensed/latin-800.css';
 import './style.css';
 import * as THREE from 'three';
-import { DT, MATCH } from './sim/constants';
+import { DT, GOAL_SEQ, MATCH } from './sim/constants';
 import { Match } from './sim/match';
 import { createPitch } from './render/pitch';
 import { createStadium } from './render/stadium';
@@ -411,6 +411,8 @@ function handleEvents(now: number): void {
       const scorer = match.scorer;
       const team = match.teams[e.goal];
       hud.showCaption('GOAL', `${scorer ? '#' + (scorer.index + 1) + ' · ' : ''}${team.info.name}`, 3.2, now);
+      // The new score is revealed as the camera comes back from the crowd.
+      hud.goal(match, e.goal, GOAL_SEQ.crowd + 0.6);
     }
     if (e.save > 0.5) audio.crowdGasp();
     // Referee's calls.
@@ -530,7 +532,7 @@ function frame(now: number): void {
   officials.update(match, running ? dt : 0);
   rig.cinematic = !playing || match.phase === 'halftime' || match.phase === 'fulltime';
   // A 4-second shot of the scoring side's fans going wild after each goal.
-  rig.crowdShot = playing && match.phase === 'goal' && match.phaseT < 4 && match.scorer ? (match.scorer.team === 0 ? -1 : 1) : 0;
+  rig.crowdShot = playing && match.phase === 'goal' && match.phaseT >= GOAL_SEQ.celebrate && match.phaseT < GOAL_SEQ.crowd && match.scorer ? (match.scorer.team === 0 ? -1 : 1) : 0;
   rig.update(match, alpha, dt, now / 1000);
   playersView.update(match, alpha, now / 1000);
   ballView.update(match, alpha, running ? dt : 0);

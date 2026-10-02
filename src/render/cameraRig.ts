@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PITCH } from '../sim/constants';
+import { GOAL_SEQ, PITCH } from '../sim/constants';
 import type { Match } from '../sim/match';
 import { clamp, lerp } from '../sim/vec';
 
@@ -90,7 +90,8 @@ export class CameraRig {
     const b = match.ball;
     const bx = lerp(b.prevPos.x, b.pos.x, alpha);
     const bz = lerp(b.prevPos.z, b.pos.z, alpha);
-    const goal = match.phase === 'goal' && match.scorer;
+    // After a goal: follow the scorer's celebration (then the crowd shot, then back to the field).
+    const goal = match.phase === 'goal' && match.scorer && match.phaseT < GOAL_SEQ.crowd;
     const c = goal ? match.scorer! : match.controlled;
     const cx = lerp(c.prevPos.x, c.pos.x, alpha);
     const cz = lerp(c.prevPos.z, c.pos.z, alpha);
@@ -140,7 +141,8 @@ export class CameraRig {
     sz = this.aimZ;
 
     // Critically damped follow, stiffer when the ball is travelling.
-    const w = 2.3 + Math.min(2.2, b.vel.len() * 0.1);
+    // Slow, smooth pans while the goal is celebrated.
+    const w = match.phase === 'goal' ? 1.3 : 2.3 + Math.min(2.2, b.vel.len() * 0.1);
     this.vx += ((sx - this.tx) * w * w - 2 * w * this.vx) * dt;
     this.vz += ((sz - this.tz) * w * w - 2 * w * this.vz) * dt;
     this.tx += this.vx * dt;
@@ -155,7 +157,7 @@ export class CameraRig {
     if (!pixel) this.dist += ((this.distOverride || wantDist) - this.dist) * k * 0.3;
     else this.dist = this.distOverride || this.baseDist;
     this.shake *= Math.exp(-dt * 6);
-    this.cine += ((this.cinematic || this.crowdShot ? 1 : 0) - this.cine) * (1 - Math.exp(-dt * (this.crowdShot ? 3.5 : 1.5)));
+    this.cine += ((this.cinematic || this.crowdShot ? 1 : 0) - this.cine) * (1 - Math.exp(-dt * (this.crowdShot ? 1.9 : 1.5)));
     if (this.cine < 0.002) this.cine = this.lastShot = 0;
     this.place(time);
   }

@@ -1,5 +1,5 @@
 import { Ball } from './ball';
-import { BALL, DT, MATCH, PITCH, PLAYER } from './constants';
+import { BALL, DT, GOAL_SEQ, MATCH, PITCH, PLAYER } from './constants';
 import { Btn, type InputState } from './input';
 import { solveFreeKick, solveGroundPass, solveLofted, solveShot } from './kick';
 import { Player, type KickPlan } from './player';
@@ -61,6 +61,7 @@ export interface MatchEvents {
 }
 
 const tmpV = new V3();
+
 /** How long a human Pass/Shoot/Through stays queued waiting for the ball (s). */
 const HUMAN_BUFFER = 2.5;
 /** Extra reach given to the human's strikes so a queued command doesn't miss by inches. */
@@ -211,28 +212,32 @@ export class Match {
 
   // ------------------------------------------------------------------ restarts
 
+  /** Where a player lines up for a kick-off taken by `kickTeam` (world). */
+  kickoffSpot(p: Player, kickTeam: number, out: V3): V3 {
+    const d = this.teams[p.team].dir;
+    let x = Math.min(p.baseX * PITCH.halfL * 0.85, -1.5);
+    let z = p.baseZ * PITCH.halfW * 0.8;
+    if (p.index === 9 && p.team === kickTeam) {
+      x = -0.3;
+      z = 0.2;
+    } else if (p.index === 7 && p.team === kickTeam) {
+      x = -1.2;
+      z = 6;
+    } else if (Math.hypot(x, z) < PITCH.circleRadius + 0.5) {
+      const s = (PITCH.circleRadius + 0.8) / Math.max(0.1, Math.hypot(x, z));
+      x *= s;
+      z *= s;
+    }
+    return out.set(x * d, 0, z * d);
+  }
+
   private placeForKickoff(kickTeam: number): void {
     for (const team of this.teams) {
-      const d = team.dir;
       for (const p of team.players) {
-        let x = p.baseX * PITCH.halfL * 0.85;
-        let z = p.baseZ * PITCH.halfW * 0.8;
-        x = Math.min(x, -1.5);
-        if (team.players.indexOf(p) === 9 && this.teams.indexOf(team) === kickTeam) {
-          x = -0.3;
-          z = 0.2;
-        } else if (team.players.indexOf(p) === 7 && this.teams.indexOf(team) === kickTeam) {
-          x = -1.2;
-          z = 6;
-        } else if (Math.hypot(x, z) < PITCH.circleRadius + 0.5) {
-          const s = (PITCH.circleRadius + 0.8) / Math.max(0.1, Math.hypot(x, z));
-          x *= s;
-          z *= s;
-        }
-        p.pos.set(x * d, 0, z * d);
+        this.kickoffSpot(p, kickTeam, p.pos);
         p.prevPos.copy(p.pos);
         p.vel.set(0, 0, 0);
-        p.facing = d > 0 ? 0 : Math.PI;
+        p.facing = team.dir > 0 ? 0 : Math.PI;
         p.prevFacing = p.facing;
         p.action = 'none';
         p.plan = null;
@@ -491,8 +496,21 @@ export class Match {
       this.pendingRestart = null;
       this.startSetPiece(r.kind, r.team, r.x, r.z);
     }
-    if (this.phase === 'goal' && this.phaseT > 3.6) {
-      this.startKickoff(this.scorer ? 1 - this.scorer.team : 0);
+    if (this.phase === 'goal') {
+      const kickTeam = this.scorer ? 1 - this.scorer.team : 0;
+      // The cut (camera's on the crowd): ball back on the spot, players most of the way home.
+      if (this.phaseT >= GOAL_SEQ.cut && this.phaseT - DT < GOAL_SEQ.cut) {
+        this.ball.reset(0, 0);
+        this.ball.pos.y = BALL.radius;
+        for (const p of this.players) {
+          this.kickoffSpot(p, kickTeam, tmpV);
+          p.pos.set(tmpV.x + (p.pos.x - tmpV.x) * 0.3, 0, tmpV.z + (p.pos.z - tmpV.z) * 0.3);
+          p.prevPos.copy(p.pos);
+          p.vel.scale(0.3);
+          p.action = 'none';
+        }
+      }
+      if (this.phaseT > GOAL_SEQ.end) this.startKickoff(kickTeam);
     }
 
     // Set piece timer.
@@ -532,6 +550,9 @@ export class Match {
 
     if (this.phase === 'play') this.checkOutOfPlay();
     if (this.advantage) this.watchAdvantage();
+
+    // A pass that has died short is just a loose ball: whoever's nearest goes for it.
+    if (this.passTarget && !this.owner && this.ball.onGround && Math.hypot(this.ball.vel.x, this.ball.vel.z) < 1.8 && this.ballDist(this.passTarget) > 2.5) this.passTarget = null;
 
     // Ownership persistence.
     if (this.owner && this.ballDist(this.owner) > 3) this.owner = null;
@@ -691,11 +712,16 @@ export class Match {
           const tz = dz / d;
           let speed: number;
           if (mode === 'loose') {
+            // Pace from what the intercept demands: reach the meeting point in time, plus a
+            // margin so we attack the ball rather than wait for it.
             const ip = this.ai.intercept[c.id];
-            const t = ip.t >= 0 ? ip.t : d / c.topSpeed;
-            // Attack loose balls: near-sprint when far, arrive under control when close.
-            const floor = d > 3 ? PLAYER.jogSpeed + 2.2 : d > 1 ? PLAYER.jogSpeed : 0;
-            speed = Math.max(floor, d / Math.max(0.2, t) + 2);
+            const dI = dist2D(c.pos.x, c.pos.z, ip.x, ip.z);
+            const need = ip.t >= 0 ? dI / Math.max(0.15, ip.t - 0.1) : c.topSpeed;
+            // A slow or dying ball won't come to us: go and get it.
+            const bs = Math.hypot(this.ball.vel.x, this.ball.vel.z);
+            const gap = this.ballDist(c);
+            const floor = gap > 3 ? PLAYER.jogSpeed + 2.2 : gap > 1 ? PLAYER.jogSpeed + (bs < 3 ? 1 : 0) : bs < 1.5 ? 2.5 : 1.2;
+            speed = Math.max(floor, need + 1.5);
           } else {
             // Close down hard, then ease in tight on the carrier.
             speed = d > 5 ? PLAYER.jogSpeed + 2.2 : Math.min(PLAYER.jogSpeed + 1, d * 3 + 0.8);
@@ -735,8 +761,14 @@ export class Match {
       this.ai.containTarget(c, out, 0.85);
       return 'press';
     }
-    // Loose ball or a pass in flight: ours to meet, or theirs to intercept.
-    if (this.passTarget && this.passTarget.team === c.team && this.passTarget !== c) return null;
+    // Loose ball or a pass in flight: ours to meet, or theirs to intercept. A pass meant for a
+    // teammate is his — unless we'd clearly get there first (it's under-hit, or coming our way).
+    const pt = this.passTarget;
+    if (pt && pt.team === c.team && pt !== c) {
+      const mine = this.ai.intercept[c.id].t;
+      const his = this.ai.intercept[pt.id].t;
+      if (mine < 0 || (his >= 0 && mine > his - 0.3)) return null;
+    }
     // A through ball for us: sprint for the planned spot until the ball is nearly there.
     if (this.passTarget === c) {
       const rt = this.ai.runTarget(c);
