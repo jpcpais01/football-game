@@ -572,6 +572,7 @@ export class AI {
       for (const p of m.teams[t].players) {
         const ip = this.intercept[p.id];
         if (p.role === 'GK' && !this.inOwnBox(p, ip.x, ip.z)) continue;
+        if (m.offsideFlagged(p) && m.passTarget !== p) continue;
         const score = ip.t >= 0 ? ip.t : 10 + dist2D(p.pos.x, p.pos.z, ip.x, ip.z) / p.topSpeed;
         if (score < bt) {
           bt = score;
