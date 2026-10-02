@@ -77,6 +77,8 @@ export class Player {
   kickContact = 0.15;
   /** The strike is with the weaker foot. */
   kickWeak = false;
+  /** Height of the ball at the moment of the strike (first-time volleys and half-volleys). */
+  kickHeight = 0;
   /** Preferred foot: 1 = right, -1 = left. */
   foot = 1;
   /** Throw-in (two hands) rather than a keeper's one-arm throw. */

@@ -52,6 +52,7 @@ it('shot with full power from 18m', () => {
   c.pos.set(34, 0, 3); c.prevPos.copy(c.pos); m.ball.reset(34.6, 3); m.owner = c;
   input.moveX = 1;
   m.step(input);
+  m.switchT = 99; // he's been in control a while: the press doesn't predate a switch
   input.events.push({ btn: 2, kind: 'up', hold: 0.8 });
   let maxH = 0, crossed: string | null = null;
   for (let i = 0; i < 120 * 3; i++) {
@@ -177,6 +178,7 @@ it('Pass pressed early on an incoming ball fires when it arrives', () => {
     m.ball.kick(-9, 0, -0.2 + trial * 0.04, 0, 0, 0);
     // Press and release Pass straight away; the ball needs ~1.5 s to arrive.
     m.step(input);
+    m.switchT = 99; // he's been in control a while: the press doesn't predate a switch
     input.events.push({ btn: 0, kind: 'down', hold: 0 }, { btn: 0, kind: 'up', hold: 0.1 });
     let passed = false;
     for (let i = 0; i < 120 * 3; i++) {
@@ -202,6 +204,7 @@ it('Pass and Shoot fire reliably while dribbling at a sprint', () => {
       m.ball.reset(5.6, 0); m.owner = c;
       input.moveX = 1; input.sprint = true;
       for (let i = 0; i < 120 + trial * 13; i++) { m.step(input); m.takeEvents(); }
+      m.switchT = 99; // he's been in control a while: the press doesn't predate a switch
       input.events.push({ btn, kind: 'down', hold: 0 }, { btn, kind: 'up', hold: btn === 2 ? 0.5 : 0.1 });
       for (let i = 0; i < 120 * 2; i++) {
         m.step(input);
@@ -237,6 +240,7 @@ it('a lofted pass from the wing becomes a cross into the box', () => {
     const lines: string[] = [];
     m.log = (s) => lines.push(s);
     m.step(input);
+    m.switchT = 99; // he's been in control a while: the press doesn't predate a switch
     input.events.push({ btn: 0, kind: 'down', hold: 0 }, { btn: 0, kind: 'up', hold: 0.4, swipeUp: true });
     let maxH = 0;
     for (let i = 0; i < 120 * 3; i++) {

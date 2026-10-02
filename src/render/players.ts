@@ -923,6 +923,11 @@ export class PlayersView {
           const lofted = p.kickLofted && !shot;
           const ground = !shot && !lofted;
           const finesse = shot && power < 0.55;
+          // First-time strikes take the ball where it arrives: on the bounce he's over it, in
+          // the air the leg rises to it and the body leans back and away (a side volley),
+          // and a high one takes him off the ground.
+          const vol = shot ? smoothstep(0.45, 0.95, p.kickHeight) : 0;
+          const halfV = shot ? smoothstep(0.18, 0.4, p.kickHeight) * (1 - vol) : 0;
           const tc = Math.max(0.05, p.kickContact);
           const tf = Math.max(tc + 0.05, p.actionDur);
           const t = p.actionT;
@@ -939,10 +944,10 @@ export class PlayersView {
           // ---- kicking leg
           // A side-foot pass is a pendulum from the hip (short back-lift, knee only half
           // bent); an instep strike folds the knee right up.
-          const backLift = ground ? -(0.12 + 0.4 * big) : -(0.2 + 0.65 * big);
-          const heel = ground ? 0.55 + 0.35 * big : 1.55 + 0.6 * big;
-          const contactHip = ground ? 0.4 : 0.32;
-          const followHip = ground ? 0.7 : lofted ? 1.55 : finesse ? 0.95 : 0.95 + 0.75 * big;
+          const backLift = ground ? -(0.12 + 0.4 * big) : -(0.2 + 0.65 * big) * (1 - 0.4 * vol);
+          const heel = (ground ? 0.55 + 0.35 * big : 1.55 + 0.6 * big) * (1 - 0.35 * vol);
+          const contactHip = (ground ? 0.4 : 0.32) + 1.05 * vol + 0.08 * halfV;
+          const followHip = (ground ? 0.7 : lofted ? 1.55 : finesse ? 0.95 : 0.95 + 0.75 * big) + 0.4 * vol;
           let kHip: number;
           let kKnee: number;
           if (u < 0.5) {
@@ -971,6 +976,8 @@ export class PlayersView {
           const tgt = clamp(-p.kickRel, -1.2, 1.2);
           const swingPhase = smoothstep(0.5, 1, u);
           const across = tgt * 0.45 * swingPhase * (1 - v * 0.5);
+          // A volley swings round from the side rather than straight through.
+          const kOutVol = 0.35 * vol * swingPhase * (1 - smoothstep(0.5, 1, v));
 
           // ---- standing leg: reaches on the last stride, plants, takes the load, the body
           // passes over it; a big strike lifts it off the ground for a moment.
@@ -988,7 +995,10 @@ export class PlayersView {
             pHip = lerp(0.14, -0.38, ease(smoothstep(0, 0.85, v)));
             pKnee = lerp(shot ? 0.48 : 0.36, 0.3, v);
           }
-          const hop = shot && power > 0.55 ? Math.sin(Math.PI * smoothstep(0.08, 0.62, v)) * (0.05 + 0.05 * big) : 0;
+          const hop =
+            (shot && power > 0.55 ? Math.sin(Math.PI * smoothstep(0.08, 0.62, v)) * (0.05 + 0.05 * big) : 0) +
+            // A high volley: both feet off as he swings through.
+            smoothstep(0.75, 1, vol) * Math.sin(Math.PI * smoothstep(0.7, 1, u) * (1 - v * 0.6)) * 0.14;
           if (hop > 0) pKnee += hop * 2.5; // tucks as he leaves the ground
 
           const apply = (gHip: number, gKnee: number, h: number, k: number) => [lerp(gHip, h, inK * (1 - outK)), lerp(gKnee, k, inK * (1 - outK))];
@@ -997,13 +1007,13 @@ export class PlayersView {
             [hipL, kneeL] = apply(hipL, kneeL, pHip, pKnee);
             ankleR = kAnkle;
             legYawR = (open + across) * inK;
-            legOutR = lerp(legOutR, kOut, inK * (1 - outK));
+            legOutR = lerp(legOutR, kOut + kOutVol, inK * (1 - outK));
           } else {
             [hipL, kneeL] = apply(hipL, kneeL, kHip, kKnee);
             [hipR, kneeR] = apply(hipR, kneeR, pHip, pKnee);
             ankleL = kAnkle;
             legYawL = (open + across) * inK;
-            legOutL = lerp(legOutL, kOut, inK * (1 - outK));
+            legOutL = lerp(legOutL, kOut + kOutVol, inK * (1 - outK));
           }
 
           // ---- arms: the opposite arm rises out wide on the back-lift and sweeps down
@@ -1033,7 +1043,11 @@ export class PlayersView {
           const atContact = Math.exp(-Math.pow((u - 1 + v * 2) * 2.2, 2));
           const overBall = ground ? 0.12 : lofted ? -0.26 : finesse ? 0.06 : power > 1 ? -0.2 : 0.22;
           flexExtra += (-0.08 * big * smoothstep(0.1, 0.5, u) * (1 - swingPhase) + overBall * swingPhase * (1 - outK) + (shot && !finesse ? 0.12 * Math.sin(Math.PI * v) : 0)) * inK;
-          sideExtra += -p.kickLeg * (0.08 + 0.16 * big) * Math.max(atContact, wind * 0.6) * inK;
+          sideExtra += -p.kickLeg * (0.08 + 0.16 * big + 0.4 * vol) * Math.max(atContact, wind * 0.6) * inK;
+          // Volley: lean back and let the kicking hip come up; half-volley: head over it.
+          leanF -= 0.2 * vol * swingPhase * (1 - outK);
+          flexExtra += 0.14 * halfV * swingPhase * (1 - outK);
+          pelvisRoll += -p.kickLeg * 0.2 * vol * swingPhase * (1 - outK);
           // Hips turn back with the leg, then through; shoulders do the opposite (the
           // "tension arc" from the kicking hip to the opposite shoulder).
           const turnBack = wind * (1 - swingPhase);

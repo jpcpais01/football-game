@@ -1,7 +1,7 @@
 import { Ball } from './ball';
 import { BALL, DT, GOAL_SEQ, MATCH, PITCH, PLAYER } from './constants';
 import { Btn, type InputState } from './input';
-import { solveFreeKick, solveGroundPass, solveLofted, solveShot } from './kick';
+import { predictBallAt, solveFreeKick, solveGroundPass, solveLofted, solveShot } from './kick';
 import { Player, type Attributes, type KickPlan, type Role } from './player';
 import { FORMATION_433, HAIR_COLORS, SKIN_TONES, TEAMS, makeAttributes, type TeamInfo } from './teams';
 import { V3, Rng, angleDiff, clamp, dist2D, smoothstep } from './vec';
@@ -88,6 +88,7 @@ export interface MatchEvents {
 }
 
 const tmpV = new V3();
+const tmpK = new V3();
 /** Tackling leg (boot and shin) radius, and the radius of a standing player's legs. */
 const TACKLE_LEG_R = 0.12;
 const VICTIM_LEG_R = 0.2;
@@ -1110,14 +1111,27 @@ export class Match {
   }
 
   /** Can the strike start now, i.e. will the ball be at the foot when the swing lands? */
-  private kickable(p: Player, contactIn = 0.12, reach: number = PLAYER.reach): boolean {
-    const b = this.ball;
+  /** Where the ball will be `dt` seconds from now: its real flight from its current state. */
+  private ballAt(dt: number, out: V3): V3 {
+    out.copy(this.ball.pos);
+    predictBallAt(this.ball, dt + 1e-6, (b, t) => {
+      out.copy(b.pos);
+      return t >= dt;
+    });
+    return out;
+  }
+
+  /**
+   * Can he strike the ball `contactIn` seconds from now? Judged on where the ball will
+   * really be then (its predicted flight: dropping, bouncing), so a pass is met in stride
+   * and a dropping ball can be volleyed (shots: up to waist height and a bit).
+   */
+  private kickable(p: Player, contactIn = 0.12, reach: number = PLAYER.reach, maxH = 1.0): boolean {
     if (this.heldBy === p) return true;
     if (this.heldBy) return false;
-    if (b.pos.y > 1.0) return false;
-    const fx = b.pos.x + b.vel.x * contactIn - (p.pos.x + p.vel.x * 0.8 * contactIn);
-    const fz = b.pos.z + b.vel.z * contactIn - (p.pos.z + p.vel.z * 0.8 * contactIn);
-    const d = Math.hypot(fx, fz);
+    const at = this.ballAt(contactIn, tmpK);
+    if (at.y > maxH) return false;
+    const d = Math.hypot(at.x - (p.pos.x + p.vel.x * 0.8 * contactIn), at.z - (p.pos.z + p.vel.z * 0.8 * contactIn));
     if (d > reach) return false;
     if (this.setPiece && this.setPiece.taker !== p) return false;
     return true;
@@ -1133,7 +1147,8 @@ export class Match {
     // the follow-through the rest.
     const timing = p.plan ? this.kickTiming(p.plan) : null;
     const reach = human ? HUMAN_STRIKE_REACH : PLAYER.reach;
-    if (p.plan && timing && !p.isBusy() && (p.touchCooldown <= 0 || p.sinceTouch > 0.12) && this.kickable(p, timing.contact, reach)) {
+    const maxH = p.plan?.type === 'shot' && !this.setPiece ? 1.25 : 1.0;
+    if (p.plan && timing && !p.isBusy() && (p.touchCooldown <= 0 || p.sinceTouch > 0.12) && this.kickable(p, timing.contact, reach, maxH)) {
       if (this.setPiece && (this.setPiece.taker !== p || this.setPiece.t < 0.7)) return;
       const plan = p.plan;
       const dur = timing.contact + timing.follow;
@@ -1154,6 +1169,7 @@ export class Match {
       p.kickPower = plan.power;
       p.kickLofted = plan.type === 'lob' || plan.type === 'cross' || plan.type === 'clear' || !!plan.lofted;
       p.kickRel = angleDiff(p.facing, Math.atan2(plan.dirZ, plan.dirX));
+      p.kickHeight = this.heldBy === p ? 0 : this.ballAt(timing.contact, tmpK).y;
     }
 
     if ((p.action === 'kick' || p.action === 'throw') && !p.actionDone && p.actionT >= p.kickContact) {
@@ -1161,7 +1177,7 @@ export class Match {
       const plan = p.plan;
       p.plan = null;
       const contact = human ? HUMAN_CONTACT_REACH : PLAYER.reach + 0.35;
-      if (plan && (this.heldBy === p || (this.ballDist(p) < contact && this.ball.pos.y < 1.3))) this.performKick(p, plan);
+      if (plan && (this.heldBy === p || (this.ballDist(p) < contact && this.ball.pos.y < 1.45))) this.performKick(p, plan);
       else if (plan && this.time < plan.expires) p.plan = plan; // missed it: stay queued and try again
     }
 
@@ -1445,6 +1461,9 @@ export class Match {
     let base = 0.05;
     let skill = p.attrs.passing;
     let strength = 0.4;
+    // First-time technique (set by the shot): error multiplier and upward bias.
+    let techErr = 1;
+    let techLift = 0;
 
     const opp = PITCH.halfL * team.dir;
     const setPieceKind = this.setPiece?.kind;
@@ -1485,6 +1504,14 @@ export class Match {
       skill = p.attrs.shooting;
       base = 0.055;
       const pw = plan.power;
+      // First time (the ball arriving, not at his feet): how it comes decides the strike.
+      // On the bounce he gets over it (topspin keeps it down, a touch less precise); in the
+      // air it's a volley - hit harder, wilder, and it likes to fly; across the line of an
+      // airborne ball (a side volley) it's hardest. A firm pass met straight back adds pace.
+      const inc = Math.hypot(b.vel.x, b.vel.z);
+      const firstTime = !fromHands && this.owner !== p && inc > 3;
+      const volley = firstTime ? smoothstep(0.45, 0.9, b.pos.y) : 0;
+      const half = firstTime ? smoothstep(0.18, 0.4, b.pos.y) * (1 - volley) : 0;
       // Aim: stick sideways picks a post, otherwise the far post.
       let sideSign: number;
       if (Math.abs(plan.dirZ) > 0.35) sideSign = Math.sign(plan.dirZ);
@@ -1493,11 +1520,21 @@ export class Match {
       const finesse = pw < 0.55;
       const ty = 0.35 + Math.min(pw, 1) * 1.45 + Math.max(0, pw - 1) * 6;
       // Shot power stat: the same swing sends the ball harder.
-      const speed = (15 + Math.min(pw, 1.1) * 16) * (0.88 + 0.24 * p.attrs.power);
+      let speed = (15 + Math.min(pw, 1.1) * 16) * (0.88 + 0.24 * p.attrs.power);
+      if (firstTime) {
+        const gx = opp - b.pos.x;
+        const gz = tz - b.pos.z;
+        const gd = Math.max(0.1, Math.hypot(gx, gz));
+        const back = -(b.vel.x * gx + b.vel.z * gz) / (gd * inc); // 1 = struck straight back
+        speed *= 1 + clamp(inc * back * 0.01, 0, 0.12) + volley * 0.06;
+        const across = Math.sqrt(Math.max(0, 1 - back * back));
+        techErr = 1 + half * 0.25 + volley * (0.6 + 0.35 * across);
+        techLift = volley * 0.05;
+      }
       // Finesse shots curl back toward goal; driven shots get topspin.
       const curlDir = -Math.sign(tz) * team.dir;
       const curl = finesse ? curlDir * 28 * (1 - pw) : 0;
-      const top = finesse ? 4 : 6 + pw * 8;
+      const top = (finesse ? 4 : 6 + pw * 8) + half * 5 - volley * 4;
       const r = solveShot(b.pos, opp, ty, tz, speed, top, curl);
       vel = r.vel;
       spin = r.spin;
@@ -1602,9 +1639,9 @@ export class Match {
     const relBall = Math.hypot(b.vel.x - p.vel.x, b.vel.z - p.vel.z);
     const ballPen = clamp(relBall / 12, 0, 1);
     const weak = p.kickWeak ? 1.35 : 1; // the weaker foot is less precise
-    const sd = base * (1.3 - skill) * weak * (1 + bodyPen * 2.2 + runPen * 0.7 + press * 0.9 + ballPen * 0.9);
+    const sd = base * (1.3 - skill) * weak * techErr * (1 + bodyPen * 2.2 + runPen * 0.7 + press * 0.9 + ballPen * 0.9);
     const yawErr = this.rng.gauss() * sd;
-    const pitchErr = this.rng.gauss() * sd * (plan.type === 'shot' ? 0.6 : 0.35);
+    const pitchErr = this.rng.gauss() * sd * (plan.type === 'shot' ? 0.6 : 0.35) + techLift * (1.2 - skill);
     const speedErr = 1 + this.rng.gauss() * sd * 0.8;
     const hs = Math.hypot(vel.x, vel.z);
     const yaw = kickYaw + yawErr;

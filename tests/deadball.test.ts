@@ -49,6 +49,7 @@ describe('dead-ball shots', () => {
     sp.aimZ = 2.4;
     sp.aimY = 0.8;
     const input = makeInput();
+    m.switchT = 99; // he's been lining it up a while: the press doesn't predate a switch
     input.events.push({ btn: Btn.C, kind: 'up', hold: 0.5, swipeUp: false });
     m.step(input);
     expect(m.aimingShot).toBe(false);
