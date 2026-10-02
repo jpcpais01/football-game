@@ -99,6 +99,12 @@ export class PixelPass {
           }
           c += bloom / float(TAPS) * 0.9;
 
+          // Clarity: a touch of local contrast against the 1-pixel neighbourhood, so shapes
+          // (kits, numbers, mown stripes) read crisply at low resolution.
+          vec3 nb = (texture2D(tColor, uv + vec2(e.x, 0.0)).rgb + texture2D(tColor, uv - vec2(e.x, 0.0)).rgb +
+                     texture2D(tColor, uv + vec2(0.0, e.y)).rgb + texture2D(tColor, uv - vec2(0.0, e.y)).rgb) * 0.25;
+          c = max(c + clamp(c - nb, -0.25, 0.25) * 0.35, 0.0);
+
           // Filmic tone map, then display gamma.
           c = toneMapping(c);
           c = pow(max(c, 0.0), vec3(1.0 / 2.2));
@@ -113,12 +119,26 @@ export class PixelPass {
           c = mix(c, c * vec3(1.07, 1.0, 0.88), smoothstep(0.55, 1.0, l) * 0.4);
           c = mix(vec3(l), c, 1.12);
 
+          // Pop, the way a good print does it rather than a filter: set a real black point,
+          // a filmic S-curve for punchy mid-tones, then vibrance — muted colours (grass in
+          // shade, kits under ACES) gain the most, already-saturated ones are left alone so
+          // skin and sky stay believable.
+          c = max(c - 0.03, 0.0) / 0.97;
+          c = mix(c, c * c * (3.0 - 2.0 * c), 0.42);
+          float hi = max(c.r, max(c.g, c.b));
+          float lo = min(c.r, min(c.g, c.b));
+          float sat = (hi - lo) / max(hi, 1e-3);
+          float l2 = dot(c, vec3(0.299, 0.587, 0.114));
+          c = mix(vec3(l2), c, 1.0 + 0.55 * (1.0 - sat) * smoothstep(0.03, 0.2, hi));
+          // Light and shadow split: warm light, cool shade, a little stronger than before.
+          c *= mix(vec3(0.94, 0.98, 1.08), vec3(1.05, 1.01, 0.95), smoothstep(0.2, 0.75, l2));
+
           // Quantise with an ordered dither: gradients turn into crisp pixel bands.
           float b = bayer4(px) - 0.5;
           c = floor(c * uLevels + 0.5 + b * 0.85) / uLevels;
 
           // Outlines in a deeper shade of the object's own colour (not a flat dark line).
-          vec3 ink = c * vec3(0.42, 0.4, 0.52);
+          vec3 ink = c * c * vec3(0.55, 0.5, 0.7);
           c = mix(c, ink, edge * 0.9);
           gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
         }

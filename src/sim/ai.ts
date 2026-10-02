@@ -23,6 +23,39 @@ const BOX_SPOTS: [number, number][] = [
   [-14, -6],
 ];
 
+/**
+ * Individuality. Every player reads the same field (shape, space, opponents, teammates),
+ * but weighs it in his own way:
+ * - discipline: how tightly he keeps to his place in the shape,
+ * - creativity: how far he roams looking for pockets of space, and how forward-minded,
+ * - work: how quickly he gets moving and how much he sprints to recover,
+ * - react: reading of the game (how fast his target follows a change in play).
+ */
+export interface Traits {
+  discipline: number;
+  creativity: number;
+  work: number;
+  react: number;
+}
+
+/** Stable pseudo-random in [0, 1) per player and channel (no Rng draws: keeps sims reproducible). */
+function hash01(id: number, k: number): number {
+  const s = Math.sin(id * 127.1 + k * 311.7) * 43758.5453;
+  return s - Math.floor(s);
+}
+
+function traitsFor(p: Player): Traits {
+  const a = p.attrs;
+  const r = (k: number) => hash01(p.id, k) - 0.5;
+  const role = p.role === 'DEF' ? 0 : p.role === 'MID' ? 1 : 2;
+  return {
+    discipline: clamp([0.75, 0.55, 0.35][role] + a.defending * 0.15 + r(1) * 0.4, 0.1, 1),
+    creativity: clamp([0.25, 0.55, 0.75][role] + a.passing * 0.15 + r(2) * 0.4, 0.05, 1),
+    work: clamp(0.45 + a.pace * 0.2 + r(3) * 0.5, 0.15, 1),
+    react: clamp(0.4 + (a.defending + a.passing) * 0.15 + r(4) * 0.4, 0.15, 1),
+  };
+}
+
 /** Team brains. Coordinates in comments are "team frame": +x is the goal the team attacks. */
 export class AI {
   readonly intercept: Intercept[] = [];
@@ -49,10 +82,33 @@ export class AI {
   private possStart = 0;
   private patience = 0.6;
   private tmp = new V3();
+  private tmp2 = new V3();
   private pose: DivePose = { roll: 0, lift: 0 };
+  /** Per-player character (fixed for the match): see `traitsFor`. */
+  readonly traits: Traits[] = [];
+  /** Off-ball: smoothed goal each player is drifting toward (world). */
+  private goalX: number[] = [];
+  private goalZ: number[] = [];
+  /** Off-ball: chosen pocket of space, as an offset from the shape slot (team frame). */
+  private seekDX: number[] = [];
+  private seekDZ: number[] = [];
+  private seekAt: number[] = [];
+  /** Zonal marking: who each defender has picked up (refreshed per team). */
+  private mark: (Player | null)[] = [];
+  private markAt = [0, 0];
+  private offBallT: number[] = [];
 
   constructor(private m: Match) {
     for (let i = 0; i < 22; i++) {
+      const p = m.players[i];
+      this.traits.push(traitsFor(p));
+      this.goalX.push(p.pos.x);
+      this.goalZ.push(p.pos.z);
+      this.seekDX.push(0);
+      this.seekDZ.push(0);
+      this.seekAt.push(0);
+      this.mark.push(null);
+      this.offBallT.push(-1);
       this.intercept.push({ t: -1, x: 0, z: 0 });
       this.nextDecision.push(0);
       this.tackleReady.push(0);
@@ -480,9 +536,7 @@ export class AI {
         this.moveTo(p, run.x, run.z, true, false);
         return;
       }
-      this.slot(p, this.tmp);
-      this.moveTo(p, this.tmp.x, this.tmp.z, false, false);
-      return;
+      return this.offBall(p, true);
     }
     // Defending or loose ball.
     if (this.chaser[p.team] === p) {
@@ -504,8 +558,187 @@ export class AI {
       p.lookAt = p.lookTarget;
       return;
     }
+    this.offBall(p, false);
+  }
+
+  /**
+   * Off-ball movement as a small steering field. The shape slot is the anchor; on top of
+   * it each player adds the force that matters to him right now:
+   * - attacking: drift into a pocket of space with a clear lane from the ball,
+   * - defending: pick up the most dangerous attacker in his zone and stand goal-side,
+   * - always: keep apart from teammates, so the team spreads by itself.
+   * The result is not followed directly: each player's goal eases toward it at his own
+   * reading speed, so a turnover ripples through the team instead of snapping everyone
+   * at once, and those who read it late have to sprint to recover.
+   */
+  private offBall(p: Player, attacking: boolean): void {
+    const m = this.m;
+    const tr = this.traits[p.id];
+    const dir = m.teams[p.team].dir;
     this.slot(p, this.tmp);
-    this.moveTo(p, this.tmp.x, this.tmp.z, false, false);
+    const ax = this.tmp.x;
+    const az = this.tmp.z;
+    let tx = ax;
+    let tz = az;
+
+    if (attacking) {
+      if (m.time >= this.seekAt[p.id]) this.seekSpace(p, ax, az);
+      tx += this.seekDX[p.id] * dir;
+      tz += this.seekDZ[p.id] * dir;
+    } else {
+      if (m.time >= this.markAt[p.team]) this.assignMarks(p.team);
+      const a = this.mark[p.id];
+      if (a) {
+        // Goal-side of his man, shaded toward the ball; tighter the nearer our goal.
+        const gx = -dir * PITCH.halfL;
+        const gdx = gx - a.pos.x;
+        const gdz = -a.pos.z * 0.7;
+        const gd = Math.max(0.1, Math.hypot(gdx, gdz));
+        const bdx = m.ball.pos.x - a.pos.x;
+        const bdz = m.ball.pos.z - a.pos.z;
+        const bd = Math.max(0.1, Math.hypot(bdx, bdz));
+        const danger = 1 - clamp((a.pos.x * -dir + PITCH.halfL) / PITCH.halfL, 0, 1);
+        const gap = 1.4 + (1 - danger) * 2.2;
+        let mx = a.pos.x + (gdx / gd) * gap + (bdx / bd) * 0.9;
+        const mz = a.pos.z + (gdz / gd) * gap + (bdz / bd) * 0.9;
+        // Defenders step out of the line only so far; beyond that they pass him on.
+        if (p.role === 'DEF') mx = dir * Math.min(mx * dir, ax * dir + 5);
+        const w = clamp(0.45 + danger * 0.35 + (1 - tr.discipline) * 0.15, 0, 0.92);
+        tx += (mx - tx) * w;
+        tz += (mz - tz) * w;
+      }
+    }
+
+    // Separation: nobody crowds a teammate's space.
+    let sx = 0;
+    let sz = 0;
+    for (const q of m.teams[p.team].players) {
+      if (q === p || q.role === 'GK') continue;
+      const dx = tx - q.pos.x;
+      const dz = tz - q.pos.z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 > 49 || d2 < 1e-4) continue;
+      const d = Math.sqrt(d2);
+      const f = ((7 - d) / 7) * 2.6;
+      sx += (dx / d) * f;
+      sz += (dz / d) * f;
+    }
+    tx = clamp(tx + sx, -PITCH.halfL + 1.5, PITCH.halfL - 1.5);
+    tz = clamp(tz + sz, -PITCH.halfW + 1, PITCH.halfW - 1);
+
+    // Reading of the game: the goal follows the field at the player's own pace.
+    if (m.time - this.offBallT[p.id] > 0.25) {
+      this.goalX[p.id] = tx;
+      this.goalZ[p.id] = tz;
+    }
+    this.offBallT[p.id] = m.time;
+    const tau = 0.18 + (1 - tr.react) * 0.55;
+    const k = 1 - Math.exp(-DT / tau);
+    const gx = (this.goalX[p.id] += (tx - this.goalX[p.id]) * k);
+    const gz = (this.goalZ[p.id] += (tz - this.goalZ[p.id]) * k);
+
+    // Recovery: caught upfield after a turnover (or badly out of place), hard workers sprint back.
+    const d = dist2D(p.pos.x, p.pos.z, gx, gz);
+    const behindPlay = !attacking && (p.pos.x - m.ball.pos.x) * dir > 2;
+    const turnover = m.time - this.possStart < 3;
+    const urgent = d > 6 + (1 - tr.work) * 10 && (behindPlay || turnover);
+    this.moveTo(p, gx, gz, urgent, !attacking || d < 6);
+    if (!urgent) p.wantSpeed *= 0.88 + tr.work * 0.2;
+  }
+
+  /**
+   * Choose a pocket of space near the slot: open from opponents, a clear lane from the
+   * ball, some forward progress, not on top of a teammate, and not too far from where the
+   * shape wants him (how far depends on his discipline and creativity). Re-read every
+   * half second or so, staggered so the team never moves in lockstep.
+   */
+  private seekSpace(p: Player, ax: number, az: number): void {
+    const m = this.m;
+    const tr = this.traits[p.id];
+    const dir = m.teams[p.team].dir;
+    const ball = m.ball.pos;
+    const line = this.offside[p.team];
+    const roam = 3 + tr.creativity * 7;
+    let best = -1e9;
+    let bdx = 0;
+    let bdz = 0;
+    for (let i = 0; i <= 8; i++) {
+      const ang = (i / 8) * Math.PI * 2 + p.id;
+      const r = i === 8 ? 0 : roam * (0.55 + 0.45 * hash01(p.id + i, m.time | 0));
+      // Candidate offsets in team frame, sticking near the previous choice.
+      const ox = i === 8 ? this.seekDX[p.id] : Math.cos(ang) * r;
+      const oz = i === 8 ? this.seekDZ[p.id] : Math.sin(ang) * r;
+      const cx = ax + ox * dir;
+      const cz = az + oz * dir;
+      if (Math.abs(cz) > PITCH.halfW - 1.5 || Math.abs(cx) > PITCH.halfL - 3) continue;
+      let open = 99;
+      for (const q of m.teams[1 - p.team].players) open = Math.min(open, dist2D(q.pos.x, q.pos.z, cx, cz));
+      let crowd = 0;
+      for (const q of m.teams[p.team].players) {
+        if (q === p) continue;
+        const d = dist2D(q.pos.x, q.pos.z, cx, cz);
+        if (d < 9) crowd += (9 - d) / 9;
+      }
+      const lane = clamp(this.laneClearance(ball.x, ball.z, cx, cz, p.team, true), -2, 3);
+      const fromBall = dist2D(ball.x, ball.z, cx, cz);
+      const range = fromBall < 7 ? (7 - fromBall) * 0.3 : fromBall > 30 ? (fromBall - 30) * 0.1 : 0;
+      const prog = cx * dir;
+      let s = Math.min(open, 9) * 0.35 + lane * 0.45 + ox * (0.04 + tr.creativity * 0.1) - crowd * 0.6 - range;
+      s -= Math.hypot(ox, oz) * (0.04 + tr.discipline * 0.12);
+      if (prog > line - 0.8) s -= (prog - line + 0.8) * 1.5;
+      if (i === 8) s += 0.4; // hysteresis
+      if (s > best) {
+        best = s;
+        bdx = ox;
+        bdz = oz;
+      }
+    }
+    this.seekDX[p.id] = bdx;
+    this.seekDZ[p.id] = bdz;
+    this.seekAt[p.id] = m.time + 0.45 + hash01(p.id, m.time * 3) * 0.5 + (1 - tr.react) * 0.3;
+  }
+
+  /**
+   * Zonal marking: each free defender picks up the most dangerous opponent inside his
+   * zone (around his slot), greedily by cost, each attacker taken once. The carrier is
+   * the chasers' job, so he's left out.
+   */
+  private assignMarks(team: number): void {
+    const m = this.m;
+    const dir = m.teams[team].dir;
+    const carrier = m.owner ?? m.heldBy;
+    const mine = m.teams[team].players;
+    const theirs = m.teams[1 - team].players;
+    for (const p of mine) this.mark[p.id] = null;
+    const taken = new Set<Player>();
+    for (let round = 0; round < mine.length; round++) {
+      let best = 1e9;
+      let bp: Player | null = null;
+      let bq: Player | null = null;
+      for (const p of mine) {
+        if (p.role === 'GK' || this.mark[p.id] || p === this.chaser[team]) continue;
+        const a = this.slot(p, this.tmp2);
+        const zone = 9 + (1 - this.traits[p.id].discipline) * 6 + (p.role === 'DEF' ? 2 : 0);
+        for (const q of theirs) {
+          if (q.role === 'GK' || q === carrier || taken.has(q)) continue;
+          const d = dist2D(a.x, a.z, q.pos.x, q.pos.z);
+          if (d > zone) continue;
+          // Danger: near our goal and central.
+          const toGoal = q.pos.x * -dir + PITCH.halfL;
+          const danger = clamp(1 - toGoal / 60, 0, 1) * (1 - Math.abs(q.pos.z) / (PITCH.halfW * 1.6));
+          const cost = d - danger * 8;
+          if (cost < best) {
+            best = cost;
+            bp = p;
+            bq = q;
+          }
+        }
+      }
+      if (!bp || !bq) break;
+      this.mark[bp.id] = bq;
+      taken.add(bq);
+    }
+    this.markAt[team] = m.time + 0.3;
   }
 
   /** Box positions while the ball is in a crossing area (null = keep normal shape). */
