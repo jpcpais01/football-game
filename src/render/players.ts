@@ -1050,29 +1050,89 @@ export class PlayersView {
           break;
         }
         case 'tackle': {
-          const k = Math.sin(Math.min(1, pr * 1.6) * Math.PI * 0.5) * (1 - smoothstep(0.7, 1, pr));
-          hipR = lerp(hipR, 1.1, k);
-          kneeR = lerp(kneeR, 0.12, k);
-          hipL = lerp(hipL, -0.3, k);
-          kneeL = lerp(kneeL, 0.9, k);
-          hipY -= 0.2 * k;
-          leanF += 0.15 * k;
-          flexExtra += 0.3 * k;
-          armOutL = armOutR = 0.6 * k + 0.1;
+          // Block tackle: plant and sink on the standing leg, swing the tackling leg low and
+          // almost straight with the foot turned out (inside of the boot to the ball), hips
+          // opening toward it, the opposite arm forward for balance. The reach follows the
+          // same curve as the sim's tackling leg, so contact happens where you see it.
+          const load = smoothstep(0, 0.2, pr) * (1 - smoothstep(0.75, 1, pr));
+          const reach = smoothstep(0.12, 0.42, pr) * (1 - smoothstep(0.62, 0.9, pr));
+          const right = p.id % 3 !== 0; // most are right-footed
+          const side = right ? -1 : 1; // tackling leg's side (left = +)
+          const tHip = 1.05;
+          const tKnee = 0.18;
+          if (right) {
+            hipR = lerp(hipR, tHip, reach);
+            kneeR = lerp(kneeR, tKnee, reach);
+            legYawR = lerp(legYawR, -0.5, reach);
+            legOutR = lerp(legOutR, 0.12, reach);
+            hipL = lerp(hipL, -0.15, load);
+            kneeL = lerp(kneeL, 0.75, load);
+            armL = lerp(armL, -0.65, reach);
+            armR = lerp(armR, 0.45, reach);
+          } else {
+            hipL = lerp(hipL, tHip, reach);
+            kneeL = lerp(kneeL, tKnee, reach);
+            legYawL = lerp(legYawL, 0.5, reach);
+            legOutL = lerp(legOutL, 0.12, reach);
+            hipR = lerp(hipR, -0.15, load);
+            kneeR = lerp(kneeR, 0.75, load);
+            armR = lerp(armR, -0.65, reach);
+            armL = lerp(armL, 0.45, reach);
+          }
+          hipY -= 0.17 * load;
+          leanF += 0.12 * load - 0.22 * reach;
+          pelvisYaw += side * 0.22 * reach;
+          twist += side * 0.18 * reach;
+          armOutL = armOutR = 0.1 + 0.5 * load;
+          elbowL = elbowR = 0.5;
           break;
         }
         case 'slide': {
-          const k = smoothstep(0, 0.18, pr) * (1 - smoothstep(0.75, 1, pr));
-          leanF = lerp(leanF, -1.0, k);
-          flexExtra += 0.25 * k; // curl up over the legs
-          hipY = lerp(hipY, 0.34, k);
-          hipR = lerp(hipR, 1.45, k);
-          kneeR = lerp(kneeR, 0.05, k);
-          hipL = lerp(hipL, 0.9, k);
-          kneeL = lerp(kneeL, 1.7, k);
-          armL = lerp(armL, -0.2, k);
-          armR = lerp(armR, 0.5, k);
-          armOutL = armOutR = lerp(0.1, 0.7, k);
+          // Slide tackle: down onto the hip and thigh of the tucked leg, the leading leg
+          // straight out just above the grass, the trailing leg folded under, torso back,
+          // the hand on the tucked side to the turf and the other arm up for balance; then
+          // roll forward over the tucked knee and up.
+          const down = smoothstep(0.02, 0.16, pr);
+          const rise = smoothstep(0.64, 0.9, pr);
+          const lying = down * (1 - rise);
+          const kneel = rise * (1 - smoothstep(0.9, 1, pr));
+          const reach = smoothstep(0.04, 0.14, pr) * (1 - smoothstep(0.6, 0.76, pr));
+          const right = p.id % 3 !== 0;
+          const tuck = right ? 1 : -1; // the folded leg's side (left = +)
+          hipY = lerp(hipY, 0.24, lying) + 0.3 * kneel;
+          leanF = lerp(leanF, -0.95, lying) + 0.45 * kneel;
+          roll += tuck * 0.3 * lying;
+          flexExtra += 0.2 * lying;
+          // (Hip angles are relative to the pelvis, which leans back with the torso: the lead
+          // leg ends up level along the grass, the tucked thigh pointing forward.)
+          const lead = { hip: lerp(0.35, 0.62, reach), knee: lerp(0.5, 0.05, reach) };
+          const fold = { hip: 0.5, knee: 2.0 };
+          const up = { hip: 1.15, knee: 1.9 };
+          if (right) {
+            hipR = lerp(lerp(hipR, lead.hip, lying), up.hip * 0.6, kneel);
+            kneeR = lerp(lerp(kneeR, lead.knee, lying), 0.9, kneel);
+            hipL = lerp(lerp(hipL, fold.hip, lying), up.hip, kneel);
+            kneeL = lerp(lerp(kneeL, fold.knee, lying), up.knee, kneel);
+            legOutL = lerp(legOutL, 0.28, lying);
+            armL = lerp(armL, 0.75, lying);
+            armOutL = lerp(armOutL, 0.45, lying);
+            elbowL = lerp(elbowL, 0.15, lying);
+            armR = lerp(armR, -1.1, lying);
+            armOutR = lerp(armOutR, 0.85, lying);
+            elbowR = lerp(elbowR, 0.5, lying);
+          } else {
+            hipL = lerp(lerp(hipL, lead.hip, lying), up.hip * 0.6, kneel);
+            kneeL = lerp(lerp(kneeL, lead.knee, lying), 0.9, kneel);
+            hipR = lerp(lerp(hipR, fold.hip, lying), up.hip, kneel);
+            kneeR = lerp(lerp(kneeR, fold.knee, lying), up.knee, kneel);
+            legOutR = lerp(legOutR, 0.28, lying);
+            armR = lerp(armR, 0.75, lying);
+            armOutR = lerp(armOutR, 0.45, lying);
+            elbowR = lerp(elbowR, 0.15, lying);
+            armL = lerp(armL, -1.1, lying);
+            armOutL = lerp(armOutL, 0.85, lying);
+            elbowL = lerp(elbowL, 0.5, lying);
+          }
           break;
         }
         case 'dive': {

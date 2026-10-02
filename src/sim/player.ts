@@ -151,6 +151,9 @@ export class Player {
     return this.action !== 'none';
   }
 
+  /** Speed a slide tackle starts with (set as he goes down). */
+  slideV0 = 7.5;
+
   startAction(kind: ActionKind, dur: number, dirX: number, dirZ: number): void {
     this.action = kind;
     this.actionT = 0;
@@ -192,9 +195,10 @@ export class Player {
         tx = this.actionDirX * lunge;
         tz = this.actionDirZ * lunge;
       } else if (a === 'slide') {
-        // Slide: ground friction decelerates a fast initial burst.
-        const p = this.actionT / this.actionDur;
-        const s = Math.max(0, 7.5 * (1 - p * 1.6));
+        // Slide: he goes down with the pace he had (a burst if he was jogging) and the
+        // grass brakes him to a stop (~2-3 m).
+        if (this.actionT <= dt * 1.5) this.slideV0 = clamp(Math.hypot(this.vel.x, this.vel.z) + 1, 6, 8.5);
+        const s = Math.max(0, this.slideV0 - 12.5 * this.actionT);
         this.vel.x = this.actionDirX * s;
         this.vel.z = this.actionDirZ * s;
         tx = this.vel.x;

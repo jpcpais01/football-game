@@ -88,6 +88,18 @@ export interface MatchEvents {
 }
 
 const tmpV = new V3();
+/** Tackling leg (boot and shin) radius, and the radius of a standing player's legs. */
+const TACKLE_LEG_R = 0.12;
+const VICTIM_LEG_R = 0.2;
+
+/** Ground distance from (x, z) to a segment. */
+function segDist(x: number, z: number, s: { ax: number; az: number; bx: number; bz: number }): number {
+  const vx = s.bx - s.ax;
+  const vz = s.bz - s.az;
+  const l2 = vx * vx + vz * vz;
+  const t = l2 > 1e-9 ? clamp(((x - s.ax) * vx + (z - s.az) * vz) / l2, 0, 1) : 0;
+  return Math.hypot(x - (s.ax + vx * t), z - (s.az + vz * t));
+}
 
 /** How long a human Pass/Shoot/Through stays queued waiting for the ball (s). */
 const HUMAN_BUFFER = 2.5;
@@ -126,6 +138,8 @@ export class Match {
   lastFoul: Foul | null = null;
   /** Advantage being played after a foul: brought back if the fouled team loses the ball. */
   advantage: { team: number; x: number; z: number; penalty: boolean; until: number } | null = null;
+  /** Who struck the last shot (headers included); see `shotTeam`. */
+  private shotBy: Player | null = null;
   /** Wall players block (don't play) the ball until this time. */
   private wallUntil = -1;
 
@@ -850,6 +864,7 @@ export class Match {
   /** Where the active player should go to win the ball, if anywhere. */
   private seekTarget(c: Player, out: V3): 'loose' | 'press' | null {
     if (this.heldBy || this.phase !== 'play') return null;
+    if (this.shotTeam() === c.team) return null; // our shot: don't run into its path
     const own = this.owner;
     if (own && own.team === c.team) return null;
     if (own) {
@@ -1167,30 +1182,44 @@ export class Match {
 
     if ((p.action === 'tackle' || p.action === 'slide') && !p.actionDone) {
       const slide = p.action === 'slide';
-      const t0 = slide ? 0.08 : 0.1;
-      const t1 = slide ? 0.55 : 0.3;
-      if (p.actionT >= t0 && p.actionT <= t1) {
-        const reachFwd = slide ? 0.9 : 0.55;
-        const fx = p.pos.x + p.actionDirX * reachFwd;
-        const fz = p.pos.z + p.actionDirZ * reachFwd;
+      const leg = this.tackleLeg(p);
+      if (leg) {
         const b = this.ball;
-        const d = dist2D(fx, fz, b.pos.x, b.pos.z);
-        if (d < (slide ? 1.05 : 0.8) && b.pos.y < 0.7 && !this.heldBy) {
+        // The opponent it can catch: the carrier, or someone who's just got rid of it.
+        const victim = this.owner && this.owner.team !== p.team ? this.owner
+          : this.lastKicker && this.lastKicker.team !== p.team && this.time - this.lastKickTime < 0.6 ? this.lastKicker : null;
+        // Contact means real contact: the leg capsule against his legs (not a radius round him).
+        const bodyHit = !!victim && victim.action !== 'stumble' && segDist(victim.pos.x, victim.pos.z, leg) < TACKLE_LEG_R + VICTIM_LEG_R;
+        const ballHit = !this.heldBy && b.pos.y < (slide ? 0.45 : 0.6) && segDist(b.pos.x, b.pos.z, leg) < TACKLE_LEG_R + BALL.radius + 0.04;
+        if (ballHit) {
           p.actionDone = true;
-          this.resolveTackle(p, slide);
-        } else {
-          // Missed the ball but caught the man: the carrier, or someone who's just got rid of it.
-          const victim = this.owner && this.owner.team !== p.team ? this.owner
-            : this.lastKicker && this.lastKicker.team !== p.team && this.time - this.lastKickTime < 0.6 ? this.lastKicker : null;
-          if (victim && victim.action !== 'stumble' && dist2D(fx, fz, victim.pos.x, victim.pos.z) < (slide ? 0.75 : 0.6)) {
-            p.actionDone = true;
-            const late = victim !== this.owner;
-            if (this.phase === 'play' && this.rng.next() < this.foulChance(p, victim, slide, false) + (late ? 0.2 : 0)) this.commitFoul(p, victim, slide, late);
-            else victim.startAction('stumble', 0.4, 0, 0);
-          }
+          this.resolveTackle(p, slide, bodyHit);
+        } else if (bodyHit) {
+          // Missed the ball but caught the man.
+          p.actionDone = true;
+          const late = victim !== this.owner;
+          if (this.phase === 'play' && this.rng.next() < this.foulChance(p, victim!, slide, false) + (late ? 0.2 : 0)) this.commitFoul(p, victim!, slide, late);
+          else victim!.startAction('stumble', 0.4, 0, 0);
         }
       }
     }
+  }
+
+  /**
+   * The tackling leg as a capsule on the ground (hip to boot), extending and withdrawing
+   * on the same timeline as the animation: a standing tackle reaches ~0.85 m in front of
+   * the body (plus the lunge), a slide's straight leg ~1.05 m. Null while the leg isn't out.
+   */
+  private tackleLeg(p: Player): { ax: number; az: number; bx: number; bz: number } | null {
+    const slide = p.action === 'slide';
+    const pr = p.actionT / p.actionDur;
+    const ext = slide ? smoothstep(0.04, 0.14, pr) * (1 - smoothstep(0.6, 0.76, pr)) : smoothstep(0.12, 0.42, pr) * (1 - smoothstep(0.62, 0.9, pr));
+    if (ext < 0.35) return null;
+    const dx = p.actionDirX;
+    const dz = p.actionDirZ;
+    const from = slide ? -0.15 : 0.15;
+    const to = slide ? 0.2 + 0.85 * ext : 0.25 + 0.6 * ext;
+    return { ax: p.pos.x + dx * from, az: p.pos.z + dz * from, bx: p.pos.x + dx * to, bz: p.pos.z + dz * to };
   }
 
   /** How the challenge comes in, relative to the victim's run: 1 = straight from behind. */
@@ -1212,6 +1241,18 @@ export class Match {
     f += clamp((p.speed - 5) / 4, 0, 1) * 0.14;
     f -= p.attrs.defending * 0.16;
     return clamp(f, 0.02, 0.92);
+  }
+
+  /**
+   * The team whose shot is in flight, or -1. A shot belongs to the goal: until somebody
+   * else touches it (a block, a deflection, the keeper), the shooter's teammates neither
+   * play it nor run onto it — it can still hit them on the way through.
+   */
+  shotTeam(): number {
+    const s = this.shotBy;
+    if (!s || this.lastTouch !== s || this.owner || this.heldBy || this.phase !== 'play') return -1;
+    if (this.time - this.lastKickTime > 2.5 || Math.hypot(this.ball.vel.x, this.ball.vel.z) < 5) return -1;
+    return s.team;
   }
 
   /** Penalty area of the goal `team` defends. */
@@ -1314,7 +1355,7 @@ export class Match {
     this.whistleFoul(victim.team, x, z, penalty);
   }
 
-  private resolveTackle(p: Player, slide: boolean): void {
+  private resolveTackle(p: Player, slide: boolean, bodyHit: boolean): void {
     const b = this.ball;
     const carrier = this.owner && this.owner.team !== p.team ? this.owner : null;
     let win = 1;
@@ -1332,8 +1373,8 @@ export class Match {
     }
     this.events.tackle = 1;
     const won = this.rng.next() < win;
-    if (carrier && this.phase === 'play' && this.rng.next() < this.foulChance(p, carrier, slide, won)) {
-      // Through the man: the ball doesn't matter, it's a foul.
+    if (carrier && bodyHit && this.phase === 'play' && this.rng.next() < this.foulChance(p, carrier, slide, won)) {
+      // Through the man (the leg caught him too): the ball doesn't matter, it's a foul.
       this.commitFoul(p, carrier, slide, false);
       if (!this.advantage) {
         p.action = slide ? 'slide' : 'stumble';
@@ -1555,6 +1596,7 @@ export class Match {
     this.lastKicker = p;
     this.lastKickTime = this.time;
     this.passTarget = receiver;
+    this.shotBy = plan.type === 'shot' ? p : null;
     p.touchCooldown = 0.35;
     p.sinceTouch = 0;
     if (this.setPiece) {
@@ -1574,6 +1616,8 @@ export class Match {
 
   private wantsBall(p: Player): boolean {
     if (p === this.owner) return true;
+    // Our own shot on its way to goal: let it through (the body can still block it).
+    if (p.team === this.shotTeam()) return false;
     // The wall blocks with its body; it doesn't try to play the ball.
     if (this.time < this.wallUntil && p.action === 'header') return false;
     if (p.plan) return true;
@@ -1808,6 +1852,7 @@ export class Match {
     this.lastKicker = p;
     this.lastKickTime = this.time;
     this.passTarget = null;
+    this.shotBy = wantShot ? p : null;
     this.events.kicks.push(0.35);
   }
 

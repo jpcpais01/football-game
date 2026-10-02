@@ -419,7 +419,7 @@ export class AI {
     // Auto-switch on defence / loose balls to the teammate who should take the ball.
     const att = m.attackingTeam();
     const c = m.controlled;
-    if (m.phase === 'play' && att !== m.humanTeam && m.switchT > 0.45 && c.action !== 'tackle' && c.action !== 'slide') {
+    if (m.phase === 'play' && att !== m.humanTeam && m.shotTeam() !== m.humanTeam && m.switchT > 0.45 && c.action !== 'tackle' && c.action !== 'slide') {
       const ci = this.intercept[c.id];
       const ct = ci.t >= 0 ? ci.t : 9;
       const cd = m.ballDist(c);
@@ -538,6 +538,8 @@ export class AI {
       }
       return this.offBall(p, true);
     }
+    // Our own shot in flight: nobody runs onto it; follow it in (rebounds) in shape.
+    if (m.shotTeam() === p.team) return this.offBall(p, true);
     // Defending or loose ball.
     if (this.chaser[p.team] === p) {
       if (m.owner && m.owner.team !== p.team) return this.press(p, m.owner);
@@ -1530,6 +1532,69 @@ export class AI {
     this.commitDive(k, dz, dh, 0.42);
   }
 
+  /**
+   * Is the ball (centre at x, y, z) touching the keeper, and where? `edge` 0..1 is how close
+   * to the limit of his reach it is (saves get harder toward the fingertips).
+   * - Diving: a capsule along the body from the hips to the outstretched hands.
+   * - Set: a real body (torso, head, two legs with the gap between them) and two arms that
+   *   can reach a ball within arm's length of either shoulder in front of him, plus the low
+   *   scoop for a ball right at his feet. Not a box: what he can't reach, he doesn't catch.
+   */
+  private keeperHit(k: Player, diving: boolean, x: number, y: number, z: number): { region: 'hands' | 'body'; edge: number } | null {
+    const h = k.look.height;
+    const R = 0.11; // ball
+    if (diving) {
+      const pose = divePose(k, this.diveRoll[k.id], this.diveLift[k.id], this.pose);
+      const s = k.actionDirZ;
+      const sr = Math.sin(pose.roll);
+      const cr = Math.cos(pose.roll);
+      const l0 = DIVE_HIPS * h;
+      const l1 = DIVE_HANDS * h;
+      const ay = pose.lift + l0 * cr;
+      const az = k.pos.z + s * l0 * sr;
+      const ly = (l1 - l0) * cr;
+      const lz = s * (l1 - l0) * sr;
+      const len2 = ly * ly + lz * lz;
+      const t = clamp(((y - ay) * ly + (z - az) * lz) / len2, 0, 1);
+      const d = Math.hypot(x - k.pos.x, y - (ay + ly * t), z - (az + lz * t));
+      return d < DIVE_RADIUS + R ? { region: t > 0.55 ? 'hands' : 'body', edge: t } : null;
+    }
+    // Keeper frame: depth toward the pitch, lateral to his left.
+    const dx = x - k.pos.x;
+    const dz = z - k.pos.z;
+    const fx = Math.cos(k.facing);
+    const fz = Math.sin(k.facing);
+    const depth = dx * fx + dz * fz;
+    const lat = -dx * fz + dz * fx;
+    // Body: torso, head, legs (each leg a capsule from the boot to the hip; the gap between).
+    const capsule = (la: number, ya: number, lb: number, yb: number, r: number) => {
+      const vl = lb - la;
+      const vy = yb - ya;
+      const t = clamp(((lat - la) * vl + (y - ya) * vy) / (vl * vl + vy * vy), 0, 1);
+      return Math.hypot(depth, lat - (la + vl * t), y - (ya + vy * t)) < r + R;
+    };
+    if (
+      capsule(0, 0.98 * h, 0, 1.52 * h, 0.19) || // torso
+      Math.hypot(depth, lat, y - 1.72 * h) < 0.12 + R || // head
+      capsule(0.2, 0.06, 0.1, 0.9 * h, 0.085) || // left leg
+      capsule(-0.2, 0.06, -0.1, 0.9 * h, 0.085) // right leg
+    ) {
+      return { region: 'body', edge: 0 };
+    }
+    // Hands: arm's length from either shoulder, in front of the body line.
+    if (depth > -0.22) {
+      const reach = 0.7 * h;
+      const sy = 1.45 * h;
+      const dl = Math.hypot(depth, lat - 0.2, y - sy);
+      const dr = Math.hypot(depth, lat + 0.2, y - sy);
+      const d = Math.min(dl, dr);
+      if (d < reach + R) return { region: 'hands', edge: d / (reach + R) };
+      // Low ball at his feet: he gets down and scoops it.
+      if (y < 0.55 && Math.abs(lat) < 0.45 && depth < 0.6) return { region: 'hands', edge: Math.abs(lat) / 0.45 };
+    }
+    return null;
+  }
+
   /** Hand contact for keepers. Returns true if the keeper dealt with the ball this step. */
   keeperContact(k: Player): boolean {
     const m = this.m;
@@ -1545,45 +1610,20 @@ export class AI {
     const own = -m.teams[k.team].dir;
     if (b.pos.x * own > PITCH.halfL) return false;
 
+    // Check along the ball's path through this step, not just where it ended up: a hard
+    // shot moves ~25 cm per step and would otherwise slip through the edge of a hand.
     const diving = k.action === 'dive';
-    const h = k.look.height;
     let region: 'hands' | 'body' | null = null;
     let edge = 0;
-    if (diving) {
-      // Capsule along the body axis from the hips to the outstretched hands.
-      const pose = divePose(k, this.diveRoll[k.id], this.diveLift[k.id], this.pose);
-      const s = k.actionDirZ;
-      const sr = Math.sin(pose.roll);
-      const cr = Math.cos(pose.roll);
-      const l0 = DIVE_HIPS * h;
-      const l1 = DIVE_HANDS * h;
-      const ay = pose.lift + l0 * cr;
-      const az = k.pos.z + s * l0 * sr;
-      const ly = (l1 - l0) * cr;
-      const lz = s * (l1 - l0) * sr;
-      const len2 = ly * ly + lz * lz;
-      const t = clamp(((b.pos.y - ay) * ly + (b.pos.z - az) * lz) / len2, 0, 1);
-      const d = Math.hypot(b.pos.x - k.pos.x, b.pos.y - (ay + ly * t), b.pos.z - (az + lz * t));
-      if (d < DIVE_RADIUS + 0.11) {
-        region = t > 0.55 ? 'hands' : 'body';
-        edge = t;
+    const p0 = b.prevPos;
+    for (let i = 1; i <= 4 && !region; i++) {
+      const f = i / 4;
+      const hit = this.keeperHit(k, diving, p0.x + (b.pos.x - p0.x) * f, p0.y + (b.pos.y - p0.y) * f, p0.z + (b.pos.z - p0.z) * f);
+      if (hit) {
+        region = hit.region;
+        edge = hit.edge;
+        if (i < 4) b.pos.set(p0.x + (b.pos.x - p0.x) * f, p0.y + (b.pos.y - p0.y) * f, p0.z + (b.pos.z - p0.z) * f);
       }
-    } else {
-      const dx = b.pos.x - k.pos.x;
-      const dz = b.pos.z - k.pos.z;
-      const d = Math.hypot(dx, dz);
-      const y = b.pos.y;
-      // Body: a person-sized column. Hands: in front of / beside him, from knee to above head.
-      // Depth (toward the pitch) and lateral offsets in the keeper's frame.
-      const fx = Math.cos(k.facing);
-      const fz = Math.sin(k.facing);
-      const depth = dx * fx + dz * fz;
-      const lat = Math.abs(-dx * fz + dz * fx);
-      if (d < 0.36 && y < 1.85 * h) region = 'body';
-      // Hands: a slab just in front of him, arm's length to each side, knee to above head
-      // (and down to the grass right by his feet).
-      else if (depth > -0.15 && depth < 0.45 && lat < 0.85 && y < 2.3 * h && (y > 0.3 || lat < 0.6)) region = 'hands';
-      edge = lat / 0.85;
     }
     if (!region) return false;
 

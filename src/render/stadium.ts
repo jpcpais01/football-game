@@ -1499,6 +1499,11 @@ function fanBanners(path: PathPt[], home: number): { group: THREE.Group; set(pho
     const g = new THREE.Group();
     const mat = windCloth(litMaterial({ roughness: 0.85 }), 0.16, 'sides', w, h);
     mat.map = tex;
+    // The home end faces away from the evening sun, so by light alone the photo sits in the
+    // shade and reads dark. Like a printed banner caught by the floodlights, it gets a soft
+    // self-lit floor from its own image (the folds still shade it on top).
+    mat.emissiveMap = tex;
+    mat.emissive.setRGB(0.55, 0.55, 0.55);
     mat.side = THREE.DoubleSide;
     const cloth = new THREE.Mesh(new THREE.PlaneGeometry(w, h, 24, 12), mat);
     cloth.position.y = 1.6 + h / 2;
