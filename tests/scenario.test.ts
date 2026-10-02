@@ -135,3 +135,24 @@ it('idle stick: active player closes down the carrier', () => {
   console.log('closest approach to the ball', minD.toFixed(2), 'm');
   expect(minD).toBeLessThan(2.5);
 });
+
+it('seeking wins over a stick pushed the other way', () => {
+  const m = new Match(79);
+  const input = makeInput();
+  m.phase = 'play';
+  m.setPiece = null;
+  for (const p of m.players) { p.pos.x = p.team === 0 ? -48 : 48; p.pos.z = (p.index - 5) * 5; p.prevPos.copy(p.pos); }
+  const c = m.teams[0].players[6];
+  c.pos.set(-10, 0, 0); c.prevPos.copy(c.pos);
+  m.setControlled(c);
+  m.ball.reset(0, 0);
+  input.moveX = -1; // pushing away from the ball
+  let t = -1;
+  for (let i = 0; i < 120 * 4; i++) {
+    m.step(input);
+    m.takeEvents();
+    if (m.owner === c) { t = i / 120; break; }
+  }
+  console.log('reached ball against the stick after', t.toFixed(2), 's');
+  expect(t).toBeGreaterThan(0);
+});

@@ -457,45 +457,46 @@ export class Match {
       c.lookAt = c.lookTarget;
     }
 
-    // Ball seeking: without the stick the active player goes after the ball on his own
-    // (meets loose balls and passes, closes down the carrier). With the stick roughly
-    // pointing at the ball, the run line is bent onto it so chasing never needs precision.
+    // Ball seeking: the active player always hunts the ball (meets loose balls and
+    // passes, closes down the carrier). The direction is 80% the seek and 20% the stick;
+    // the stick mostly just nudges the pace (toward the ball = a bit faster).
     if (this.owner !== c && !this.pressHeld) {
       const mode = this.seekTarget(c, tmpV);
       if (mode) {
         const dx = tmpV.x - c.pos.x;
         const dz = tmpV.z - c.pos.z;
         const d = Math.hypot(dx, dz);
-        if (d > 0.35) {
+        if (d > 0.25) {
           const tx = dx / d;
           const tz = dz / d;
-          if (m <= 0.12) {
-            c.moveX = tx;
-            c.moveZ = tz;
-            if (mode === 'loose') {
-              const ip = this.ai.intercept[c.id];
-              const t = ip.t >= 0 ? ip.t : d / c.topSpeed;
-              // Attack loose balls: near-sprint when far, arrive under control when close.
-              const floor = d > 4 ? PLAYER.jogSpeed + 2 : d > 1.5 ? PLAYER.jogSpeed : 0;
-              c.wantSpeed = Math.min(c.topSpeed, Math.max(floor, d / Math.max(0.2, t) + 1.5));
-            } else {
-              // Close down quickly, then ease in so we don't fly past the carrier.
-              c.wantSpeed = d > 6 ? PLAYER.jogSpeed + 1.5 : Math.min(PLAYER.jogSpeed, d * 2 + 0.5);
-            }
-            if (input.sprint) c.wantSpeed = c.topSpeed;
+          let speed: number;
+          if (mode === 'loose') {
+            const ip = this.ai.intercept[c.id];
+            const t = ip.t >= 0 ? ip.t : d / c.topSpeed;
+            // Attack loose balls: near-sprint when far, arrive under control when close.
+            const floor = d > 3 ? PLAYER.jogSpeed + 2.2 : d > 1 ? PLAYER.jogSpeed : 0;
+            speed = Math.max(floor, d / Math.max(0.2, t) + 2);
           } else {
-            const mx = c.moveX;
-            const mz = c.moveZ;
-            const align = mx * tx + mz * tz;
-            if (align > 0.5) {
-              const w = 0.45 + (align - 0.5) * 0.7; // stronger pull the closer the stick is
-              const nx = mx * (1 - w) + tx * w;
-              const nz = mz * (1 - w) + tz * w;
-              const n = Math.hypot(nx, nz) || 1;
-              c.moveX = nx / n;
-              c.moveZ = nz / n;
-            }
+            // Close down hard, then ease in tight on the carrier.
+            speed = d > 5 ? PLAYER.jogSpeed + 2.2 : Math.min(PLAYER.jogSpeed + 1, d * 3 + 0.8);
           }
+          let dirX = tx;
+          let dirZ = tz;
+          if (m > 0.12) {
+            const sx = input.moveX / m;
+            const sz = -input.moveY / m;
+            const nx = tx * 0.8 + sx * 0.2;
+            const nz = tz * 0.8 + sz * 0.2;
+            const n = Math.hypot(nx, nz);
+            if (n > 0.05) {
+              dirX = nx / n;
+              dirZ = nz / n;
+            }
+            speed *= 1 + 0.15 * (sx * tx + sz * tz);
+          }
+          c.moveX = dirX;
+          c.moveZ = dirZ;
+          c.wantSpeed = input.sprint ? c.topSpeed : Math.min(c.topSpeed, speed);
           if (mode === 'press' && d < 6) {
             c.lookTarget.copy(this.ball.pos);
             c.lookAt = c.lookTarget;
@@ -511,7 +512,7 @@ export class Match {
     const own = this.owner;
     if (own && own.team === c.team) return null;
     if (own) {
-      this.ai.containTarget(c, out);
+      this.ai.containTarget(c, out, 0.85);
       return 'press';
     }
     // Loose ball or a pass in flight: ours to meet, or theirs to intercept.

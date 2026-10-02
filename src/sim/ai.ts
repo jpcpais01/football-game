@@ -340,14 +340,13 @@ export class AI {
   }
 
   /** Goal-side point from which to contain the ball carrier. */
-  containTarget(p: Player, out: V3): V3 {
+  containTarget(p: Player, out: V3, keep = 1.3): V3 {
     const m = this.m;
     const b = m.ball.pos;
     const gx = -m.teams[p.team].dir * PITCH.halfL;
     const dx = gx - b.x;
     const dz = -b.z * 0.5;
     const d = Math.max(0.1, Math.hypot(dx, dz));
-    const keep = 1.3;
     return out.set(b.x + (dx / d) * keep, 0, b.z + (dz / d) * keep);
   }
 
