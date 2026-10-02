@@ -10,11 +10,10 @@ export class Hud {
   private homeScore: HTMLElement;
   private awayScore: HTMLElement;
   private clock: HTMLElement;
-  private banner: HTMLElement;
   private caption: HTMLElement;
   private captionTitle: HTMLElement;
   private captionSub: HTMLElement;
-  private last = { h: -1, a: -1, min: -1, banner: '', caption: '' };
+  private last = { h: -1, a: -1, min: -1, caption: '' };
   private captionUntil = 0;
   private card: HTMLElement;
   /** Score shown until the goal's score card reveals the new one. */
@@ -34,7 +33,6 @@ export class Hud {
         <div class="team away"><span>${a.info.short}</span><i style="background:${hex(a.info.kit.shirt)}"></i></div>
         <div class="clock">0'</div>
       </div>
-      <div class="banner"></div>
       <div class="caption"><div class="c-title"></div><div class="c-sub"></div></div>
       <div class="scorecard">
         <div class="sc-row">
@@ -51,7 +49,6 @@ export class Hud {
     this.homeScore = this.root.querySelector('.hs')!;
     this.awayScore = this.root.querySelector('.as')!;
     this.clock = this.root.querySelector('.clock')!;
-    this.banner = this.root.querySelector('.banner')!;
     this.caption = this.root.querySelector('.caption')!;
     this.captionTitle = this.root.querySelector('.c-title')!;
     this.captionSub = this.root.querySelector('.c-sub')!;
@@ -137,25 +134,6 @@ export class Hud {
     if (min !== this.last.min) {
       this.clock.textContent = `${min}'`;
       this.last.min = min;
-    }
-    let banner = '';
-    if (m.phase === 'setpiece' && m.setPiece) {
-      const k = m.setPiece.kind;
-      const mine = m.setPiece.team === m.humanTeam;
-      banner =
-        k === 'corner' ? (mine ? 'Corner · Stick: aim · Pass: whip · Shoot: float · Through: short' : 'Corner')
-        : k === 'throw' ? 'Throw-in'
-        : k === 'goalkick' ? 'Goal kick'
-        : k === 'penalty' ? (mine ? 'Penalty · Stick: aim · Hold Shoot' : 'Penalty')
-        : k === 'freekick' ? (mine && m.setPiece.direct ? 'Stick: aim · Hold Shoot · Pass: play it' : 'Free kick')
-        : '';
-    } else if (m.phase === 'kickoff' && m.setPiece && m.setPiece.team === m.humanTeam && m.setPiece.t > 1.2) {
-      banner = 'Pass to kick off';
-    }
-    if (banner !== this.last.banner) {
-      this.banner.textContent = banner;
-      this.banner.classList.toggle('show', banner !== '');
-      this.last.banner = banner;
     }
     if (this.captionUntil > 0 && now > this.captionUntil) {
       this.caption.classList.remove('show');
