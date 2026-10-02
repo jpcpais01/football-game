@@ -4,6 +4,8 @@ import type { Match } from '../sim/match';
 import { clamp, lerp } from '../sim/vec';
 
 const CAM_PITCH_DEG = 21;
+/** Pixel art looks down more steeply: a cleaner, more readable top-down-ish framing. */
+const PIXEL_PITCH_DEG = 30;
 const LOOK_OFFSET = 3.5;
 
 export const CAMERA_PRESETS = { close: 33, normal: 40, far: 48 } as const;
@@ -75,7 +77,7 @@ export class CameraRig {
       // grid stays perfectly stable and the camera only pans left and right. The forward
       // position is chosen so the near touchline sits at the bottom of the screen.
       this.dist = this.baseDist;
-      const pitch = (CAM_PITCH_DEG * Math.PI) / 180;
+      const pitch = this.pitch();
       const bottom = pitch + (this.camera.fov * Math.PI) / 360;
       const h = Math.sin(pitch) * this.dist;
       const back = Math.cos(pitch) * this.dist;
@@ -101,9 +103,13 @@ export class CameraRig {
     this.place(time);
   }
 
+  private pitch(): number {
+    return ((this.pixelHeight > 0 ? PIXEL_PITCH_DEG : CAM_PITCH_DEG) * Math.PI) / 180;
+  }
+
   private place(time: number): void {
     // A little lower than a tactical cam so the stands and sky are part of the picture.
-    const pitch = (CAM_PITCH_DEG * Math.PI) / 180;
+    const pitch = this.pitch();
     const cam = this.camera;
     const sx = Math.sin(time * 41) * this.shake * 0.25;
     const sy = Math.cos(time * 37) * this.shake * 0.2;
