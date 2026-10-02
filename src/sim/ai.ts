@@ -111,12 +111,20 @@ export class AI {
       const ip = this.intercept[p.id];
       ip.t = -1;
       const top = p.topSpeed * 0.92;
+      // Best effort if unreachable in the horizon: the point he gets closest to in time.
+      let bestDef = 1e9;
+      let bestI = n - 1;
       for (let i = 0; i < n; i++) {
         const t = i * SAMPLE_DT;
         const y = this.sy[i];
         const maxH = p.role === 'GK' && this.inOwnBox(p, this.sx[i], this.sz[i]) ? 2.5 : PLAYER.headMax;
         if (y > maxH) continue;
         const d = dist2D(p.pos.x, p.pos.z, this.sx[i], this.sz[i]) - PLAYER.reach * 0.8;
+        const deficit = d - Math.max(0, t - 0.2) * top;
+        if (deficit < bestDef) {
+          bestDef = deficit;
+          bestI = i;
+        }
         if (d <= Math.max(0, t - 0.2) * top) {
           ip.t = t;
           ip.x = this.sx[i];
@@ -125,8 +133,8 @@ export class AI {
         }
       }
       if (ip.t < 0) {
-        ip.x = this.sx[n - 1];
-        ip.z = this.sz[n - 1];
+        ip.x = this.sx[bestI];
+        ip.z = this.sz[bestI];
       }
     }
 
@@ -921,7 +929,7 @@ export class AI {
       const push = clamp((Math.abs(dz) - reachNow) / tt, 0, 6 + k.attrs.keeping * 2);
       const aAtContact = Math.max(0, Math.abs(dz) - push * tt);
       const plan = planDive(aAtContact, dh, k.look.height);
-      k.startAction('dive', 1.2, 0, s);
+      k.startAction('dive', 1.5, 0, s);
       k.vel.set(-own * 0.6, 0, s * push);
       this.diveHeight[k.id] = dh;
       this.diveRoll[k.id] = plan.roll;

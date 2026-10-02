@@ -216,7 +216,7 @@ function lampMaterial(): THREE.ShaderMaterial {
 }
 
 const BOARDS: { bg: string; fg: string; text: string }[] = [
-  { bg: '#1f3b5c', fg: '#f2ede1', text: 'MATCHDAY' },
+  { bg: '#1f3b5c', fg: '#f2ede1', text: 'GAMENIGHT' },
   { bg: '#c8393b', fg: '#ffffff', text: 'ROSSONERI' },
   { bg: '#f1ebdc', fg: '#23345e', text: 'ATLANTIC' },
   { bg: '#2f6b4f', fg: '#f2ede1', text: 'KESTREL' },

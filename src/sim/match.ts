@@ -550,9 +550,16 @@ export class Match {
     }
     // Loose ball or a pass in flight: ours to meet, or theirs to intercept.
     if (this.passTarget && this.passTarget.team === c.team && this.passTarget !== c) return null;
+    // Run to where the ball is going (the intercept on its predicted path), not where it
+    // is now. Close to the ball, lean back toward the ball itself so the final approach
+    // stays tight.
     const ip = this.ai.intercept[c.id];
-    if (ip.t >= 0) out.set(ip.x, 0, ip.z);
-    else out.set(this.ball.pos.x + this.ball.vel.x * 0.5, 0, this.ball.pos.z + this.ball.vel.z * 0.5);
+    const b = this.ball;
+    const gap = this.ballDist(c);
+    const w = clamp((gap - 2) / 6, 0, 1) * 0.85;
+    const bx = b.pos.x + b.vel.x * 0.15;
+    const bz = b.pos.z + b.vel.z * 0.15;
+    out.set(bx + (ip.x - bx) * (0.15 + w), 0, bz + (ip.z - bz) * (0.15 + w));
     return 'loose';
   }
 
@@ -736,7 +743,11 @@ export class Match {
       if (this.setPiece && (this.setPiece.taker !== p || this.setPiece.t < 0.7)) return;
       const plan = p.plan;
       const dur = planDur;
-      const kind = this.heldBy === p ? 'throw' : 'kick';
+      // From the hands: a throw (or a throw-in), except keepers punt long balls.
+      const fromHands = this.heldBy === p;
+      const punt = fromHands && !this.setPiece && (plan.type === 'lob' || plan.type === 'clear');
+      const kind = fromHands && !punt ? 'throw' : 'kick';
+      p.throwIn = this.setPiece?.kind === 'throw';
       // Strike with the foot on the side of the ball.
       const side = -Math.sin(p.facing) * (this.ball.pos.x - p.pos.x) + Math.cos(p.facing) * (this.ball.pos.z - p.pos.z);
       p.kickLeg = side >= 0 ? 1 : -1;
@@ -1192,6 +1203,10 @@ export class Match {
 
   /** Keeper secures the ball in his hands. */
   catchBall(k: Player): void {
+    if (k.role === 'GK' && k.action === 'none' && this.phase === 'play') {
+      k.catchY = this.ball.pos.y;
+      k.startAction('catch', 0.45, 0, 0);
+    }
     this.heldBy = k;
     this.owner = null;
     this.passTarget = null;

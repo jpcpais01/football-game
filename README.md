@@ -1,4 +1,4 @@
-# Matchday
+# GameNight
 
 A mobile-first football game (PWA). Stylized look, realistic feel.
 

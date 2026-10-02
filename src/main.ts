@@ -93,7 +93,7 @@ menu.className = 'menu';
 menu.innerHTML = `
   <div class="menu-card">
     <div class="kicker">Season 01</div>
-    <h1>Matchday</h1>
+    <h1>GameNight</h1>
     <p class="sub">${match.teams[0].info.name} <span>vs</span> ${match.teams[1].info.name}</p>
     <button class="play">Kick off</button>
     <p class="hint">Landscape · joystick to move · Pass / Through / Shoot</p>

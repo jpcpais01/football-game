@@ -32,9 +32,12 @@ export function planDive(a: number, y: number, height: number): { roll: number; 
 
 export function divePose(k: Player, targetRoll: number, targetLift: number, out: DivePose): DivePose {
   const pr = k.actionDur > 0 ? clamp(k.actionT / k.actionDur, 0, 1) : 0;
-  const reachOut = smoothstep(0, 0.22, pr);
-  const land = smoothstep(0.55, 0.85, pr);
-  out.roll = lerp(targetRoll * reachOut, Math.max(targetRoll, 1.5), land);
+  // Timeline (1.5 s): push off and stretch (to ~0.28 s), fly, land on the side, lie a
+  // moment, then get back up.
+  const reachOut = smoothstep(0.015, 0.19, pr);
+  const land = smoothstep(0.42, 0.56, pr);
+  const getUp = smoothstep(0.74, 0.97, pr);
+  out.roll = lerp(lerp(targetRoll * reachOut, Math.max(targetRoll, 1.5), land), 0, getUp);
   out.lift = targetLift * reachOut * (1 - land);
   return out;
 }

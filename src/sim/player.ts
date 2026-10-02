@@ -14,7 +14,7 @@ export interface Attributes {
   keeping: number;
 }
 
-export type ActionKind = 'none' | 'kick' | 'tackle' | 'slide' | 'dive' | 'stumble' | 'header' | 'throw' | 'celebrate';
+export type ActionKind = 'none' | 'kick' | 'tackle' | 'slide' | 'dive' | 'stumble' | 'header' | 'throw' | 'catch' | 'celebrate';
 
 export interface KickPlan {
   type: 'pass' | 'lob' | 'through' | 'shot' | 'clear' | 'cross';
@@ -59,6 +59,10 @@ export class Player {
   kickType: KickPlan['type'] = 'pass';
   kickPower = 0;
   kickRel = 0;
+  /** Throw-in (two hands) rather than a keeper's one-arm throw. */
+  throwIn = false;
+  /** Height the keeper caught the ball at (for the catch animation). */
+  catchY = 1;
   /** Smoothed forward acceleration (m/s²), used for body inertia. */
   accelFwd = 0;
   /** Seconds before this player can be knocked off balance again. */
@@ -149,6 +153,9 @@ export class Player {
         }
         tx = this.vel.x;
         tz = this.vel.z;
+      } else if (a === 'catch') {
+        tx = this.vel.x * 0.4;
+        tz = this.vel.z * 0.4;
       } else if (a === 'stumble') {
         tx = this.vel.x * 0.3;
         tz = this.vel.z * 0.3;

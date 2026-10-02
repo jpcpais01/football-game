@@ -661,6 +661,44 @@ export class PlayersView {
       let headPitch = 0;
       let headLook = true;
 
+      // Side-steps and backpedalling: when moving across or against the way the body faces
+      // (keepers on their line, defenders jockeying) the legs shuffle instead of striding.
+      {
+        const cf = Math.cos(facing);
+        const sf = Math.sin(facing);
+        const vf = p.vel.x * cf + p.vel.z * sf;
+        const vl = -p.vel.x * sf + p.vel.z * cf;
+        const slowEnough = 1 - smoothstep(4.5, 6.5, speed);
+        const sideAmt = speed > 0.25 ? clamp(Math.abs(vl) / speed, 0, 1) * moveAmt * slowEnough : 0;
+        const backAmt = vf < -0.3 ? clamp(-vf / Math.max(speed, 0.01), 0, 1) * slowEnough : 0;
+        if (backAmt > 0.5) {
+          // Backpedal: same stride, legs swing the other way, short quick steps.
+          hipL = -hipL * 0.7;
+          hipR = -hipR * 0.7;
+          flexExtra += 0.12;
+        }
+        if (sideAmt > 0) {
+          const k = sideAmt * sideAmt;
+          hipL *= 1 - k * 0.85;
+          hipR *= 1 - k * 0.85;
+          // Step out with one leg, bring the other to it.
+          legOutL += k * (0.06 + 0.22 * Math.max(0, sinP));
+          legOutR += k * (0.06 + 0.22 * Math.max(0, -sinP));
+          kneeL += k * 0.3;
+          kneeR += k * 0.3;
+          hipL += k * 0.15;
+          hipR += k * 0.15;
+          hipY -= k * 0.07;
+          armL *= 1 - k;
+          armR *= 1 - k;
+          armOutL += k * 0.25;
+          armOutR += k * 0.25;
+          pelvisYaw *= 1 - k;
+          twist *= 1 - k;
+          flexExtra += k * 0.12;
+        }
+      }
+
       // Idle breathing.
       if (moveAmt < 1) {
         const br = Math.sin(time * 2.1 + p.id) * 0.015 * (1 - moveAmt);
@@ -673,19 +711,27 @@ export class PlayersView {
       armOutL += Math.max(0, -leanS) * 0.5;
       armOutR += Math.max(0, leanS) * 0.5;
 
-      // Keeper ready stance.
-      if (p.role === 'GK' && speed < 2.5 && p.action === 'none' && held !== p && match.phase === 'play') {
-        kneeL += 0.35;
-        kneeR += 0.35;
-        hipL += 0.18;
-        hipR += 0.18;
-        hipY -= 0.08;
-        armOutL = 0.45;
-        armOutR = 0.45;
-        armL = -0.35;
-        armR = -0.35;
-        flexExtra += 0.22;
-        legOutL = legOutR = 0.12;
+      // Keeper ready stance: athletic crouch, hands out in front. When danger is close (an
+      // opponent on the ball near goal, or a shot coming) he gets set: lower, weight on the
+      // toes with a small bounce, hands up and forward.
+      if (p.role === 'GK' && speed < 4.5 && p.action === 'none' && held !== p && match.phase === 'play') {
+        const own = -match.teams[p.team].dir * 52.5;
+        const carrier = match.owner;
+        const ballD = Math.hypot(ball.pos.x - own, ball.pos.z);
+        const threat = (carrier && carrier.team !== p.team && ballD < 30) || (ball.vel.x * Math.sign(own) > 8 && ballD < 35);
+        const set = threat ? 1 : smoothstep(45, 25, ballD) * 0.5;
+        const calm = 1 - smoothstep(0.3, 2.5, speed) * 0.5;
+        kneeL += (0.3 + 0.25 * set) * calm;
+        kneeR += (0.3 + 0.25 * set) * calm;
+        hipL += (0.18 + 0.12 * set) * calm;
+        hipR += (0.18 + 0.12 * set) * calm;
+        hipY -= (0.07 + 0.07 * set) * calm;
+        if (speed < 1) hipY += Math.max(0, Math.sin(time * 9 + p.id)) * 0.018 * set;
+        armOutL = armOutR = 0.38 + 0.12 * set;
+        armL = armR = -0.45 - 0.35 * set;
+        elbowL = elbowR = 0.7;
+        flexExtra += 0.2 + 0.1 * set;
+        legOutL = legOutR = Math.max(legOutL, 0.12);
       }
 
       // Dribble touch: quick flick of the leading leg, body over the ball.
@@ -804,21 +850,64 @@ export class PlayersView {
           const leftZ = -Math.cos(facing);
           const side = Math.sign(p.actionDirZ * leftZ) || 1;
           divePose(p, match.ai.diveRoll[p.id], match.ai.diveLift[p.id], this.pose);
-          const k = smoothstep(0, 0.22, pr);
           roll = -side * this.pose.roll;
           lift = this.pose.lift;
-          hipY = HIP_Y;
           leanF = 0;
           leanS = 0;
-          sideExtra += -side * 0.12 * k; // arch toward the ball
-          armL = lerp(armL, -3.05, k);
-          armR = lerp(armR, -3.05, k);
-          armOutL = armOutR = lerp(0.1, 0.12, k);
-          elbowL = elbowR = 0.05;
-          hipL = hipR = lerp(hipL, 0.15, k);
-          kneeL = lerp(kneeL, 0.5, k);
-          kneeR = lerp(kneeR, 0.15, k);
+          const dip = 1 - smoothstep(0.0, 0.07, pr); // load the near leg before take-off
+          const fly = smoothstep(0.02, 0.17, pr) * (1 - smoothstep(0.42, 0.56, pr));
+          const lie = smoothstep(0.42, 0.56, pr) * (1 - smoothstep(0.74, 0.86, pr));
+          const rise = smoothstep(0.72, 0.86, pr) * (1 - smoothstep(0.9, 1.0, pr));
+          const reach = smoothstep(0.015, 0.19, pr) * (1 - smoothstep(0.74, 0.9, pr));
+          hipY = HIP_Y - dip * 0.14 - rise * 0.38;
+          // Near (push) leg drives straight; the far leg trails, bent.
+          const nearL = side > 0;
+          const push = { hip: 0.1 * fly, knee: lerp(0.9 * dip + 0.15, 0.08, fly) };
+          const trail = { hip: 0.55 * fly + 0.2 * lie, knee: 1.1 * fly + 0.5 * lie };
+          const kneelHip = 0.9 * rise;
+          const kneelKnee = 1.6 * rise;
+          if (nearL) {
+            hipL = push.hip + kneelHip;
+            kneeL = push.knee + kneelKnee;
+            hipR = trail.hip + kneelHip * 0.4;
+            kneeR = trail.knee + kneelKnee * 0.6;
+          } else {
+            hipR = push.hip + kneelHip;
+            kneeR = push.knee + kneelKnee;
+            hipL = trail.hip + kneelHip * 0.4;
+            kneeL = trail.knee + kneelKnee * 0.6;
+          }
+          // Arms stretch along the body toward the ball; the top hand comes over.
+          const up = lerp(-0.6, -3.05, reach);
+          armL = lerp(armL, up, Math.max(reach, 0.2));
+          armR = lerp(armR, up, Math.max(reach, 0.2));
+          armOutL = nearL ? 0.06 : 0.22 * reach + 0.08;
+          armOutR = nearL ? 0.22 * reach + 0.08 : 0.06;
+          elbowL = elbowR = lerp(0.6, 0.06, reach);
+          sideExtra += -side * 0.14 * fly; // arch toward the ball
+          flexExtra += 0.25 * lie + 0.3 * rise; // curl on landing, lean forward to rise
           headLook = false;
+          headPitch = 0.15 * fly;
+          break;
+        }
+        case 'catch': {
+          // Hands meet the ball at its height, then gather it into the chest.
+          const yH = clamp(p.catchY, 0.1, 2.4);
+          const meet = 1 - smoothstep(0.25, 0.6, pr);
+          const reachSwing = yH > 1.6 ? -2.5 : yH > 0.9 ? -1.5 : -0.75;
+          armL = armR = lerp(-1.0, reachSwing, meet);
+          elbowL = elbowR = lerp(1.35, 0.25, meet);
+          armOutL = armOutR = lerp(0.0, 0.12, meet);
+          const low = 1 - smoothstep(0.3, 0.8, yH);
+          kneeL += 0.7 * low + 0.25;
+          kneeR += 0.7 * low + 0.25;
+          hipL += 0.35 * low;
+          hipR += 0.35 * low;
+          hipY -= 0.25 * low + 0.04;
+          flexExtra += 0.45 * low + 0.18 * (1 - meet); // smother low balls, cushion the rest
+          if (yH > 1.8) lift = 0.18 * Math.sin(Math.min(1, pr * 1.6) * Math.PI);
+          headLook = false;
+          headPitch = 0.2;
           break;
         }
         case 'header': {
@@ -834,10 +923,26 @@ export class PlayersView {
           break;
         }
         case 'throw': {
-          const k = pr < 0.5 ? pr / 0.5 : 1 - (pr - 0.5) / 0.5;
-          armL = armR = lerp(-2.8, -1.4, 1 - k);
-          elbowL = elbowR = lerp(1.4, 0.2, 1 - k);
-          flexExtra += lerp(-0.25, 0.25, smoothstep(0.3, 0.7, pr));
+          if (p.throwIn) {
+            const k = pr < 0.5 ? pr / 0.5 : 1 - (pr - 0.5) / 0.5;
+            armL = armR = lerp(-2.8, -1.4, 1 - k);
+            elbowL = elbowR = lerp(1.4, 0.2, 1 - k);
+            flexExtra += lerp(-0.25, 0.25, smoothstep(0.3, 0.7, pr));
+          } else {
+            // Keeper's one-arm throw: wind back, whip over the top, step into it.
+            const wind = 1 - smoothstep(0.15, 0.5, pr);
+            const whip = smoothstep(0.35, 0.65, pr);
+            armR = lerp(lerp(0, 1.3, smoothstep(0, 0.3, pr)), -1.0, whip) + (whip > 0 && whip < 1 ? -1.6 * Math.sin(whip * Math.PI) : 0);
+            elbowR = lerp(0.9, 0.15, whip);
+            armOutR = 0.25;
+            armL = -1.2 * wind - 0.4;
+            armOutL = 0.2;
+            twist = lerp(-0.45, 0.45, whip);
+            pelvisYaw = lerp(-0.2, 0.25, whip);
+            hipL = 0.45 * smoothstep(0.2, 0.5, pr);
+            kneeL = 0.35;
+            flexExtra += lerp(-0.15, 0.25, whip);
+          }
           break;
         }
         case 'stumble': {
