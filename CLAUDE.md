@@ -6,6 +6,9 @@
   change to the sim rules, something that can't be reasoned about from the code).
 - Remember what has been asked before; don't make the owner repeat it.
 - Bump the version in `package.json` on every push (it's shown on the home screen).
+- On every push also add a line to `src/home/patchNotes.ts` (newest first, at most 50 words).
+- Measure gameplay changes (passing, seeking, AI) over many simulated matches; trace before fixing.
+- See `PROJECT.md` for the full project description and code map.
 - Two chats may work on this branch at once: fetch before pushing and merge (never
   overwrite) anything new on the remote.
 
