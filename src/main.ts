@@ -483,6 +483,7 @@ function frame(now: number): void {
   handleEvents(now / 1000);
 
   officials.update(match, running ? dt : 0);
+  rig.cinematic = !playing || match.phase === 'halftime' || match.phase === 'fulltime';
   rig.update(match, alpha, dt, now / 1000);
   playersView.update(match, alpha, now / 1000);
   ballView.update(match, alpha, running ? dt : 0);
@@ -492,7 +493,9 @@ function frame(now: number): void {
   atmo.set(progress);
   atmo.follow(rig.focusX, rig.focusZ);
   SHARED.uTime.value = now / 1000;
-  stadium.update(now / 1000, match.excitement, atmo);
+  // The ultras hold up their card display for each kick-off and the opening seconds of the half.
+  const tifo = match.phase === 'kickoff' || (match.phase === 'play' && match.clock < 8) ? 1 : 0;
+  stadium.update(now / 1000, match.excitement, atmo, tifo);
   if (playing) hud.update(match, now / 1000);
   updateCharge(alpha);
 

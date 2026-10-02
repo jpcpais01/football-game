@@ -12,12 +12,12 @@ import * as THREE from 'three';
 /** Direction the sunlight travels (from the sun toward the ground). Mutated by Atmosphere. */
 export const SUN_DIR = new THREE.Vector3(0.42, -0.55, -0.72).normalize();
 
-/** Floodlight pylon positions (x, z); also used for the faint floodlight shadows. */
+/** Floodlight banks at the roof corners (x, z); also used for the faint floodlight shadows. */
 export const PYLONS: [number, number][] = [
-  [-74.5, -56],
-  [74.5, -56],
-  [-74.5, 56],
-  [74.5, 56],
+  [-65.3, -45.8],
+  [65.3, -45.8],
+  [-65.3, 45.8],
+  [65.3, 45.8],
 ];
 
 export const SHARED = {

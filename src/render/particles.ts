@@ -11,6 +11,14 @@ import { SHARED } from './look';
 
 const MAX = 1400;
 const MOTES = 170;
+/** Flare spots in the ultras' end (lower tier behind the home goal). */
+const CURVA_FLARES: [number, number][] = [
+  [-PITCH.halfL - 19, -8],
+  [-PITCH.halfL - 18, 13],
+  [-PITCH.halfL - 21, -20],
+  [-PITCH.halfL - 17, 2],
+  [-PITCH.halfL - 20, 24],
+];
 
 enum Kind {
   Mote = 0,
@@ -175,17 +183,19 @@ export class Particles {
         if (p.action === 'slide' && p.actionT < 0.5 && Math.random() < 0.5) this.grassBurst(p.pos.x, p.pos.z, 0.3, p.vel.x * 0.15, p.vel.z * 0.15);
       }
     }
-    // Pyro in the home end once it's dark: a red glow and drifting smoke.
-    if (flood > 0.55) {
+    // Pyro in the ultras' end once it's dark, and a proper show when a goal goes in:
+    // flares all along the curva and smoke drifting off in the club colour.
+    const goal = match.phase === 'goal';
+    if (flood > 0.55 || goal) {
       this.flareT -= dt;
       if (this.flareT <= 0) {
-        this.flareT = 0.12;
-        for (const [fx, fz] of [
-          [-30, -(PITCH.halfW + 16)],
-          [-(PITCH.halfL + 15), 12],
-        ] as [number, number][]) {
-          this.spawn(Kind.Flare, fx + (Math.random() - 0.5) * 0.6, 8 + Math.random() * 0.4, fz, 0, 0.2, 0, 0.25, 0.5, 0xff5a3c);
-          this.spawn(Kind.Smoke, fx, 8.5, fz, wind.x * 0.8 + (Math.random() - 0.5) * 0.4, 0.6 + Math.random() * 0.4, wind.y * 0.8 + (Math.random() - 0.5) * 0.4, 6 + Math.random() * 3, 1.2, 0xd9b4b4);
+        this.flareT = goal ? 0.05 : 0.12;
+        const spots = goal ? CURVA_FLARES : CURVA_FLARES.slice(0, 2);
+        for (const [fx, fz] of spots) {
+          const y = 7.2 + Math.random() * 0.3;
+          this.spawn(Kind.Flare, fx + (Math.random() - 0.5) * 0.6, y, fz + (Math.random() - 0.5) * 0.6, 0, 0.2, 0, 0.25, 0.5, 0xff5a3c);
+          const smoke = goal && Math.random() < 0.5 ? this.home : 0xd9b4b4;
+          this.spawn(Kind.Smoke, fx, y + 0.5, fz, wind.x * 0.8 + (Math.random() - 0.5) * 0.4, 0.6 + Math.random() * 0.4, wind.y * 0.8 + (Math.random() - 0.5) * 0.4, 6 + Math.random() * 3, 1.2, smoke);
         }
       }
     }
