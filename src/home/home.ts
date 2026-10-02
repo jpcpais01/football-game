@@ -1,3 +1,4 @@
+import { PATCH_NOTES } from './patchNotes';
 import './home.css';
 import type { Club } from '../meta/club';
 import { FREE_PACK_HOURS } from '../meta/club';
@@ -241,6 +242,7 @@ export class HomeUI {
         <span class="hint">Landscape · joystick to move · Pass / Through / Shoot</span>
         <span class="grow"></span>
         <span class="ver">v${__APP_VERSION__}</span>
+        <button class="notes" aria-label="Patch notes">Patch notes</button>
         <button class="update" aria-label="Check for update">Update ⟳</button>
       </footer>`;
     const q = (s: string) => this.homeEl.querySelector(s) as HTMLElement;
@@ -248,6 +250,7 @@ export class HomeUI {
     q('.squad-tile').addEventListener('click', () => this.go('squad'));
     q('.store-tile').addEventListener('click', () => this.go('store'));
     q('.club-btn').addEventListener('click', () => this.go('club'));
+    q('.notes').addEventListener('click', () => this.patchNotes());
     q('.update').addEventListener('click', async (e) => {
       (e.currentTarget as HTMLButtonElement).textContent = 'Updating…';
       try {
@@ -258,6 +261,16 @@ export class HomeUI {
         location.reload();
       }
     });
+  }
+
+  /** What's new: the patch notes, newest first. */
+  patchNotes(): void {
+    this.openModal(
+      `<button class="m-close" aria-label="Close">✕</button>
+      <h3>Patch notes</h3>
+      <ul class="notes-list">${PATCH_NOTES.map((n) => `<li><b>v${n.v}</b><span>${esc(n.note)}</span></li>`).join('')}</ul>`,
+      'small notes-modal',
+    );
   }
 
   clubSettings(): void {

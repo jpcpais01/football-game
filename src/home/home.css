@@ -184,6 +184,11 @@ button.tile:hover .chev { transform: translateX(4px); }
 
 .home-foot { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; font-size: 13px; font-weight: 600; letter-spacing: 0.1em; color: var(--ink-dim); }
 .home-foot .ver { opacity: 0.7; }
+.home-foot .notes { font-size: 13px; letter-spacing: 0.1em; padding: 4px 10px; background: transparent; border: 1px solid var(--line-2); border-radius: 6px; font-weight: 600; text-transform: uppercase; color: var(--ink-dim); }
+.notes-modal .m-box { width: min(460px, 100%); }
+.notes-list { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.notes-list li { display: grid; grid-template-columns: 3.4em 1fr; gap: 10px; align-items: baseline; font-size: 14px; line-height: 1.4; color: var(--ink-dim); }
+.notes-list b { color: var(--gold); font-weight: 800; letter-spacing: 0.04em; font-variant-numeric: tabular-nums; }
 .home-foot .update { font-size: 13px; letter-spacing: 0.1em; padding: 4px 10px; background: transparent; border: 1px solid var(--line-2); border-radius: 6px; font-weight: 600; text-transform: uppercase; }
 
 /* ---------------------------------------------------------------- foil packs */
