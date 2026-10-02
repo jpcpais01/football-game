@@ -17,7 +17,7 @@ function score(m: Match) {
   m.ball.pos.set(team.dir * 50, 0.5, 0);
   m.ball.vel.set(team.dir * 25, 0, 0);
   m.ball.onGround = false;
-  for (let i = 0; i < 60 && m.phase !== 'goal'; i++) {
+  for (let i = 0; i < 60 && (m.phase as string) !== 'goal'; i++) {
     m.lastTouch = s;
     m.step(makeInput());
   }
