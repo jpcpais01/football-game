@@ -335,3 +335,5 @@ html, body {
 .aim-mark i { position: absolute; left: 50%; top: 50%; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; border-radius: 50%; background: #fff; }
 .aim-mark.off::before, .aim-mark.off::after { border-color: #ff5a4d; box-shadow: 0 0 10px rgba(255, 90, 77, 0.7); }
 @keyframes aim-pulse { 50% { transform: scale(0.7); opacity: 0.6; } }
+
+.menu.pause button.quit.armed { background: #c8393b; border-color: #c8393b; color: #fff; }

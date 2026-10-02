@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { Match } from '../sim/match';
 import type { Player } from '../sim/player';
+import type { Kit } from '../sim/teams';
 import { clamp, lerp, smoothstep } from '../sim/vec';
 import { PYLONS, blobMaterial, litMaterial } from './look';
 import { divePose, type DivePose } from '../sim/keeperPose';
@@ -316,10 +317,26 @@ function torsoMaterial(numbers: THREE.Texture): THREE.MeshStandardMaterial {
     groundAO: true,
     roughness: 0.78,
     uniforms: { uNumbers: { value: numbers } },
-    vertDecl: 'attribute vec3 aTrim; attribute vec3 aNumCol; attribute float aNum; varying vec3 vTrim; varying vec3 vNumCol; varying float vNum;',
-    vertBody: 'vTrim = aTrim; vNumCol = aNumCol; vNum = aNum;',
+    vertDecl: 'attribute vec3 aTrim; attribute vec3 aNumCol; attribute float aNum; attribute float aPat; varying vec3 vTrim; varying vec3 vNumCol; varying float vNum; varying float vPat;',
+    vertBody: 'vTrim = aTrim; vNumCol = aNumCol; vNum = aNum; vPat = aPat;',
     fragDecl: `${KIT_DECL}
-      varying vec3 vNumCol; varying float vNum;
+      varying vec3 vNumCol; varying float vNum; varying float vPat;
+      // Shirt designs (see KIT_PATTERNS): how much of the secondary colour shows at (u, v).
+      // u runs round the body (0 = front centre, 0.5 = back), v up from the hem.
+      float kitPattern(float pat, float u, float v) {
+        float uc = fract(u + 0.5) - 0.5; // signed, 0 at the front centre
+        float aa = 0.006;
+        if (pat < 0.5) return 0.0;                                                        // plain
+        if (pat < 1.5) return smoothstep(0.5 - aa * 8.0, 0.5 + aa * 8.0, fract(u * 9.0));   // stripes
+        if (pat < 2.5) return smoothstep(0.5 - aa * 5.0, 0.5 + aa * 5.0, fract(v * 5.0 + 0.25)); // hoops
+        if (pat < 3.5) return 1.0 - smoothstep(0.1, 0.16, abs(fract(u * 22.0) - 0.5) * 2.0);        // pinstripes
+        if (pat < 4.5) return smoothstep(-aa, aa, uc);                                     // halves
+        if (pat < 5.5) return 1.0 - smoothstep(0.075, 0.085, abs(uc * 1.25 + (v - 0.5) * 0.9)); // sash
+        if (pat < 6.5) return 1.0 - smoothstep(0.045, 0.055, abs(v - 0.66 + abs(uc) * 1.1)); // chevron
+        if (pat < 7.5) return abs(smoothstep(-aa, aa, uc) - smoothstep(0.5 - aa, 0.5 + aa, v)); // quarters
+        if (pat < 8.5) return 1.0 - smoothstep(0.1, 0.11, abs(uc));                         // centre band
+        return smoothstep(0.75, 0.05, v);                                                  // fade
+      }
       uniform sampler2D uNumbers;
       float digit(vec2 p, float d) {
         if (p.x < 0.0 || p.x > 1.0 || p.y < 0.0 || p.y > 1.0) return 0.0;
@@ -328,11 +345,11 @@ function torsoMaterial(numbers: THREE.Texture): THREE.MeshStandardMaterial {
     diffuseHook: /* glsl */ `{
       float u = vUv2.x;
       float v = vUv2.y;
-      vec3 base = diffuseColor.rgb;
+      vec3 base = mix(diffuseColor.rgb, vTrim, clamp(kitPattern(vPat, u, v), 0.0, 1.0));
       // Collar and side panels.
       float collar = smoothstep(0.86, 0.875, v);
       float side = (1.0 - smoothstep(0.012, 0.02, abs(u - 0.25))) + (1.0 - smoothstep(0.012, 0.02, abs(u - 0.75)));
-      side *= smoothstep(0.1, 0.2, v) * (1.0 - smoothstep(0.7, 0.8, v));
+      side *= smoothstep(0.1, 0.2, v) * (1.0 - smoothstep(0.7, 0.8, v)) * step(vPat, 0.5);
       vec3 c = mix(base, vTrim, clamp(collar + side * 0.85, 0.0, 1.0));
       // Crest on the left chest.
       float crest = 1.0 - smoothstep(0.018, 0.024, length(vec2((u - 0.085) * 3.0, v - 0.72)));
@@ -529,6 +546,7 @@ export class PlayersView {
         add('aTrim', 3);
         add('aNumCol', 3);
         add('aNum', 1);
+        add('aPat', 1);
       } else if (name === 'upperArm') {
         add('aTrim', 3);
         add('aSkin', 3);
@@ -602,7 +620,8 @@ export class PlayersView {
       [0x6a3fd1, 0xe9f23a], // purple / volt
     ];
     const num = this.parts.torso.mesh.geometry.getAttribute('aNum') as THREE.InstancedBufferAttribute;
-    const REF_KIT = { shirt: 0x17181b, shirt2: 0xf2c94c, shorts: 0x17181b, socks: 0x17181b, gkShirt: 0x17181b, gkShorts: 0x17181b };
+    const pat = this.parts.torso.mesh.geometry.getAttribute('aPat') as THREE.InstancedBufferAttribute;
+    const REF_KIT: Kit = { shirt: 0x17181b, shirt2: 0xf2c94c, shorts: 0x17181b, socks: 0x17181b, gkShirt: 0x17181b, gkShorts: 0x17181b };
     for (const p of this.list) {
       const kit = p.team === 2 ? REF_KIT : match.teams[p.team].info.kit;
       const gk = p.role === 'GK';
@@ -613,6 +632,7 @@ export class PlayersView {
       attr('torso', 'aTrim', p, trim);
       // Numbers in the trim colour unless that's too close to the shirt.
       attr('torso', 'aNumCol', p, gk ? 0x1d1d1d : kit.shirt2 === kit.shirt ? 0xffffff : kit.shirt2);
+      pat.setX(p.id, p.team === 2 || gk ? 0 : (kit.pattern ?? 0));
       num.setX(p.id, p.team === 2 ? -1 : p.number > 0 ? p.number : gk ? 1 : p.index + 1);
       set('upperArm', p, shirt);
       attr('upperArm', 'aTrim', p, trim);
@@ -634,6 +654,7 @@ export class PlayersView {
       attr('boot', 'aTrim', p, sole);
     }
     num.needsUpdate = true;
+    pat.needsUpdate = true;
     for (const name of Object.keys(this.parts) as PartName[]) {
       const m = this.parts[name].mesh;
       if (m.instanceColor) m.instanceColor.needsUpdate = true;
