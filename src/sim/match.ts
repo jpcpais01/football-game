@@ -5,7 +5,7 @@ import { groundKick, predictBallAt, solveFreeKick, solveGroundPass, solveLofted,
 import { Player, type Attributes, type KickPlan, type Role } from './player';
 import { FORMATION_433, HAIR_COLORS, SKIN_TONES, TEAMS, makeAttributes, type TeamInfo } from './teams';
 import { V3, Rng, angleDiff, clamp, dist2D, smoothstep } from './vec';
-import { AI, type ThroughPlan } from './ai';
+import { AI, AIM_CONE, type ThroughPlan } from './ai';
 
 export type Phase = 'kickoff' | 'play' | 'out' | 'setpiece' | 'goal' | 'halftime' | 'fulltime';
 /** Goal celebrations, one per button: Pass, Through, Shoot, Sprint. */
@@ -51,6 +51,19 @@ export interface Foul {
   penalty: boolean;
   time: number;
 }
+
+/** The last offside given: the player caught, and the free kick it gave the defenders. */
+export interface Offside {
+  player: Player;
+  /** The team awarded the indirect free kick. */
+  team: number;
+  x: number;
+  z: number;
+  time: number;
+}
+
+/** Level is onside: the linesman gives the attacker this much benefit of the doubt (m). */
+const OFFSIDE_MARGIN = 0.3;
 
 /** One player of a prepared line-up (club squads): who he is and where he plays. */
 export interface SetupPlayer {
@@ -100,6 +113,8 @@ export interface MatchEvents {
   foul: number;
   /** A yellow card was shown. */
   card: number;
+  /** The linesman's flag went up for offside. */
+  offside: number;
 }
 
 const tmpV = new V3();
@@ -169,6 +184,12 @@ export class Match {
   lastFoul: Foul | null = null;
   /** Advantage being played after a foul: brought back if the fouled team loses the ball. */
   advantage: { team: number; x: number; z: number; penalty: boolean; until: number } | null = null;
+  lastOffside: Offside | null = null;
+  /**
+   * Offside is judged the moment a team plays the ball: these teammates were beyond the line
+   * then, and touching it before an opponent plays it is the offence.
+   */
+  private offsideSnap: { team: number; flagged: Player[] } | null = null;
   /** Who struck the last shot (headers included); see `shotTeam`. */
   private shotBy: Player | null = null;
   /** Wall players block (don't play) the ball until this time. */
@@ -243,7 +264,7 @@ export class Match {
   }
 
   freshEvents(): MatchEvents {
-    return { kicks: [], whistle: 0, goal: -1, post: 0, net: 0, netX: 0, netY: 0, netZ: 0, bounce: 0, save: 0, tackle: 0, foul: 0, card: 0 };
+    return { kicks: [], whistle: 0, goal: -1, post: 0, net: 0, netX: 0, netY: 0, netZ: 0, bounce: 0, save: 0, tackle: 0, foul: 0, card: 0, offside: 0 };
   }
 
   takeEvents(): MatchEvents {
@@ -346,6 +367,7 @@ export class Match {
     this.heldBy = null;
     this.passTarget = null;
     this.lastTouch = null;
+    this.offsideSnap = null;
     this.possTeam = team;
     const taker = this.teams[team].players[9];
     this.setPiece = { kind: 'kickoff', team, x: 0, z: 0, taker, t: 0 };
@@ -358,6 +380,7 @@ export class Match {
   private ballOut(kind: SetPieceKind, team: number, x: number, z: number): void {
     this.pendingRestart = { kind, team, x, z };
     this.advantage = null;
+    this.offsideSnap = null;
     this.phase = 'out';
     this.phaseT = 0;
     this.owner = null;
@@ -1555,6 +1578,57 @@ export class Match {
     this.ball.vel.scale(0.3);
   }
 
+  /** Was this player beyond the line when his team last played the ball (and not yet onside again)? */
+  offsideFlagged(p: Player): boolean {
+    const s = this.offsideSnap;
+    return s !== null && s.team === p.team && s.flagged.includes(p);
+  }
+
+  /** About to play the ball: if he was caught offside, the flag goes up instead. */
+  private offsideTouch(p: Player): boolean {
+    if (this.phase !== 'play' || !this.offsideFlagged(p)) return false;
+    const def = 1 - p.team;
+    const x = clamp(p.pos.x, -PITCH.halfL + 0.5, PITCH.halfL - 0.5);
+    const z = clamp(p.pos.z, -PITCH.halfW + 0.5, PITCH.halfW - 0.5);
+    this.lastOffside = { player: p, team: def, x, z, time: this.time };
+    this.log?.(`${this.time.toFixed(1)} OFFSIDE T${p.team} #${p.index} at ${x.toFixed(0)},${z.toFixed(0)}`);
+    this.events.offside = 1;
+    // Indirect free kick to the defenders where he became involved.
+    this.ballOut('freekick', def, x, z);
+    this.ball.vel.scale(0.3);
+    return true;
+  }
+
+  /**
+   * `p` has played the ball: the moment that judges his teammates. An opponent's deflection or
+   * save leaves the earlier judgement standing; nobody is offside straight from a throw-in,
+   * corner or goal kick.
+   */
+  private judgeOffside(p: Player, deliberate = true, restart?: SetPieceKind): void {
+    const s = this.offsideSnap;
+    if (s && s.team !== p.team && !deliberate) return;
+    if (this.phase !== 'play' || restart === 'throw' || restart === 'corner' || restart === 'goalkick') {
+      this.offsideSnap = null;
+      return;
+    }
+    const dir = this.teams[p.team].dir;
+    // Second-last opponent (the keeper usually being the last), the ball and halfway.
+    let a = -1e9;
+    let bb = -1e9;
+    for (const q of this.teams[1 - p.team].players) {
+      const v = q.pos.x * dir;
+      if (v > a) {
+        bb = a;
+        a = v;
+      } else if (v > bb) bb = v;
+    }
+    const line = Math.max(bb, this.ball.pos.x * dir, 0) + OFFSIDE_MARGIN;
+    const flagged = s && s.team === p.team ? s.flagged : [];
+    flagged.length = 0;
+    for (const q of this.teams[p.team].players) if (q !== p && q.pos.x * dir > line) flagged.push(q);
+    this.offsideSnap = { team: p.team, flagged };
+  }
+
   /** Debug: a foul for the human team where the ball is right now. */
   debugFoul(): void {
     if (this.phase !== 'play') return;
@@ -1611,6 +1685,7 @@ export class Match {
       }
     }
     if (won) {
+      if (!carrier && this.offsideTouch(p)) return;
       const keep = !slide && this.rng.next() < 0.45;
       const a = Math.atan2(p.actionDirZ, p.actionDirX) + this.rng.gauss() * 0.6;
       const s = keep ? 1.2 : slide ? this.rng.range(5, 9) : this.rng.range(3, 6);
@@ -1621,6 +1696,7 @@ export class Match {
       }
       this.owner = keep ? p : null;
       this.lastTouch = p;
+      this.judgeOffside(p);
       this.passTarget = null;
       p.touchCooldown = keep ? 0 : 0.2;
       if (keep && p.team === this.humanTeam) this.setControlled(p);
@@ -1634,9 +1710,11 @@ export class Match {
 
   /** Executes the strike: solve the ideal ball, then add the striker's error. */
   performKick(p: Player, plan: KickPlan): void {
+    if (this.offsideTouch(p)) return;
     const b = this.ball;
     const team = this.teams[p.team];
     const fromHands = this.heldBy === p;
+    const restart = this.setPiece?.kind;
     if (fromHands) {
       this.heldBy = null;
       b.onGround = false;
@@ -1818,7 +1896,7 @@ export class Match {
           ? this.players[plan.targetId]
           : plan.aimed === false
             ? this.ai.bestReceiver(p, false)
-            : this.ai.pickReceiver(p, plan.dirX, plan.dirZ, false);
+            : this.ai.pickReceiver(p, plan.dirX, plan.dirZ, false, plan.aimed ? AIM_CONE : undefined);
       if (!receiver) {
         // Nobody there: play it into space.
         const tx = clamp(b.pos.x + plan.dirX * 15, -PITCH.halfL, PITCH.halfL);
@@ -1899,6 +1977,7 @@ export class Match {
       this.setPiece = null;
       this.phase = 'play';
     }
+    this.judgeOffside(p, true, restart);
     if (receiver && receiver.team === this.humanTeam) this.setControlled(receiver);
   }
 
@@ -1914,6 +1993,8 @@ export class Match {
     if (this.owner && this.owner.team === p.team) return false;
     if (this.passTarget === p) return true;
     if (p === this.controlled) return true;
+    // Caught beyond the line: leave it for someone onside.
+    if (this.offsideFlagged(p)) return false;
     if (this.ai.chaser[p.team] === p) return true;
     if (p.role === 'GK') return true;
     // Opponents of the pass target will happily intercept.
@@ -1947,7 +2028,10 @@ export class Match {
         // Body deflection for anyone in the way.
         // Jumping (a wall, a block) reaches higher.
         const top = p.action === 'header' ? 2.3 : 1.85;
-        if (d < PLAYER.radius + BALL.radius && h < top && p !== this.lastKicker) this.deflect(p);
+        if (d < PLAYER.radius + BALL.radius && h < top && p !== this.lastKicker) {
+          if (this.offsideTouch(p)) return;
+          this.deflect(p);
+        }
         continue;
       }
       // Close control by the owner: opponents must tackle, not just touch.
@@ -1962,6 +2046,7 @@ export class Match {
     }
     if (!best) return;
     const p = best;
+    if (this.offsideTouch(p)) return;
     if (h > PLAYER.controlHeight) {
       // Head it only when it makes sense; otherwise take it down on the chest.
       if (this.shouldHead(p)) this.header(p);
@@ -1992,6 +2077,7 @@ export class Match {
     b.pos.z = p.pos.z + nz * (PLAYER.radius + BALL.radius + 0.01);
     this.lastTouch = p;
     this.lastKicker = p;
+    this.judgeOffside(p, false);
     this.passTarget = null;
     if (this.owner && this.owner !== p) this.owner = null;
     this.events.kicks.push(clamp(-rv / 25, 0.1, 0.6));
@@ -2048,6 +2134,7 @@ export class Match {
     }
     p.sinceTouch = 0;
     this.lastTouch = p;
+    this.judgeOffside(p);
     this.events.kicks.push(0.08);
   }
 
@@ -2142,6 +2229,7 @@ export class Match {
     p.sinceTouch = 0;
     this.owner = p;
     this.lastTouch = p;
+    this.judgeOffside(p);
     this.passTarget = null;
     this.possTeam = p.team;
     this.events.kicks.push(clamp(rel / 30, 0.05, 0.4));
@@ -2209,6 +2297,7 @@ export class Match {
     this.lastTouch = p;
     this.lastKicker = p;
     this.lastKickTime = this.time;
+    this.judgeOffside(p);
     this.passTarget = null;
     this.shotBy = wantShot ? p : null;
     this.events.kicks.push(0.35);
@@ -2241,6 +2330,8 @@ export class Match {
       const qz = q.pos.z + q.vel.z * 0.9;
       const depth = (gx - qx) * dir; // metres from the goal line
       if (depth > 24 || depth < 1 || Math.abs(qz) > 22) continue;
+      // The computer doesn't pick out a man standing offside (the human might).
+      if (!plan.aimed && q.pos.x * dir > this.ai.offsideLineFor(p.team) + OFFSIDE_MARGIN) continue;
       let open = 99;
       for (const o of this.teams[1 - p.team].players) open = Math.min(open, dist2D(o.pos.x, o.pos.z, qx, qz));
       const toGoal = dist2D(qx, qz, gx, 0);
@@ -2313,6 +2404,7 @@ export class Match {
     this.owner = null;
     this.passTarget = null;
     this.lastTouch = k;
+    this.judgeOffside(k);
     this.possTeam = k.team;
     this.ball.vel.set(0, 0, 0);
     this.ball.spin.set(0, 0, 0);

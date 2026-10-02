@@ -706,6 +706,7 @@ function handleEvents(now: number): void {
       } else if (f.yellow) hud.showCaption('YELLOW CARD', `${f.offender.name ? f.offender.name.split(' ').slice(-1)[0] : '#' + (f.offender.index + 1)} · ${match.teams[f.offender.team].info.name}`, 2.6, now, 'yellow');
       else hud.showCaption('FOUL', `Free kick · ${match.teams[f.victim.team].info.name}`, 2, now, 'small');
     }
+    if (e.offside && match.lastOffside) hud.showCaption('OFFSIDE', `Free kick · ${match.teams[match.lastOffside.team].info.name}`, 2, now, 'small');
     // Booked while advantage was played: show the card now.
     if (e.card && e.foul === 2 && f) hud.showCaption('YELLOW CARD', `${f.offender.name ? f.offender.name.split(' ').slice(-1)[0] : '#' + (f.offender.index + 1)} · ${match.teams[f.offender.team].info.name} · advantage`, 2.6, now, 'yellow');
     audio.setExcitement(match.excitement);

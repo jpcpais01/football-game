@@ -12,170 +12,201 @@
     <link rel="icon" type="image/svg+xml" href="/icons/icon.svg" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <title>GameNight</title>
+    <link rel="preload" href="/icons/icon-512.png" as="image" />
+    <link rel="preload" href="/fonts/jersey-10.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/silkscreen.woff2" as="font" type="font/woff2" crossorigin />
     <!--
-      Boot screen: plain HTML and CSS, painted before any script downloads, so the phone's
-      splash hands straight over to it. A stadium powering up for a night match: the
-      floodlights come on bank by bank, the pitch glows, a ball rolls along the touchline
-      as the game loads. Animations are opacity / transform only.
+      Boot screen: plain HTML and CSS, painted before any script downloads. Its first frame is
+      the phone's own launch splash (the app icon on the night colour, dead centre), so the
+      hand-over is invisible; then the screen builds out in the game's pixel art: the icon hops
+      up, the wordmark and a segmented loading bar drop in, and the ground switches on around
+      it: floodlights, a stand of crowd lights, the pitch. Motion is stepped, like a cartridge.
     -->
     <style>
+      @font-face { font-family: 'Boot Pixel'; src: url('/fonts/jersey-10.woff2') format('woff2'); font-display: swap; }
+      @font-face { font-family: 'Boot Small'; src: url('/fonts/silkscreen.woff2') format('woff2'); font-display: swap; }
+      html, body { background: #14123a; }
       #boot {
-        --c: #14123a;
-        position: fixed; inset: 0; z-index: 1000; overflow: hidden; background: var(--c);
-        font-family: 'Barlow Condensed', 'Arial Narrow', 'Roboto Condensed', sans-serif-condensed, system-ui, sans-serif;
-        color: #f4efe3; transition: opacity 0.55s ease, visibility 0s 0.55s;
+        /* One art pixel. Everything on this screen is drawn in whole art pixels. */
+        --p: min(1vmin, 9px);
+        --cream: #f7f3e8;
+        --gold: #ffd447;
+        --ink: #170f2c;
+        position: fixed; inset: 0; z-index: 1000; overflow: hidden; background: #14123a; color: var(--cream);
+        font-family: 'Boot Pixel', 'Arial Narrow', sans-serif;
+        transition: opacity 0.4s steps(4), visibility 0s 0.4s;
         -webkit-user-select: none; user-select: none;
       }
       #boot.done { opacity: 0; visibility: hidden; }
-      #boot .sky {
-        position: absolute; inset: 0;
-        background:
-          radial-gradient(ellipse 90% 60% at 50% 105%, #2b2a6e 0%, transparent 70%),
-          linear-gradient(#0c0b26 0%, #14123a 45%, #241f55 100%);
-      }
-      /* Stars, twinkling. */
-      #boot .stars {
-        position: absolute; inset: 0 0 45% 0; opacity: 0.7;
-        background-image:
-          radial-gradient(1.2px 1.2px at 12% 18%, #fff 50%, transparent 51%),
-          radial-gradient(1px 1px at 27% 8%, #fff 50%, transparent 51%),
-          radial-gradient(1.4px 1.4px at 44% 22%, #fff 50%, transparent 51%),
-          radial-gradient(1px 1px at 63% 11%, #fff 50%, transparent 51%),
-          radial-gradient(1.2px 1.2px at 78% 26%, #fff 50%, transparent 51%),
-          radial-gradient(1px 1px at 88% 9%, #fff 50%, transparent 51%),
-          radial-gradient(1px 1px at 6% 34%, #fff 50%, transparent 51%),
-          radial-gradient(1.3px 1.3px at 54% 4%, #fff 50%, transparent 51%);
-        animation: boot-twinkle 3.2s ease-in-out infinite alternate;
-      }
-      @keyframes boot-twinkle { to { opacity: 0.35; } }
+      #boot *, #boot *::before, #boot *::after { position: absolute; box-sizing: border-box; }
 
-      /* The stands: a dark silhouette with a band of tiny crowd lights. */
+      /* ---- the ground, switched on around the logo */
+      #boot .scene { inset: 0; opacity: 0; animation: boot-on 0.6s 0.35s steps(4) forwards; }
+      #boot .stars, #boot .stars2 { left: 0; top: 0; width: var(--p); height: var(--p); background: transparent; }
+      #boot .stars {
+        box-shadow: 6vw 9vh #fffbe6, 19vw 4vh #a99fc6, 31vw 14vh #fffbe6, 46vw 6vh #a99fc6, 58vw 17vh #fffbe6,
+          72vw 5vh #fffbe6, 84vw 13vh #a99fc6, 93vw 7vh #fffbe6, 12vw 24vh #a99fc6, 88vw 26vh #a99fc6;
+        animation: boot-twinkle 1.6s steps(1) infinite;
+      }
+      #boot .stars2 {
+        box-shadow: 3vw 18vh #a99fc6, 25vw 9vh #fffbe6, 39vw 3vh #fffbe6, 52vw 12vh #a99fc6, 65vw 9vh #a99fc6,
+          78vw 20vh #fffbe6, 97vw 15vh #fffbe6, 35vw 25vh #a99fc6, 62vw 26vh #fffbe6;
+        animation: boot-twinkle 1.6s 0.8s steps(1) infinite;
+      }
+      @keyframes boot-twinkle { 50% { opacity: 0.25; } }
+      /* A night sky warming in hard bands toward the lit ground, as in the icon. */
+      #boot .glow {
+        left: 0; right: 0; bottom: 20%; height: 34%;
+        background: linear-gradient(transparent 0 20%, #1a1240 20% 42%, #26175a 42% 62%, #3b1d68 62% 80%, #5c2470 80% 92%, #8a3170 92%);
+      }
       #boot .stand {
-        position: absolute; left: -5%; right: -5%; bottom: 30%; height: 22%;
-        background: linear-gradient(#0a0a1c, #15143a);
-        clip-path: polygon(0 40%, 18% 18%, 82% 18%, 100% 40%, 100% 100%, 0 100%);
+        left: 0; right: 0; bottom: 11%; height: 12%; background: var(--ink);
+        clip-path: polygon(0 45%, 6% 45%, 6% 30%, 14% 30%, 14% 15%, 86% 15%, 86% 30%, 94% 30%, 94% 45%, 100% 45%, 100% 100%, 0 100%);
+      }
+      #boot .stand::before, #boot .stand::after {
+        content: ''; left: 0; right: 0; top: 35%; bottom: 18%; opacity: 0;
+        background: radial-gradient(#a99fc6 calc(var(--p) * 0.55), transparent 0) 0 0 / calc(var(--p) * 4) calc(var(--p) * 3);
+        animation: boot-on 0.3s 1.25s steps(2) forwards, boot-crowd 0.9s 1.6s steps(1) infinite;
       }
       #boot .stand::after {
-        content: ''; position: absolute; left: 0; right: 0; top: 46%; height: 30%; opacity: 0;
-        background-image: radial-gradient(1px 1px, rgba(255, 238, 200, 0.85) 50%, transparent 51%);
-        background-size: 7px 5px; animation: boot-on 0.8s 1.5s ease forwards;
+        background: radial-gradient(#fff0bf calc(var(--p) * 0.55), transparent 0) calc(var(--p) * 2) calc(var(--p) * 1.5) / calc(var(--p) * 8) calc(var(--p) * 6);
+        animation: boot-on 0.3s 1.45s steps(2) forwards, boot-crowd 0.9s 2.05s steps(1) infinite;
       }
-
-      /* Floodlight banks: they come on one after another, then the beams. */
+      @keyframes boot-crowd { 50% { opacity: 0.55; } }
+      #boot .pitch {
+        left: 0; right: 0; bottom: 0; height: 11%;
+        background:
+          linear-gradient(var(--cream), var(--cream)) 0 0 / 100% var(--p) no-repeat,
+          linear-gradient(transparent 70%, rgba(23, 15, 44, 0.35) 70%),
+          repeating-linear-gradient(90deg, #2f7a3c 0 calc(var(--p) * 10), #3d9447 0 calc(var(--p) * 20));
+      }
+      /* Floodlight pylons: a dark lattice mast, a checkerboard lamp bank that flickers on. */
+      #boot .pylon { bottom: 11%; height: 58%; width: calc(var(--p) * 14); }
+      #boot .pylon.l { left: 6%; }
+      #boot .pylon.r { right: 6%; }
+      #boot .mast {
+        left: calc(var(--p) * 6); width: calc(var(--p) * 2); top: calc(var(--p) * 6); bottom: 0;
+        background: repeating-linear-gradient(var(--ink) 0 calc(var(--p) * 2), #24183f 0 calc(var(--p) * 3));
+      }
       #boot .lamp {
-        position: absolute; top: 16%; width: 18vmin; height: 5vmin; border-radius: 1vmin; opacity: 0.25;
-        background: repeating-linear-gradient(90deg, #fff6dc 0 18%, #3a3850 18% 25%);
-        box-shadow: 0 0 2vmin rgba(255, 244, 214, 0.9), 0 0 9vmin rgba(255, 236, 190, 0.55);
-        animation: boot-lamp 0.5s ease forwards;
+        left: 0; top: 0; width: calc(var(--p) * 14); height: calc(var(--p) * 7);
+        border: var(--p) solid var(--ink);
+        background: repeating-conic-gradient(#fffbe6 0 25%, #fff0bf 0 50%) 0 0 / calc(var(--p) * 2) calc(var(--p) * 2);
+        filter: brightness(0.3) saturate(0.4);
+        animation: boot-lamp 0.45s steps(1) forwards;
       }
-      #boot .lamp.l1 { left: 8%; animation-delay: 0.25s; transform: rotate(-8deg); }
-      #boot .lamp.l2 { left: 31%; top: 11%; animation-delay: 0.55s; }
-      #boot .lamp.l3 { right: 31%; top: 11%; animation-delay: 0.85s; }
-      #boot .lamp.l4 { right: 8%; animation-delay: 1.15s; transform: rotate(8deg); }
+      #boot .l .lamp { animation-delay: 0.7s; }
+      #boot .r .lamp { animation-delay: 0.95s; }
+      #boot .lamp::after {
+        /* A square halo in stepped rings: pixel-art light. */
+        content: ''; inset: calc(var(--p) * -1); opacity: 0;
+        box-shadow: 0 0 0 calc(var(--p) * 2) rgba(255, 240, 191, 0.3), 0 0 0 calc(var(--p) * 5) rgba(255, 240, 191, 0.13),
+          0 0 0 calc(var(--p) * 9) rgba(255, 240, 191, 0.06);
+        animation: boot-on 0.1s 1s steps(1) forwards;
+      }
+      #boot .r .lamp::after { animation-delay: 1.25s; }
       @keyframes boot-lamp {
-        0% { opacity: 0.25; } 30% { opacity: 1; } 45% { opacity: 0.45; } 60%, 100% { opacity: 1; }
+        0% { filter: none; } 25% { filter: brightness(0.3) saturate(0.4); } 50%, 100% { filter: none; }
       }
-      #boot .beam {
-        position: absolute; top: 18%; width: 34vmin; height: 70%; opacity: 0; transform-origin: 50% 0;
-        background: linear-gradient(rgba(255, 244, 214, 0.22), rgba(255, 244, 214, 0) 85%);
-        clip-path: polygon(42% 0, 58% 0, 100% 100%, 0 100%);
-        animation: boot-on 1s ease forwards;
+      #boot .cone {
+        top: calc(var(--p) * 7); left: calc(var(--p) * -14); width: calc(var(--p) * 42); height: 260%; opacity: 0;
+        clip-path: polygon(38% 0, 62% 0, 100% 100%, 0 100%);
+        background: linear-gradient(rgba(255, 240, 191, 0.16) 0 25%, rgba(255, 240, 191, 0.1) 25% 50%, rgba(255, 240, 191, 0.05) 50% 75%, transparent 75%);
+        animation: boot-on 0.2s steps(2) forwards;
       }
-      #boot .beam.b1 { left: 0%; transform: rotate(-24deg); animation-delay: 0.4s; }
-      #boot .beam.b2 { left: 22%; top: 13%; transform: rotate(-8deg); animation-delay: 0.7s; }
-      #boot .beam.b3 { right: 22%; top: 13%; transform: rotate(8deg); animation-delay: 1s; }
-      #boot .beam.b4 { right: 0%; transform: rotate(24deg); animation-delay: 1.3s; }
+      #boot .l .cone { animation-delay: 0.95s; transform: skewX(14deg); transform-origin: 50% 0; }
+      #boot .r .cone { animation-delay: 1.2s; transform: skewX(-14deg); transform-origin: 50% 0; }
       @keyframes boot-on { to { opacity: 1; } }
 
-      /* The pitch, in perspective, lit as the floodlights come on. */
-      #boot .pitch {
-        position: absolute; left: -30%; right: -30%; bottom: -8%; height: 42%;
-        transform: perspective(60vmin) rotateX(52deg); transform-origin: 50% 100%;
-        background:
-          linear-gradient(rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.55)) 50% 0 / 0.5% 100% no-repeat,
-          radial-gradient(ellipse 50% 40% at 50% 30%, rgba(255, 255, 255, 0.12), transparent 70%),
-          repeating-linear-gradient(90deg, #2f7a3e 0 6%, #2a7038 6% 12%);
-        filter: brightness(0.35); animation: boot-pitch 1.4s 0.6s ease forwards;
-      }
-      @keyframes boot-pitch { to { filter: brightness(1); } }
-      #boot .pitch::after {
-        content: ''; position: absolute; left: 50%; top: 18%; width: 18%; aspect-ratio: 1; transform: translateX(-50%);
-        border: 0.4vmin solid rgba(255, 255, 255, 0.55); border-radius: 50%;
-      }
-
-      /* Wordmark and loader. */
+      /* ---- the logo block. Heights are exact so the icon can start dead centre. */
       #boot .mid {
-        position: absolute; left: 0; right: 0; top: 34%; display: flex; flex-direction: column; align-items: center;
-        transform: translateY(-50%); text-align: center;
+        left: 50%; top: 50%; width: calc(var(--p) * 70); height: calc(var(--p) * 63);
+        margin: calc(var(--p) * -31.5) 0 0 calc(var(--p) * -35);
+        transform: translateY(calc(var(--p) * 15.5));
+        animation: boot-hop 0.4s 0.3s steps(4) forwards;
       }
-      #boot .kicker {
-        font-size: clamp(11px, 2.2vmin, 15px); font-weight: 600; letter-spacing: 0.42em; text-transform: uppercase; color: #ffd447;
-        opacity: 0; animation: boot-rise 0.7s 0.3s ease forwards;
+      @keyframes boot-hop { to { transform: none; } }
+      #boot .icon {
+        left: calc(var(--p) * 19); top: 0; width: calc(var(--p) * 32); height: calc(var(--p) * 32);
+        image-rendering: pixelated;
+        box-shadow: 0 calc(var(--p) * -1) 0 0 var(--ink), 0 var(--p) 0 0 var(--ink), calc(var(--p) * -1) 0 0 0 var(--ink),
+          var(--p) 0 0 0 var(--ink), calc(var(--p) * 2) calc(var(--p) * 2) 0 var(--p) rgba(0, 0, 0, 0.45);
       }
       #boot h1 {
-        margin: 0.15em 0 0; font-size: clamp(44px, 14vmin, 120px); font-weight: 800; line-height: 0.88; letter-spacing: 0.04em;
-        text-transform: uppercase; opacity: 0; animation: boot-rise 0.8s 0.45s cubic-bezier(0.2, 1.2, 0.4, 1) forwards;
-        text-shadow: 0 0.06em 0 rgba(0, 0, 0, 0.3), 0 0 0.6em rgba(255, 220, 160, 0.25);
+        left: 0; right: 0; top: calc(var(--p) * 35); height: calc(var(--p) * 13); margin: 0;
+        font-weight: 400; font-size: calc(var(--p) * 16); line-height: calc(var(--p) * 13); text-align: center;
+        letter-spacing: 0.05em; text-transform: uppercase;
+        text-shadow: calc(var(--p) * 0.8) calc(var(--p) * 0.8) 0 rgba(0, 0, 0, 0.6);
       }
-      #boot h1 b { color: #ffd447; font-weight: 800; }
-      @keyframes boot-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
-
-      #boot .bar { position: relative; width: min(62vw, 420px); height: 4px; margin-top: clamp(18px, 5vmin, 34px); }
-      #boot .bar::before { content: ''; position: absolute; inset: 0; border-radius: 2px; background: rgba(255, 255, 255, 0.16); }
-      #boot .fill {
-        position: absolute; left: 0; top: 0; bottom: 0; width: 100%; border-radius: 2px; transform-origin: 0 50%;
-        transform: scaleX(0.02); background: linear-gradient(90deg, #f4efe3, #ffd447); transition: transform 0.4s ease;
+      #boot h1 b { position: static; color: var(--gold); font-weight: 400; }
+      #boot .bar {
+        left: calc(var(--p) * 5); right: calc(var(--p) * 5); top: calc(var(--p) * 52); height: calc(var(--p) * 4);
+        background: #0c0a24;
+        box-shadow: 0 calc(var(--p) * -1) 0 0 rgba(190, 200, 255, 0.35), 0 var(--p) 0 0 rgba(190, 200, 255, 0.35),
+          calc(var(--p) * -1) 0 0 0 rgba(190, 200, 255, 0.35), var(--p) 0 0 0 rgba(190, 200, 255, 0.35),
+          calc(var(--p) * 2) calc(var(--p) * 2) 0 var(--p) rgba(0, 0, 0, 0.45);
       }
-      /* The ball rolls along the line to where it has loaded. */
+      /* 24 blocks, revealed one whole block at a time. */
+      #boot .segs {
+        inset: calc(var(--p) * 0.5);
+        background: repeating-linear-gradient(90deg, var(--gold) 0 calc(100% / 24 - var(--p) * 0.5), transparent 0 calc(100% / 24));
+        clip-path: inset(0 100% 0 0);
+      }
+      #boot .runner { left: 0; top: calc(var(--p) * -1.5); width: 0; height: calc(var(--p) * 7); }
       #boot .ball {
-        position: absolute; top: -8px; left: 0; width: 20px; height: 20px; margin-left: -10px; border-radius: 50%;
-        transform: translateX(0); transition: transform 0.4s ease; filter: drop-shadow(0 3px 3px rgba(0, 0, 0, 0.4));
+        left: calc(var(--p) * -3.5); top: 0; width: calc(var(--p) * 7); height: calc(var(--p) * 7); image-rendering: pixelated;
+        background: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7 7' shape-rendering='crispEdges'><rect x='2' y='0' width='3' height='1' fill='%23170f2c'/><rect x='1' y='1' width='1' height='1' fill='%23170f2c'/><rect x='2' y='1' width='3' height='1' fill='%23f7f3e8'/><rect x='5' y='1' width='1' height='1' fill='%23170f2c'/><rect x='0' y='2' width='1' height='1' fill='%23170f2c'/><rect x='1' y='2' width='2' height='1' fill='%23f7f3e8'/><rect x='3' y='2' width='1' height='1' fill='%23574e6c'/><rect x='4' y='2' width='2' height='1' fill='%23f7f3e8'/><rect x='6' y='2' width='1' height='1' fill='%23170f2c'/><rect x='0' y='3' width='1' height='1' fill='%23170f2c'/><rect x='1' y='3' width='1' height='1' fill='%23f7f3e8'/><rect x='2' y='3' width='3' height='1' fill='%23574e6c'/><rect x='5' y='3' width='1' height='1' fill='%23f7f3e8'/><rect x='6' y='3' width='1' height='1' fill='%23170f2c'/><rect x='0' y='4' width='1' height='1' fill='%23170f2c'/><rect x='1' y='4' width='2' height='1' fill='%23f7f3e8'/><rect x='3' y='4' width='1' height='1' fill='%23574e6c'/><rect x='4' y='4' width='2' height='1' fill='%23f7f3e8'/><rect x='6' y='4' width='1' height='1' fill='%23170f2c'/><rect x='1' y='5' width='1' height='1' fill='%23170f2c'/><rect x='2' y='5' width='3' height='1' fill='%23f7f3e8'/><rect x='5' y='5' width='1' height='1' fill='%23170f2c'/><rect x='2' y='6' width='3' height='1' fill='%23170f2c'/></svg>") 0 0 / 100% 100%;
+        animation: boot-bounce 0.36s steps(1) infinite;
       }
-      #boot .ball i {
-        position: absolute; inset: 0; border-radius: 50%; animation: boot-spin 0.6s linear infinite;
-        background:
-          radial-gradient(circle at 50% 50%, #1b1b22 0 18%, transparent 19%),
-          radial-gradient(circle at 50% 4%, #1b1b22 0 12%, transparent 13%),
-          radial-gradient(circle at 96% 38%, #1b1b22 0 12%, transparent 13%),
-          radial-gradient(circle at 80% 92%, #1b1b22 0 12%, transparent 13%),
-          radial-gradient(circle at 20% 92%, #1b1b22 0 12%, transparent 13%),
-          radial-gradient(circle at 4% 38%, #1b1b22 0 12%, transparent 13%),
-          radial-gradient(circle at 35% 30%, #ffffff, #dcdcd6 70%, #a9a9a2);
-      }
-      @keyframes boot-spin { to { transform: rotate(360deg); } }
+      @keyframes boot-bounce { 50% { transform: translateY(calc(var(--p) * -1)); } }
       #boot .tip {
-        margin-top: 14px; min-height: 1.3em; font-size: clamp(12px, 2.4vmin, 16px); font-weight: 600; letter-spacing: 0.12em;
-        text-transform: uppercase; color: rgba(244, 239, 227, 0.72); transition: opacity 0.35s;
+        left: calc(var(--p) * -30); right: calc(var(--p) * -30); top: calc(var(--p) * 59); height: calc(var(--p) * 4);
+        font-family: 'Boot Small', monospace; font-size: calc(var(--p) * 2.6); line-height: calc(var(--p) * 4);
+        letter-spacing: 0.06em; text-align: center; text-transform: uppercase; color: #a99fc6;
+      }
+      #boot :is(h1, .bar, .tip) { opacity: 0; animation: boot-on 0.2s steps(2) forwards; }
+      #boot h1 { animation-delay: 0.5s; }
+      #boot .bar { animation-delay: 0.65s; }
+      #boot .tip { animation-delay: 0.8s; }
+      /* Scanlines, as on the menus. */
+      #boot .crt {
+        inset: 0; pointer-events: none;
+        background: repeating-linear-gradient(rgba(0, 0, 0, 0.16) 0 1px, transparent 1px 3px);
       }
       @media (prefers-reduced-motion: reduce) {
         #boot *, #boot *::before, #boot *::after { animation-duration: 0.01s !important; animation-delay: 0s !important; }
+        #boot .ball, #boot .stars, #boot .stars2 { animation: none !important; }
       }
     </style>
   </head>
   <body>
     <div id="boot" aria-label="Loading">
-      <div class="sky"></div>
-      <div class="stars"></div>
-      <div class="beam b1"></div><div class="beam b2"></div><div class="beam b3"></div><div class="beam b4"></div>
-      <div class="lamp l1"></div><div class="lamp l2"></div><div class="lamp l3"></div><div class="lamp l4"></div>
-      <div class="stand"></div>
-      <div class="pitch"></div>
+      <div class="scene">
+        <div class="stars"></div><div class="stars2"></div>
+        <div class="glow"></div>
+        <div class="pylon l"><div class="cone"></div><div class="mast"></div><div class="lamp"></div></div>
+        <div class="pylon r"><div class="cone"></div><div class="mast"></div><div class="lamp"></div></div>
+        <div class="stand"></div>
+        <div class="pitch"></div>
+      </div>
       <div class="mid">
-        <div class="kicker">Matchday</div>
+        <img class="icon" src="/icons/icon-512.png" alt="" />
         <h1>Game<b>Night</b></h1>
-        <div class="bar"><div class="fill"></div><div class="ball"><i></i></div></div>
+        <div class="bar"><div class="segs"></div><div class="runner"><div class="ball"></div></div></div>
         <div class="tip">Floodlights on</div>
       </div>
+      <div class="crt"></div>
     </div>
     <script>
       // Boot progress: creeps on its own while the code downloads, and the app reports real
-      // milestones with __boot(p). __bootDone() fades the screen out.
+      // milestones with __boot(p). The bar shows whole blocks. __bootDone() fades the screen out.
       (function () {
         var el = document.getElementById('boot');
-        var fill = el.querySelector('.fill');
-        var ball = el.querySelector('.ball');
+        var segs = el.querySelector('.segs');
+        var runner = el.querySelector('.runner');
         var bar = el.querySelector('.bar');
         var tip = el.querySelector('.tip');
+        var BLOCKS = 24;
         var shown = 0.02;
         var target = 0.35;
         var tips = [
@@ -189,9 +220,13 @@
           'Design your kit and crest',
         ];
         var ti = 0;
+        var drawn = -1;
         function draw() {
-          fill.style.transform = 'scaleX(' + shown.toFixed(3) + ')';
-          ball.style.transform = 'translateX(' + (shown * bar.clientWidth).toFixed(1) + 'px)';
+          var q = Math.round(shown * BLOCKS) / BLOCKS;
+          if (q === drawn) return;
+          drawn = q;
+          segs.style.clipPath = 'inset(0 ' + ((1 - q) * 100).toFixed(2) + '% 0 0)';
+          runner.style.transform = 'translateX(' + (q * bar.clientWidth).toFixed(1) + 'px)';
         }
         var timer = setInterval(function () {
           // Ease toward the last reported milestone, and keep inching forward meanwhile.
@@ -200,12 +235,8 @@
           draw();
         }, 60);
         var tipTimer = setInterval(function () {
-          tip.style.opacity = '0';
-          setTimeout(function () {
-            ti = (ti + 1) % tips.length;
-            tip.textContent = tips[ti];
-            tip.style.opacity = '1';
-          }, 350);
+          ti = (ti + 1) % tips.length;
+          tip.textContent = tips[ti];
         }, 2200);
         window.__boot = function (p) {
           target = Math.max(target, Math.min(1, p));
@@ -218,7 +249,7 @@
           clearInterval(tipTimer);
           setTimeout(function () {
             el.classList.add('done');
-            setTimeout(function () { el.remove(); }, 700);
+            setTimeout(function () { el.remove(); }, 500);
           }, 380);
         };
         draw();

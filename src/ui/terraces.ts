@@ -297,6 +297,8 @@ export class Terraces {
       // The end whose team was pulled up lets the referee hear it.
       this.boos.push(match.lastFoul.offender.team as 0 | 1);
     }
+    // ...and the end whose striker was flagged gives the linesman some.
+    if (e.offside && match.lastOffside) this.boos.push(match.lastOffside.player.team as 0 | 1);
     if (e.save > 0.5 || e.post > 0) this.oohs.push(1);
   }
 

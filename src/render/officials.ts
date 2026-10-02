@@ -51,6 +51,7 @@ export class Officials {
   /** The foul behind the current stoppage, if any. */
   private recentFoul(m: Match) {
     const f = m.lastFoul;
+    if (f && m.lastOffside && m.lastOffside.time > f.time) return null;
     return f && m.time - f.time < 12 && (m.phase === 'out' || m.setPiece?.kind === 'freekick' || m.setPiece?.kind === 'penalty') ? f : null;
   }
 
@@ -80,10 +81,13 @@ export class Officials {
       if (m.phase === 'out' || (m.phase === 'setpiece' && this.lastPhase !== 'out')) {
         this.refPoint = 2.2;
         const foul = this.recentFoul(m);
-        const att = foul ? foul.victim.team : m.setPiece ? m.setPiece.team : m.possTeam;
+        const off = m.lastOffside && m.time - m.lastOffside.time < 0.5 ? m.lastOffside : null;
+        const att = off ? off.team : foul ? foul.victim.team : m.setPiece ? m.setPiece.team : m.possTeam;
         this.refPointSide = m.teams[att]?.dir ?? 1;
         const li = ball.z < 0 ? 0 : 1;
-        if (!foul && (Math.abs(ball.z) > PITCH.halfW - 1 || Math.abs(ball.x) > PITCH.halfL - 1)) this.flagUp[li] = 2.0;
+        // Offside: the linesman on that half holds his flag up.
+        if (off) this.flagUp[off.x > 0 ? 0 : 1] = 2.6;
+        else if (!foul && (Math.abs(ball.z) > PITCH.halfW - 1 || Math.abs(ball.x) > PITCH.halfL - 1)) this.flagUp[li] = 2.0;
       }
       this.lastPhase = m.phase;
     }

@@ -1,5 +1,8 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.65', note: 'Your aim counts: a pass goes to a team-mate within about 40° of where the stick points, a through ball too, now also played along the stick’s own line. Nobody there? It goes into the space you aimed at, never off the other way.' },
+  { v: '0.64', note: 'Offside is called. Strayed beyond the last defender when a teammate plays it, then touch the ball, and the linesman’s flag goes up: indirect free kick to the defenders. Not from throw-ins, corners or goal kicks. The computer’s forwards hold their runs and leave the ball when caught.' },
+  { v: '0.63.1', note: 'New loading screen in the game’s pixel art: it opens on the app icon, exactly where the phone’s launch screen leaves it, then the floodlights flicker on, the stand lights up and a pixel ball rolls along a block-by-block loading bar.' },
   { v: '0.63', note: 'Stoppage time: each half now runs on for 1 to 5 added minutes. The board goes up at 45 and 90 minutes (+3 beside the clock) and the clock carries on, 45+1, 45+2, until the whistle.' },
   { v: '0.62.1', note: 'Smaller pause menu: compact buttons and text. No more instruction banners during corners, free kicks, penalties, goal kicks, throw-ins and kick-offs.' },
   { v: '0.62', note: 'Through balls reworked: struck at the right pace into the space a runner reaches first, so most now find him in stride. Players judge loose balls by who gets there first and meet them sooner. Strikers time runs off the passer having time to look up.' },
