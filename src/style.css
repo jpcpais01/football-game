@@ -197,3 +197,19 @@ html, body {
   position: absolute; bottom: 6px; left: 50%; transform: translateX(-50%); font: 12px/1 monospace;
   background: rgba(0, 0, 0, 0.5); padding: 4px 6px; border-radius: 3px; pointer-events: none;
 }
+
+/* ---------------------------------------------------------------- Charge bar */
+.charge {
+  position: absolute; left: -24px; top: -14px; width: 48px; height: 7px; pointer-events: none;
+  border-radius: 4px; background: rgba(15, 20, 17, 0.7); box-shadow: 0 0 0 1.5px rgba(244, 239, 227, 0.75);
+  overflow: hidden; opacity: 0; transition: opacity 0.12s; will-change: transform;
+}
+.charge.show { opacity: 1; }
+.charge .fill {
+  position: absolute; inset: 0; transform-origin: left center; transform: scaleX(0);
+  background: #f4efe3;
+}
+.charge.lofted .fill { background: #9fd0ff; }
+.charge.shot .fill { background: linear-gradient(90deg, #ffd447, #ff9d3c); }
+.charge.over .fill { background: linear-gradient(90deg, #ffd447 0%, #ff9d3c 70%, #e5483b 100%); }
+.charge .tick { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: rgba(15, 20, 17, 0.85); }

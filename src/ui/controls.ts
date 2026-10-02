@@ -25,7 +25,7 @@ export class Controls {
   private btnPointer: number[] = [-1, -1, -1];
   private btnDownAt: number[] = [0, 0, 0];
   private sprintPointer = -1;
-  private mode: 'attack' | 'defend' = 'attack';
+  mode: 'attack' | 'defend' = 'attack';
   private keys = new Set<string>();
   private keySprint = false;
   enabled = true;

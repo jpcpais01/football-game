@@ -123,6 +123,45 @@ rotate.className = 'rotate';
 rotate.innerHTML = '<div class="phone"></div><p>Turn your phone sideways</p>';
 ui.appendChild(rotate);
 
+// Charge bar above the active player while Pass / Through / Shoot is held.
+const charge = document.createElement('div');
+charge.className = 'charge';
+charge.innerHTML = '<i class="fill"></i><i class="tick"></i>';
+ui.appendChild(charge);
+const chargeFill = charge.querySelector('.fill') as HTMLElement;
+const chargeTick = charge.querySelector('.tick') as HTMLElement;
+const headPos = new THREE.Vector3();
+
+function updateCharge(alpha: number): void {
+  const inp = controls.input;
+  let btn = -1;
+  if (playing && !paused && controls.mode === 'attack') {
+    if (inp.held[2]) btn = 2;
+    else if (inp.held[0]) btn = 0;
+    else if (inp.held[1]) btn = 1;
+  }
+  if (btn < 0) {
+    charge.classList.remove('show');
+    return;
+  }
+  const hold = inp.holdTime[btn];
+  // Shoot: full power at 0.85 s, over-hit beyond (red). Pass/Through: past the tick = lofted.
+  const shot = btn === 2;
+  const p = shot ? Math.min(1.15, hold / 0.85) / 1.15 : Math.min(1, hold / 0.5);
+  chargeFill.style.transform = `scaleX(${p.toFixed(3)})`;
+  charge.classList.toggle('shot', shot);
+  charge.classList.toggle('over', shot && hold > 0.85);
+  charge.classList.toggle('lofted', !shot && hold > 0.22);
+  chargeTick.style.left = `${shot ? (1 / 1.15) * 100 : (0.22 / 0.5) * 100}%`;
+  const c = match.controlled;
+  headPos.set(c.prevPos.x + (c.pos.x - c.prevPos.x) * alpha, 2.45 * c.look.height, c.prevPos.z + (c.pos.z - c.prevPos.z) * alpha);
+  headPos.project(rig.camera);
+  const x = (headPos.x * 0.5 + 0.5) * window.innerWidth;
+  const y = (-headPos.y * 0.5 + 0.5) * window.innerHeight;
+  charge.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
+  charge.classList.add('show');
+}
+
 const fpsEl = document.createElement('div');
 fpsEl.className = 'fps';
 if (DEBUG) ui.appendChild(fpsEl);
@@ -370,6 +409,7 @@ function frame(now: number): void {
   SHARED.uTime.value = now / 1000;
   stadium.update(now / 1000, match.excitement, atmo);
   if (playing) hud.update(match, now / 1000);
+  updateCharge(alpha);
 
   renderer.render(scene, rig.camera);
   cpuAvg += (performance.now() - t0 - cpuAvg) * 0.05;
