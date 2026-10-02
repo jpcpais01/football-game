@@ -66,8 +66,9 @@ export const MATCH = {
 } as const;
 
 /**
- * After a goal (seconds into the 'goal' phase): the camera follows the celebration, then
- * cuts to the crowd — while it's away the players are brought most of the way back — then
- * returns to the field as they jog into their kick-off spots.
+ * After a goal (seconds into the 'goal' phase): the camera follows the scorer's run, swings
+ * round in front of him for his celebration (`front` → `crowd`), then turns to the crowd —
+ * while it's away the players are brought most of the way back (`cut`) — and returns to the
+ * field (`back`) as they jog into their kick-off spots.
  */
-export const GOAL_SEQ = { celebrate: 3, crowd: 5, cut: 3.9, end: 8 } as const;
+export const GOAL_SEQ = { front: 2.6, crowd: 6.6, cut: 7.5, back: 8.6, end: 11.6 } as const;

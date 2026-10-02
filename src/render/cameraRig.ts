@@ -48,8 +48,17 @@ export class CameraRig {
   get povActive(): boolean {
     return this.pov > 0;
   }
+  /** A ground-level shot is (partly) on — dead-ball view or goal celebration — so the camera
+   * can see the side of the ground behind the broadcast position. */
+  get groundLevel(): boolean {
+    return this.pov > 0 || this.front > 0;
+  }
   private povPos = new THREE.Vector3();
   private povLook = new THREE.Vector3();
+  /** Goal celebration shot from in front of the scorer (0 = off, 1 = on). */
+  private front = 0;
+  private frontPos = new THREE.Vector3();
+  private frontLook = new THREE.Vector3();
   private baseFov = 30;
   /** Base distance from the play; set by the camera setting. */
   baseDist: number = CAMERA_PRESETS.normal;
@@ -101,7 +110,7 @@ export class CameraRig {
     const bx = lerp(b.prevPos.x, b.pos.x, alpha);
     const bz = lerp(b.prevPos.z, b.pos.z, alpha);
     // After a goal: follow the scorer's celebration (then the crowd shot, then back to the field).
-    const goal = match.phase === 'goal' && match.scorer && match.phaseT < GOAL_SEQ.crowd;
+    const goal = match.phase === 'goal' && match.scorer && match.phaseT < GOAL_SEQ.back;
     const c = goal ? match.scorer! : match.controlled;
     const cx = lerp(c.prevPos.x, c.pos.x, alpha);
     const cz = lerp(c.prevPos.z, c.pos.z, alpha);
@@ -168,6 +177,7 @@ export class CameraRig {
     else this.dist = this.distOverride || this.baseDist;
     this.shake *= Math.exp(-dt * 6);
     this.updatePov(match, alpha, dt);
+    this.updateFront(match, alpha, dt);
     this.cine += ((this.cinematic || this.crowdShot ? 1 : 0) - this.cine) * (1 - Math.exp(-dt * (this.crowdShot ? 1.9 : 1.5)));
     if (this.cine < 0.002) this.cine = this.lastShot = 0;
     this.place(time);
@@ -209,6 +219,33 @@ export class CameraRig {
     const rate = want ? 3.2 : 2.0;
     this.pov += (want - this.pov) * (1 - Math.exp(-dt * rate));
     if (this.pov < 0.002) this.pov = 0;
+  }
+
+  /**
+   * The scorer's celebration: once his run is over the camera swings down and round to stand
+   * between him and the centre spot, at chest height, the celebrating end's stands behind him,
+   * and drifts slowly across him. It holds there while the crowd shot takes over (the crowd
+   * shot blends from wherever the camera is), then lets go.
+   */
+  private updateFront(match: Match, alpha: number, dt: number): void {
+    const s = match.scorer;
+    const t = match.phase === 'goal' && s ? match.phaseT : -1;
+    const want = t >= GOAL_SEQ.front && t < GOAL_SEQ.crowd + 1 ? 1 : 0;
+    if (s && t >= 0 && t < GOAL_SEQ.crowd) {
+      const x = lerp(s.prevPos.x, s.pos.x, alpha);
+      const z = lerp(s.prevPos.z, s.pos.z, alpha);
+      const d = Math.hypot(x, z) || 1;
+      // Toward the centre spot, swung a little off-axis and drifting across as he celebrates.
+      const u = clamp((t - GOAL_SEQ.front) / (GOAL_SEQ.crowd - GOAL_SEQ.front), 0, 1);
+      const a = Math.atan2(-z / d, -x / d) + (0.55 - 0.7 * u) * (z >= 0 ? 1 : -1);
+      const h = s.look.height;
+      const r = 4.4 - 0.6 * u;
+      this.frontPos.set(x + Math.cos(a) * r, 1.25 * h, z + Math.sin(a) * r);
+      this.frontLook.set(x, 1.08 * h, z);
+    }
+    // A slow, swooping pan in; held through the cut to the crowd.
+    this.front += (want - this.front) * (1 - Math.exp(-dt * (want ? 1.6 : 3)));
+    if (this.front < 0.002) this.front = 0;
   }
 
   /** Move `aim` the least so that point p lies within [aim - far, aim + near] (z: + is nearer the camera). */
@@ -258,6 +295,18 @@ export class CameraRig {
     } else if (cam.fov !== this.baseFov) {
       cam.fov = this.baseFov;
       cam.updateProjectionMatrix();
+    }
+    if (this.front > 0) {
+      const k = this.front * this.front * (3 - 2 * this.front);
+      cam.position.lerp(this.frontPos, k);
+      this.look.lerp(this.frontLook, k);
+      this.subPixelX *= 1 - k;
+      this.subPixelY *= 1 - k;
+      const fov = lerp(cam.fov, 38, k);
+      if (Math.abs(cam.fov - fov) > 0.01) {
+        cam.fov = fov;
+        cam.updateProjectionMatrix();
+      }
     }
     if (this.cine > 0) {
       // A slow crane sweep from the open near side across the bowl: the far stands, the

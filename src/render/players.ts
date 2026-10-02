@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { GOAL_SEQ } from '../sim/constants';
 import type { Match } from '../sim/match';
 import type { Player } from '../sim/player';
 import type { Kit } from '../sim/teams';
@@ -804,6 +805,9 @@ export class PlayersView {
       let elbowR = elbowL;
       let armOutL = 0.1;
       let armOutR = 0.1;
+      // Upper-arm rotation about its own length (+ = forearm swings outward).
+      let armRotL = 0;
+      let armRotR = 0;
       let hipY = HIP_Y - (0.012 + 0.05 * s) * Math.abs(cosP) * moveAmt;
       // Hips rotate and drop with each stride; the shoulders counter-rotate.
       let pelvisYaw = -0.1 * s * sinP * moveAmt;
@@ -1335,11 +1339,74 @@ export class PlayersView {
         }
       }
       // Goal celebration.
-      if (match.phase === 'goal' && match.scorer === p && match.phaseT > 0.4) {
-        armL = armR = -2.7;
-        armOutL = armOutR = 0.5;
-        elbowL = elbowR = 0.2;
-        flexExtra -= 0.25;
+      if (match.phase === 'goal' && match.scorer === p && match.phaseT > 0.4 && match.phaseT < GOAL_SEQ.cut) {
+        const u = match.phaseT - GOAL_SEQ.front;
+        if (u < 0.3) {
+          // The run: arms flung up.
+          armL = armR = -2.7;
+          armOutL = armOutR = 0.5;
+          elbowL = elbowR = 0.2;
+          flexExtra -= 0.25;
+        } else {
+          // Pulled up in front of the camera: a roar with pumped fists, sunk into a wide
+          // stance, then his signature pose, held, chin up.
+          const set = 1 - smoothstep(0.5, 2.5, speed);
+          const roar = smoothstep(0.3, 0.7, u) * (1 - smoothstep(1.7, 2.2, u));
+          const sig = smoothstep(1.9, 2.5, u);
+          const pump = Math.max(0, Math.sin((u - 0.3) * 11)) * (1 - smoothstep(1.3, 1.7, u));
+          const st = set * (roar + sig * 0.6);
+          legOutL = lerp(legOutL, 0.17, st);
+          legOutR = lerp(legOutR, 0.17, st);
+          hipL += 0.22 * set * roar;
+          hipR += 0.22 * set * roar;
+          kneeL += 0.4 * set * roar;
+          kneeR += 0.4 * set * roar;
+          hipY -= (0.07 + 0.02 * pump) * set * roar;
+          flexExtra += (0.28 + 0.1 * pump) * roar;
+          headPitch -= 0.25 * roar + 0.12 * sig;
+          headLook = false;
+          // Roar: fists clenched up in front of the chest, pumped down.
+          const ra = 0.35 + 0.35 * pump;
+          armL = lerp(-2.7, ra, roar);
+          armR = lerp(-2.7, ra, roar);
+          armOutL = armOutR = lerp(0.5, 0.35, roar);
+          elbowL = elbowR = lerp(0.2, 2.1 - 0.5 * pump, roar);
+          const v = p.id % 3;
+          if (v === 0) {
+            // Arms folded: arms across the chest, one over the other, shoulders back.
+            armL = lerp(armL, 0.5, sig);
+            armR = lerp(armR, 0.45, sig);
+            armOutL = lerp(armOutL, 0.06, sig);
+            armOutR = lerp(armOutR, 0.04, sig);
+            elbowL = lerp(elbowL, 1.95, sig);
+            elbowR = lerp(elbowR, 1.8, sig);
+            armRotL = -1.45 * sig;
+            armRotR = -1.4 * sig;
+            flexExtra -= 0.12 * sig;
+            headPitch += 0.04 * Math.sin(time * 2.2) * sig;
+          } else if (v === 1) {
+            // Arms spread wide, chest out, soaking it in.
+            armL = lerp(armL, 0.15, sig);
+            armR = lerp(armR, 0.15, sig);
+            armOutL = lerp(armOutL, 1.35, sig);
+            armOutR = lerp(armOutR, 1.35, sig);
+            elbowL = lerp(elbowL, 0.15, sig);
+            elbowR = lerp(elbowR, 0.15, sig);
+            flexExtra -= 0.2 * sig;
+          } else {
+            // "Calm down": palms pressed slowly toward the ground.
+            const press = 0.5 + 0.5 * Math.sin(time * 3.2);
+            armL = lerp(armL, 0.55 + 0.15 * press, sig);
+            armR = lerp(armR, 0.55 + 0.15 * press, sig);
+            armOutL = lerp(armOutL, 0.4, sig);
+            armOutR = lerp(armOutR, 0.4, sig);
+            elbowL = lerp(elbowL, 0.45 - 0.15 * press, sig);
+            elbowR = lerp(elbowR, 0.45 - 0.15 * press, sig);
+            hipY -= 0.025 * press * sig * set;
+            kneeL += 0.12 * press * sig * set;
+            kneeR += 0.12 * press * sig * set;
+          }
+        }
       } else if (match.phase === 'goal' && match.scorer && match.scorer.team === p.team && match.phaseT > 1.2) {
         armOutL = armOutR = 0.3 + 0.2 * Math.sin(time * 9 + p.id);
       }
@@ -1433,7 +1500,7 @@ export class PlayersView {
         const elbow = sd === 0 ? elbowL : elbowR;
         this.chain(this.j1, C, sideSign * 0.198 * build, 0.5, 0, -swing, 0, sideSign * out);
         this.put('upperArm', id * 2 + sd, this.j1);
-        this.chain(this.j2, this.j1, 0, -0.29, 0, -elbow, 0, 0);
+        this.chain(this.j2, this.j1, 0, -0.29, 0, -elbow, sideSign * (sd === 0 ? armRotL : armRotR), 0);
         this.put('forearm', id * 2 + sd, this.j2);
         // Hand at the wrist, relaxed with the palm toward the body; keeper gloves are bigger.
         this.chain(this.j3, this.j2, 0, -0.245, 0, 0.1, 0, sideSign * -0.08);

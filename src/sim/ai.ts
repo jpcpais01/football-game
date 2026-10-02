@@ -1402,13 +1402,34 @@ export class AI {
       p.wantSpeed = Math.min(p.wantSpeed, PLAYER.jogSpeed * 0.8);
       return;
     }
+    // The celebration is shot from in front of the scorer, between him and the centre spot:
+    // he pulls up and turns to it, and his team-mates pile in from behind and the sides.
+    const front = m.phaseT > GOAL_SEQ.front;
+    const d = Math.hypot(s.pos.x, s.pos.z) || 1;
+    const fx = -s.pos.x / d;
+    const fz = -s.pos.z / d;
     if (p === s) {
+      if (front) {
+        p.moveX = p.moveZ = 0;
+        p.wantSpeed = 0;
+        p.sprinting = false;
+        p.lookTarget.set(0, 0, 0);
+        p.lookAt = p.lookTarget;
+        return;
+      }
       const cx = Math.sign(p.pos.x || 1) * (PITCH.halfL - 6);
       const cz = Math.sign(p.pos.z || 1) * (PITCH.halfW - 2);
       this.moveTo(p, cx, cz, m.phaseT < 2.2, false);
       p.sprinting = true;
     } else if (p.team === s.team && p.role !== 'GK') {
-      this.moveTo(p, s.pos.x - Math.sign(s.pos.x) * 1.5, s.pos.z + ((p.index % 3) - 1) * 1.2, false, false);
+      // Chase him down, then fan out behind him: alternate sides, staggered.
+      const k = (p.index % 2 ? 1 : -1) * (1.3 + (p.index % 4) * 0.45);
+      const ahead = front ? -1.1 - (p.index % 3) * 0.5 : 1.5;
+      this.moveTo(p, s.pos.x + fx * ahead - fz * k, s.pos.z + fz * ahead + fx * k, front, false);
+      if (front && Math.hypot(p.pos.x - s.pos.x, p.pos.z - s.pos.z) < 3.5) {
+        p.lookTarget.copy(s.pos);
+        p.lookAt = p.lookTarget;
+      }
     } else {
       p.wantSpeed = Math.max(0, p.wantSpeed - DT * 4);
     }

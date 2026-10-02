@@ -566,7 +566,7 @@ function handleEvents(now: number): void {
       const who = scorer ? (scorer.name ? scorer.name.split(' ').slice(-1)[0] : '#' + (scorer.index + 1)) + ' · ' : '';
       hud.showCaption('GOAL', `${who}${team.info.name}`, 3.2, now);
       // The new score is revealed as the camera comes back from the crowd.
-      hud.goal(match, e.goal, GOAL_SEQ.crowd + 0.6);
+      hud.goal(match, e.goal, GOAL_SEQ.back + 0.6);
     }
     if (e.save > 0.5) audio.crowdGasp();
     // Referee's calls.
@@ -695,7 +695,7 @@ function frame(now: number): void {
   officials.update(match, running ? dt : 0);
   rig.cinematic = !playing || match.phase === 'halftime' || match.phase === 'fulltime';
   // A 4-second shot of the scoring side's fans going wild after each goal.
-  rig.crowdShot = playing && match.phase === 'goal' && match.phaseT >= GOAL_SEQ.celebrate && match.phaseT < GOAL_SEQ.crowd && match.scorer ? (match.scorer.team === 0 ? -1 : 1) : 0;
+  rig.crowdShot = playing && match.phase === 'goal' && match.phaseT >= GOAL_SEQ.crowd && match.phaseT < GOAL_SEQ.back && match.scorer ? (match.scorer.team === 0 ? -1 : 1) : 0;
   rig.update(match, alpha, dt, now / 1000);
   playersView.update(match, alpha, now / 1000);
   ballView.update(match, alpha, running ? dt : 0);
@@ -707,7 +707,7 @@ function frame(now: number): void {
   SHARED.uTime.value = now / 1000;
   // The ultras hold up their card display for each kick-off and the opening seconds of the half.
   const tifo = match.phase === 'kickoff' || (match.phase === 'play' && match.clock < 8) ? 1 : 0;
-  stadium.setNearStand(rig.povActive);
+  stadium.setNearStand(rig.groundLevel);
   stadium.update(now / 1000, match.excitement, atmo, tifo);
   if (playing) hud.update(match, now / 1000);
   updateAim();
