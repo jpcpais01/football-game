@@ -148,6 +148,41 @@ export class Ball {
     }
 
     this.collideGoals();
+    this.collideSurrounds();
+  }
+
+  /**
+   * Ad boards round the pitch and the front walls of the stands, so a ball that goes out
+   * thuds into them and drops instead of flying away. (Matches the rendered stadium.)
+   */
+  private collideSurrounds(): void {
+    const p = this.pos;
+    const v = this.vel;
+    const hit = (axis: 'x' | 'z', limit: number, height: number, e: number) => {
+      const c = axis === 'x' ? p.x : p.z;
+      const vc = axis === 'x' ? v.x : v.z;
+      if (Math.abs(c) > limit - R && p.y < height + R && Math.sign(vc) === Math.sign(c)) {
+        const back = Math.sign(c) * (limit - R);
+        if (axis === 'x') {
+          p.x = back;
+          v.x = -v.x * e;
+          v.z *= 0.75;
+        } else {
+          p.z = back;
+          v.z = -v.z * e;
+          v.x *= 0.75;
+        }
+        v.y *= 0.7;
+        this.spin.scale(0.4);
+        this.events.bounce = Math.max(this.events.bounce, Math.abs(vc) * 0.5);
+      }
+    };
+    // Boards along the touchlines and beside the goals (open behind the goal mouth).
+    hit('z', PITCH.halfW + 3.8, 0.9, 0.35);
+    if (Math.abs(p.z) > PITCH.goalHalfWidth + 3.5) hit('x', PITCH.halfL + 4.5, 0.9, 0.35);
+    // Stand walls behind them.
+    hit('z', PITCH.halfW + 7.5, 1.6, 0.3);
+    hit('x', PITCH.halfL + 8.5, 1.4, 0.3);
   }
 
   /** Friction impulse at the contact point, capped by maxImpulse (N·s). */

@@ -242,6 +242,12 @@ export class AI {
     switch (m.phase) {
       case 'goal':
         return this.celebrate(p);
+      case 'out':
+        // Play's stopped: ease off and watch the ball.
+        p.wantSpeed = Math.max(0, p.wantSpeed - DT * 5);
+        p.lookTarget.copy(m.ball.pos);
+        p.lookAt = p.lookTarget;
+        return;
       case 'halftime':
       case 'fulltime':
         p.wantSpeed = 0;

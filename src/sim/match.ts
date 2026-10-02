@@ -7,7 +7,7 @@ import { FORMATION_433, HAIR_COLORS, SKIN_TONES, TEAMS, makeAttributes, type Tea
 import { V3, Rng, angleDiff, clamp, dist2D, smoothstep } from './vec';
 import { AI } from './ai';
 
-export type Phase = 'kickoff' | 'play' | 'setpiece' | 'goal' | 'halftime' | 'fulltime';
+export type Phase = 'kickoff' | 'play' | 'out' | 'setpiece' | 'goal' | 'halftime' | 'fulltime';
 export type SetPieceKind = 'kickoff' | 'throw' | 'corner' | 'goalkick';
 
 export interface SetPiece {
@@ -70,6 +70,8 @@ export class Match {
   /** Team that last had controlled possession (for team shape). */
   possTeam = 0;
   setPiece: SetPiece | null = null;
+  /** Restart waiting while the ball runs on after going out of play. */
+  private pendingRestart: { kind: SetPieceKind; team: number; x: number; z: number } | null = null;
   kickoffTeam = 0;
   scorer: Player | null = null;
 
@@ -229,6 +231,17 @@ export class Match {
     this.events.whistle = 1;
   }
 
+  /** Ball out: let it run on into the boards / stands for a moment, then restart. */
+  private ballOut(kind: SetPieceKind, team: number, x: number, z: number): void {
+    this.pendingRestart = { kind, team, x, z };
+    this.phase = 'out';
+    this.phaseT = 0;
+    this.owner = null;
+    this.passTarget = null;
+    this.events.whistle = 1;
+    for (const p of this.players) p.plan = null;
+  }
+
   private startSetPiece(kind: SetPieceKind, team: number, x: number, z: number): void {
     this.phase = 'setpiece';
     this.phaseT = 0;
@@ -296,7 +309,7 @@ export class Match {
     this.switchT += DT;
     const ball = this.ball;
 
-    if (this.phase === 'play' || this.phase === 'setpiece' || this.phase === 'kickoff') {
+    if (this.phase === 'play' || this.phase === 'out' || this.phase === 'setpiece' || this.phase === 'kickoff') {
       this.clock += DT;
     }
 
@@ -318,6 +331,11 @@ export class Match {
       for (const t of this.teams) t.dir = -t.dir;
       for (const p of this.players) p.stamina = Math.min(1, p.stamina + 0.4);
       this.startKickoff(1);
+    }
+    if (this.phase === 'out' && this.phaseT > 1.5 && this.pendingRestart) {
+      const r = this.pendingRestart;
+      this.pendingRestart = null;
+      this.startSetPiece(r.kind, r.team, r.x, r.z);
     }
     if (this.phase === 'goal' && this.phaseT > 3.6) {
       this.startKickoff(this.scorer ? 1 - this.scorer.team : 0);
@@ -443,8 +461,9 @@ export class Match {
     this.pressHeld = !attacking && (input.held[Btn.C] || input.sprint);
     input.events.length = 0;
 
-    if (this.phase === 'goal' || this.phase === 'halftime' || this.phase === 'fulltime') {
+    if (this.phase === 'goal' || this.phase === 'halftime' || this.phase === 'fulltime' || this.phase === 'out') {
       c.sprinting = false;
+      if (this.phase === 'out') c.wantSpeed = Math.max(0, c.wantSpeed - DT * 6);
       return;
     }
 
@@ -1341,9 +1360,7 @@ export class Match {
     }
     if (Math.abs(p.z) > PITCH.halfW + BALL.radius) {
       const team = this.lastTouch ? 1 - this.lastTouch.team : 0;
-      this.startSetPiece('throw', team, clamp(p.x, -PITCH.halfL + 1, PITCH.halfL - 1), Math.sign(p.z) * (PITCH.halfW + 0.3));
-      const taker = this.setPiece!.taker;
-      void taker;
+      this.ballOut('throw', team, clamp(p.x, -PITCH.halfL + 1, PITCH.halfL - 1), Math.sign(p.z) * (PITCH.halfW + 0.3));
       return;
     }
     if (Math.abs(p.x) > PITCH.halfL + BALL.radius && !b.inGoal) {
@@ -1351,9 +1368,9 @@ export class Match {
       const defending = this.teams[0].dir === side ? 1 : 0;
       const attacking = 1 - defending;
       if (this.lastTouch && this.lastTouch.team === defending) {
-        this.startSetPiece('corner', attacking, side * (PITCH.halfL - 0.4), Math.sign(p.z || 1) * (PITCH.halfW - 0.4));
+        this.ballOut('corner', attacking, side * (PITCH.halfL - 0.4), Math.sign(p.z || 1) * (PITCH.halfW - 0.4));
       } else {
-        this.startSetPiece('goalkick', defending, side * (PITCH.halfL - 5.5), Math.sign(p.z || 1) * 5);
+        this.ballOut('goalkick', defending, side * (PITCH.halfL - 5.5), Math.sign(p.z || 1) * 5);
       }
     }
   }
