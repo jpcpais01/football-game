@@ -94,15 +94,15 @@ html, body {
 }
 /* Score card after a goal: the scorer's side rolls over to the new number. */
 .scorecard {
-  position: absolute; left: 50%; bottom: calc(22% + var(--safe-b)); transform: translate(-50%, 30px);
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, calc(-50% + 30px));
   opacity: 0; pointer-events: none; text-align: center;
 }
 .scorecard.show { animation: sc-in 3.4s cubic-bezier(0.2, 0.9, 0.25, 1) forwards; }
 @keyframes sc-in {
-  0% { opacity: 0; transform: translate(-50%, 30px) scale(0.96); }
-  9% { opacity: 1; transform: translate(-50%, 0) scale(1); }
-  88% { opacity: 1; transform: translate(-50%, 0) scale(1); }
-  100% { opacity: 0; transform: translate(-50%, -12px) scale(0.98); }
+  0% { opacity: 0; transform: translate(-50%, calc(-50% + 30px)) scale(0.96); }
+  9% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  88% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, calc(-50% - 12px)) scale(0.98); }
 }
 .sc-row {
   display: flex; align-items: stretch; height: 64px; border-radius: 6px; overflow: hidden;
