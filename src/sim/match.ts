@@ -91,6 +91,8 @@ const tmpV = new V3();
 const tmpK = new V3();
 /** Tackling leg (boot and shin) radius, and the radius of a standing player's legs. */
 const TACKLE_LEG_R = 0.12;
+/** A slide sweeps more: the whole leg and the trailing knee and thigh are on the grass. */
+const SLIDE_LEG_R = 0.15;
 const VICTIM_LEG_R = 0.2;
 
 /** Ground distance from (x, z) to a segment. */
@@ -810,7 +812,7 @@ export class Match {
     }
 
     // Ball seeking: the active player always hunts the ball (meets loose balls and
-    // passes, closes down the carrier). The direction is 80% the seek and 20% the stick;
+    // passes, closes down the carrier). The direction is 70% the seek and 30% the stick;
     // the stick mostly just nudges the pace (toward the ball = a bit faster).
     if (this.owner !== c && !this.pressHeld) {
       const mode = this.seekTarget(c, tmpV);
@@ -842,8 +844,8 @@ export class Match {
           if (m > 0.12) {
             const sx = input.moveX / m;
             const sz = -input.moveY / m;
-            const nx = tx * 0.8 + sx * 0.2;
-            const nz = tz * 0.8 + sz * 0.2;
+            const nx = tx * 0.7 + sx * 0.3;
+            const nz = tz * 0.7 + sz * 0.3;
             const n = Math.hypot(nx, nz);
             if (n > 0.05) {
               dirX = nx / n;
@@ -1216,8 +1218,8 @@ export class Match {
         const victim = this.owner && this.owner.team !== p.team ? this.owner
           : this.lastKicker && this.lastKicker.team !== p.team && this.time - this.lastKickTime < 0.6 ? this.lastKicker : null;
         // Contact means real contact: the leg capsule against his legs (not a radius round him).
-        const bodyHit = !!victim && victim.action !== 'stumble' && victim.action !== 'fall' && segDist(victim.pos.x, victim.pos.z, leg) < TACKLE_LEG_R + VICTIM_LEG_R;
-        const ballHit = !this.heldBy && b.pos.y < (slide ? 0.45 : 0.6) && segDist(b.pos.x, b.pos.z, leg) < TACKLE_LEG_R + BALL.radius + 0.04;
+        const bodyHit = !!victim && victim.action !== 'stumble' && victim.action !== 'fall' && segDist(victim.pos.x, victim.pos.z, leg) < (slide ? SLIDE_LEG_R : TACKLE_LEG_R) + VICTIM_LEG_R;
+        const ballHit = !this.heldBy && b.pos.y < (slide ? 0.45 : 0.6) && segDist(b.pos.x, b.pos.z, leg) < (slide ? SLIDE_LEG_R : TACKLE_LEG_R) + BALL.radius + 0.04;
         if (ballHit || bodyHit) {
           p.actionDone = true;
           // The leg meets his legs: what that does to him is physics (see legImpact).

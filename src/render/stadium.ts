@@ -21,7 +21,9 @@ import { SHARED, litMaterial } from './look';
  * card tifo at kick-off); banners hang off the railings, all moving in the shared wind.
  *
  * The crowd is drawn procedurally in the tier shader (tens of thousands of fans for one
- * draw call per tier) and lit by the same evening light as everything else.
+ * draw call per tier) and lit by the same evening light as everything else. It's 2.5D: each
+ * row of fans is an upright card standing on its step, found by following the view ray back
+ * across the rows, so fans stand up off the slope and the front rows hide the ones behind.
  */
 
 export interface Stadium {
@@ -47,6 +49,7 @@ const U = {
   uSunDir: { value: new THREE.Vector3() },
   uSunColor: { value: new THREE.Color() },
   uFlood: SHARED.uFlood,
+  uRain: SHARED.uRain,
   /** Background haze strength (1 = evening haze, low on a clear sunny day). */
   uHaze: { value: 1 },
   uTifoOn: { value: 0 },
@@ -314,10 +317,14 @@ function crowdMaterial(o: CrowdOpts): THREE.ShaderMaterial {
       varying float vDist;
       varying float vHome;
       varying float vAway;
+      varying vec3 vWorld;
+      varying vec3 vNrm;
       void main() {
         vUv = uv;
         vHome = aHome;
         vAway = aAway;
+        vWorld = (modelMatrix * vec4(position, 1.0)).xyz;
+        vNrm = mat3(modelMatrix) * normal;
         vec4 mv = viewMatrix * modelMatrix * vec4(position, 1.0);
         vDist = -mv.z;
         gl_Position = projectionMatrix * mv;
@@ -329,6 +336,8 @@ function crowdMaterial(o: CrowdOpts): THREE.ShaderMaterial {
       varying float vDist;
       varying float vHome;
       varying float vAway;
+      varying vec3 vWorld;
+      varying vec3 vNrm;
       uniform float uTime, uExcite, uFogNear, uFogFar, uFlood, uHaze, uTifoOn, uHasTifo, uStripes, uHasLetters, uFill;
       uniform vec2 uShade, uAisle;
       uniform vec3 uA, uB, uFog, uLight, uSeat, uVom;
@@ -337,100 +346,180 @@ function crowdMaterial(o: CrowdOpts): THREE.ShaderMaterial {
 
       float hash(vec2 p) { return fract(sin(dot(p, vec2(41.3, 289.1))) * 15731.743); }
 
-      void main() {
-        float ultra = step(0.5, vHome);
-        float awayEnd = step(0.5, vAway);
-        // Ultras stand shoulder to shoulder; the main stands sit in rows of seats.
-        vec2 seat = mix(vec2(0.62, 0.82), vec2(0.5, 0.78), ultra);
-        vec2 g = vUv / seat;
-        vec2 cell = floor(g);
-        vec2 f = fract(g);
-        float occ = step(hash(cell), mix(mix(0.92, 0.86, awayEnd), 1.0, ultra) * uFill);
-        // The tier's fixtures: aisle steps, vomitory tunnels, seats spelling the club's name.
-        float aisle = uAisle.x > 0.0 ? step(abs(fract(vUv.x / uAisle.x) - 0.5) * uAisle.x, uAisle.y * 0.5) : 0.0;
-        float vom = uVom.x > 0.0
-          ? step(abs(fract(vUv.x / uVom.x + 0.25) - 0.5) * uVom.x, 1.5) * step(uVom.y, vUv.y) * step(vUv.y, uVom.z) : 0.0;
-        float letter = 0.0;
-        if (uHasLetters > 0.5) {
-          vec2 lt = (vUv - uLetterRect.xz) / (uLetterRect.yw - uLetterRect.xz);
-          if (lt.x > 0.0 && lt.x < 1.0 && lt.y > 0.0 && lt.y < 1.0) letter = texture2D(uLetters, lt).a;
-        }
-        occ *= 1.0 - max(aisle, max(vom, step(0.5, letter)));
-        float awayShare = mix(mix(0.22, 0.95, awayEnd), 0.02, ultra);
+      float gUltra, gAway;
+      vec2 gSeat;
+      /** Phone torch lit on the fan that was hit. */
+      float gTorch;
 
-        // Every fan is drawn at every distance: the stands keep the same detail near and far.
-        vec3 seatAvg = uSeat;
-        vec3 avg = mix(seatAvg, mix(uA, uB, awayShare) * 0.75 + 0.06, mix(0.55, 0.8, max(ultra, awayEnd)));
-        vec3 c;
-        vec3 club;
-        {
-          // Colours: the ends are a sea of their club, the main stands a mix.
+      // The tier's fixtures at a point (uv metres): aisle steps, vomitory tunnels, letter seats.
+      float aisleAt(vec2 uv) { return uAisle.x > 0.0 ? step(abs(fract(uv.x / uAisle.x) - 0.5) * uAisle.x, uAisle.y * 0.5) : 0.0; }
+      float vomAt(vec2 uv) {
+        return uVom.x > 0.0 ? step(abs(fract(uv.x / uVom.x + 0.25) - 0.5) * uVom.x, 1.5) * step(uVom.y, uv.y) * step(uv.y, uVom.z) : 0.0;
+      }
+      float letterAt(vec2 uv) {
+        if (uHasLetters < 0.5) return 0.0;
+        vec2 lt = (uv - uLetterRect.xz) / (uLetterRect.yw - uLetterRect.xz);
+        return lt.x > 0.0 && lt.x < 1.0 && lt.y > 0.0 && lt.y < 1.0 ? texture2D(uLetters, lt).a : 0.0;
+      }
+
+      /**
+       * One row's card, standing upright on its step: the fan in that seat (or the seat back
+       * behind an empty one, or the card he holds up). fx: metres across from the seat's
+       * centre, hy: metres above the step. a = 1 where the card is solid.
+       */
+      vec4 rowCard(float u, float k, float sv, float hy) {
+        vec2 uv = vec2(u, sv);
+        float gap = max(aisleAt(uv), vomAt(uv));
+        if (gap > 0.5 || hy > 2.2) return vec4(0.0);
+        float ultra = gUltra;
+        float awayEnd = gAway;
+        vec2 cell = vec2(floor(u / gSeat.x), k);
+        float fx = (fract(u / gSeat.x) - 0.5) * gSeat.x;
+        float letter = step(0.5, letterAt(uv));
+        float occ = step(hash(cell), mix(mix(0.92, 0.86, awayEnd), 1.0, ultra) * uFill) * (1.0 - letter);
+
+        if (occ > 0.5) {
+          // Card display: held up overhead, edge to edge, together they make the picture.
+          if (uTifoOn > 0.001) {
+            vec2 cardUv = (cell + 0.5) * gSeat;
+            vec3 card = vec3(0.0);
+            float on = 0.0;
+            if (uHasTifo > 0.5) {
+              vec2 t = (cardUv - uTifoRect.xz) / (uTifoRect.yw - uTifoRect.xz);
+              on = step(0.0, t.x) * step(t.x, 1.0) * step(0.0, t.y) * step(t.y, 1.0) * ultra;
+              card = texture2D(uTifo, clamp(t, 0.0, 1.0)).rgb;
+            }
+            if (uStripes > 0.5) {
+              vec3 sc = mix(mix(uA, uB, awayEnd), vec3(0.95, 0.93, 0.88), step(0.5, fract(cardUv.x / 9.0)));
+              card = mix(sc, card, on);
+              on = 1.0;
+            }
+            float up = on * step(hash(cell + 8.8), 0.985) * step(hash(cell + 4.1) * 0.7 + 0.15, uTifoOn);
+            if (up > 0.5 && abs(fx) < gSeat.x * 0.47 && hy > 1.2 && hy < 1.95) {
+              card *= 0.86 + 0.14 * hash(cell + 4.4);
+              return vec4(card * (0.8 + 0.2 * smoothstep(1.2, 1.9, hy)), 1.0);
+            }
+          }
+
+          // The fan: built and dressed by his seat's hash, standing or sitting, jumping with
+          // the ultras' bounce, up out of his seat when it gets loud.
+          float ph = hash(cell + 3.3) * 6.283;
+          float beat = sin(uTime * 7.5 - cell.y * 0.5 + hash(vec2(cell.y, 1.0)) * 0.6);
+          float jump = ultra * max(0.0, beat) * (0.08 + 0.1 * uExcite)
+            + (1.0 - ultra) * max(0.0, sin(uTime * (7.0 + hash(cell + 1.1) * 3.0) + ph)) * uExcite * uExcite * 0.18;
+          float stand = max(ultra, clamp(uExcite * 2.4 - 1.25 - hash(cell + 6.6) * 0.5, 0.0, 1.0));
+          float tall = 0.92 + 0.14 * hash(cell + 2.9);
+          float wide = 0.85 + 0.3 * hash(cell + 1.7);
+          float y = (hy - jump + (1.0 - stand) * 0.44) / tall;
+          float x = (fx - sin(uTime * 1.3 + ph) * 0.02) / wide;
+          float ax = abs(x);
+          // Scarves held up overhead: always in the ends, everywhere when it's loud.
+          float scarfUp = step(hash(cell + 5.5), max(max(ultra, awayEnd) * 0.75, uExcite * uExcite * 0.8));
+          float armsUp = max(scarfUp, ultra * step(0.6, beat) * step(0.5, hash(cell + 7.7)));
+
           float h = hash(cell + 7.1);
-          club = mix(uA, uB, step(hash(cell * 0.37 + floor(cell.x / 14.0)), awayShare));
+          vec3 club = mix(uA, uB, step(hash(cell * 0.37 + floor(cell.x / 14.0)), mix(mix(0.22, 0.95, awayEnd), 0.02, ultra)));
           float clubShare = mix(0.55, 0.85, max(ultra, awayEnd));
           vec3 shirt = h < clubShare ? club * (0.78 + 0.22 * hash(cell + 2.0))
             : h < clubShare + 0.12 ? vec3(0.86, 0.84, 0.79)
             : h < clubShare + 0.22 ? vec3(0.17, 0.18, 0.21)
             : vec3(0.34, 0.38, 0.47);
-
-          // Movement: ultras bounce together in a rolling wave; others now and then.
-          float ph = hash(cell + 3.3) * 6.283;
-          float beat = sin(uTime * 7.5 - cell.y * 0.5 + hash(vec2(cell.y, 1.0)) * 0.6);
-          float jump = ultra * max(0.0, beat) * (0.1 + 0.12 * uExcite)
-            + (1.0 - ultra) * max(0.0, sin(uTime * (7.0 + hash(cell + 1.1) * 3.0) + ph)) * uExcite * uExcite * 0.22;
-          float sway = sin(uTime * 1.3 + ph) * 0.03;
-          vec2 q = f - vec2(0.5 + sway, 0.0) - vec2(0.0, jump);
-          float body = step(abs(q.x), 0.3) * step(0.08, q.y) * step(q.y, 0.62);
-          float head = step(length((q - vec2(0.0, 0.74)) * vec2(1.0, 1.25)), 0.16);
-          // Scarves held up overhead: always in the ends, everywhere when it's loud.
-          float scarfUp = step(hash(cell + 5.5), max(max(ultra, awayEnd) * 0.75, uExcite * uExcite * 0.8));
-          float scarf = scarfUp * step(abs(q.x), 0.46) * step(0.86, q.y) * step(q.y, 0.97);
-          vec3 scarfCol = mix(club, vec3(0.95, 0.93, 0.88), step(0.5, fract(q.x * 3.0 + 0.25)));
-
-          vec3 seatCol = seatAvg * (0.9 + 0.2 * step(0.5, fract(cell.y * 0.5)));
           vec3 skin = mix(vec3(0.93, 0.76, 0.6), vec3(0.42, 0.28, 0.18), hash(cell + 9.2));
-          vec3 fan = seatCol;
-          fan = mix(fan, shirt, body * occ);
-          fan = mix(fan, skin, head * occ);
-          fan = mix(fan, scarfCol, scarf * occ);
-          c = fan;
-        }
-        c = mix(c, avg, 0.05 + 0.1 * uHaze);
-        // Fixtures over the fans: white letter seats, concrete steps, dark tunnel mouths.
-        vec3 stepsCol = vec3(0.4, 0.41, 0.43) * (0.82 + 0.18 * step(0.5, fract(vUv.y / 0.82)));
-        c = mix(c, vec3(0.86, 0.85, 0.82) * (0.9 + 0.1 * step(0.5, fract(vUv.y / 0.82))), letter);
-        c = mix(c, stepsCol, aisle * (1.0 - letter));
-        c = mix(c, vec3(0.02, 0.022, 0.03), vom);
+          vec3 hair = mix(vec3(0.08, 0.06, 0.05), vec3(0.45, 0.32, 0.18), hash(cell + 3.9) * hash(cell + 3.9));
+          vec3 legsCol = mix(vec3(0.12, 0.14, 0.2), vec3(0.3, 0.3, 0.32), hash(cell + 4.7));
 
-        // Card display: every fan holds one card, together they make the picture.
-        if (uTifoOn > 0.001) {
-          vec2 cardUv = (cell + 0.5) * seat;
-          vec3 card = vec3(0.0);
-          float on = 0.0;
-          if (uHasTifo > 0.5) {
-            vec2 t = (cardUv - uTifoRect.xz) / (uTifoRect.yw - uTifoRect.xz);
-            on = step(0.0, t.x) * step(t.x, 1.0) * step(0.0, t.y) * step(t.y, 1.0) * ultra;
-            card = texture2D(uTifo, clamp(t, 0.0, 1.0)).rgb;
+          float sh = 0.62 + 0.38 * smoothstep(0.0, 1.7, hy);
+          if (scarfUp > 0.5 && ax < 0.27 && y > 1.86 && y < 1.97) {
+            vec3 sc = mix(club, vec3(0.95, 0.93, 0.88), step(0.5, fract(x * 6.0 + 0.25)));
+            return vec4(sc * sh, 1.0);
           }
-          if (uStripes > 0.5) {
-            float band = step(0.5, fract(cardUv.x / 9.0));
-            vec3 sc = mix(mix(uA, uB, awayEnd), vec3(0.95, 0.93, 0.88), band);
-            card = mix(sc, card, on);
-            on = 1.0;
+          vec2 hq = vec2(x, (y - 1.6) * 0.92);
+          if (length(hq) < 0.105) {
+            gTorch = step(0.9965, hash(cell + floor(uTime * 3.0 + hash(cell) * 10.0)));
+            vec3 c = mix(skin, hair, step(0.04, hq.y) * step(0.3, hash(cell + 0.7)));
+            return vec4(c * sh * (1.0 - 0.25 * smoothstep(0.05, 0.105, ax)), 1.0);
           }
-          float gap = step(0.08, f.x) * step(f.x, 0.94) * step(0.06, f.y) * step(f.y, 0.94);
-          card *= 0.86 + 0.14 * hash(cell + 4.4);
-          card = mix(card * 0.55, card, gap);
-          c = mix(c, card, on * uTifoOn * step(hash(cell + 8.8), 0.985));
+          if (armsUp > 0.5 ? (abs(ax - 0.21) < 0.045 && y > 1.32 && y < 1.92) : (abs(ax - 0.225) < 0.04 && y > 1.0 && y < 1.42)) {
+            float hand = armsUp > 0.5 ? step(1.84, y) : step(y, 1.07);
+            return vec4(mix(shirt * 0.85, skin, hand) * sh, 1.0);
+          }
+          if (y > 0.86 && y < 1.46 && ax < 0.2 - max(0.0, y - 1.38) * 1.3) {
+            return vec4(shirt * sh * (1.0 - 0.28 * smoothstep(0.09, 0.2, ax)), 1.0);
+          }
+          if (y > 0.0 && y < 0.88 && abs(ax - 0.075) < 0.068) return vec4(legsCol * sh, 1.0);
         }
+        // Seat backs (the ultras' end is a standing terrace: none); the club's name in white.
+        if (ultra < 0.5 && hy < 0.46 && abs(fx) < gSeat.x * 0.44) {
+          vec3 seatCol = mix(uSeat * (0.9 + 0.2 * step(0.5, fract(k * 0.5))), vec3(0.86, 0.85, 0.82), letter);
+          return vec4(seatCol * (0.7 + 0.3 * smoothstep(0.0, 0.46, hy)), 1.0);
+        }
+        return vec4(0.0);
+      }
+
+      void main() {
+        gUltra = step(0.5, vHome);
+        gAway = step(0.5, vAway);
+        // Ultras stand shoulder to shoulder; the main stands sit in rows of seats.
+        gSeat = mix(vec2(0.62, 0.82), vec2(0.5, 0.78), gUltra);
+        gTorch = 0.0;
+
+        // The tier in section: its slope, which way is back (up the rows) and along.
+        vec3 N = normalize(vNrm);
+        N *= sign(N.y + 1e-4);
+        vec2 back = -normalize(N.xz + vec2(1e-5));
+        vec2 along = vec2(-back.y, back.x);
+        float tanT = length(N.xz) / max(N.y, 0.05);
+        float cosT = inversesqrt(1.0 + tanT * tanT);
+        vec3 R = normalize(vWorld - cameraPosition);
+        float Rb = dot(R.xz, back);
+        float Ru = dot(R.xz, along);
+
+        // Each row of fans is an upright card on its step. Follow the view ray back across the
+        // rows in front of the point where it meets the tier: the first card it passes through
+        // below a fan's height is what's seen (front rows hide the ones behind; the gaps
+        // between heads show the next row).
+        vec3 c = vec3(0.0);
+        float hit = 0.0;
+        float sv = vUv.y;
+        if (Rb > 0.02) {
+          float m = tanT - R.y / Rb;
+          float xP = vUv.y * cosT;
+          float kEnd = floor(vUv.y / gSeat.y - 0.6);
+          float kStart = max(0.0, ceil(((xP - 2.2 / max(m, 0.01)) / cosT) / gSeat.y - 0.6));
+          kStart = max(kStart, kEnd - 9.0);
+          for (int i = 0; i < 10; i++) {
+            float k = kStart + float(i);
+            if (k > kEnd) break;
+            float sk = (k + 0.6) * gSeat.y;
+            float dx = xP - sk * cosT;
+            vec4 r = rowCard(vUv.x - dx * Ru / Rb, k, sk, dx * m);
+            if (r.a > 0.5) {
+              c = r.rgb;
+              hit = 1.0;
+              sv = sk;
+              break;
+            }
+          }
+        }
+        if (hit < 0.5) {
+          // The step itself, in the shadow of the people on it.
+          vec2 uv = vUv;
+          float vom = vomAt(uv);
+          float aisle = aisleAt(uv);
+          vec3 stepsCol = vec3(0.4, 0.41, 0.43) * (0.82 + 0.18 * step(0.5, fract(uv.y / 0.82)));
+          c = mix(uSeat * 0.45, vec3(0.3, 0.3, 0.32) * 0.6, gUltra);
+          c = mix(c, stepsCol, aisle);
+          c = mix(c, vec3(0.02, 0.022, 0.03), vom);
+        }
+        vec3 avg = mix(uSeat, mix(uA, uB, mix(mix(0.22, 0.95, gAway), 0.02, gUltra)) * 0.75 + 0.06, mix(0.55, 0.8, max(gUltra, gAway)));
+        c = mix(c, avg, 0.05 + 0.1 * uHaze);
 
         // Rows under the roof sit in its shadow.
-        c *= 1.0 - 0.38 * smoothstep(uShade.x, uShade.y, vUv.y);
+        c *= 1.0 - 0.38 * smoothstep(uShade.x, uShade.y, sv);
 
         c = pow(c, vec3(2.2)) * uLight;
         // Phone torches once it's dark.
-        float tw = step(0.9965, hash(cell + floor(uTime * 3.0 + hash(cell) * 10.0)));
-        c += vec3(1.0, 0.97, 0.9) * tw * occ * uFlood * 1.6;
+        c += vec3(1.0, 0.97, 0.9) * gTorch * uFlood * 1.6;
 
         // Atmospheric haze: the background sits back behind the play.
         float fog = smoothstep(uFogNear, uFogFar, vDist);
@@ -1082,13 +1171,15 @@ function lightShafts(spots: THREE.Vector3[]): THREE.Group {
     side: THREE.DoubleSide,
     blending: THREE.AdditiveBlending,
     fog: false,
-    uniforms: { uFlood: SHARED.uFlood },
+    uniforms: { uFlood: SHARED.uFlood, uRain: SHARED.uRain, uTime: U.uTime },
     vertexShader: /* glsl */ `
       varying float vAlong;
+      varying float vU;
       varying vec3 vN;
       varying vec3 vV;
       void main() {
         vAlong = uv.y;
+        vU = uv.x;
         vec4 wp = modelMatrix * vec4(position, 1.0);
         vN = normalize(mat3(modelMatrix) * normal);
         vV = normalize(cameraPosition - wp.xyz);
@@ -1096,14 +1187,21 @@ function lightShafts(spots: THREE.Vector3[]): THREE.Group {
       }
     `,
     fragmentShader: /* glsl */ `
-      uniform float uFlood;
+      uniform float uFlood, uRain, uTime;
       varying float vAlong;
+      varying float vU;
       varying vec3 vN;
       varying vec3 vV;
       void main() {
         // Bright at the lamp, fading toward the pitch; soft edges (no hard cone outline).
         float soft = pow(abs(dot(normalize(vN), normalize(vV))), 1.6);
         float a = pow(vAlong, 2.2) * soft * uFlood * uFlood * 0.065;
+        // Rain makes the beams: the light catches every drop, a shimmer of falling streaks.
+        if (uRain > 0.0) {
+          vec2 sc = vec2(floor(vU * 140.0), floor(vAlong * 9.0 + uTime * 2.6 + fract(floor(vU * 140.0) * 0.37) * 7.0));
+          float streak = step(0.72, fract(sin(dot(sc, vec2(12.9898, 78.233))) * 43758.5453));
+          a *= 1.0 + uRain * (1.6 + 1.4 * streak);
+        }
         gl_FragColor = vec4(vec3(1.0, 0.96, 0.86) * a, 1.0);
       }
     `,
@@ -1258,7 +1356,7 @@ function sky(): THREE.Mesh {
     vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
     fragmentShader: /* glsl */ `
       uniform vec3 uSkyTop, uSkyHorizon, uSunDir, uSunColor;
-      uniform float uTime, uFlood;
+      uniform float uTime, uFlood, uRain;
       varying vec3 vDir;
       float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
       float noise(vec2 p) {
@@ -1271,7 +1369,7 @@ function sky(): THREE.Mesh {
         vec3 c = mix(uSkyHorizon, uSkyTop, pow(h, 0.5));
         vec3 toSun = -uSunDir;
         float s = max(dot(d, normalize(toSun)), 0.0);
-        c += uSunColor * (pow(s, 6.0) * 0.25 + pow(s, 80.0) * 0.6);
+        c += uSunColor * (pow(s, 6.0) * 0.25 + pow(s, 80.0) * 0.6) * (1.0 - uRain);
         // Soft streaky clouds low in the sky, lit by the sun from one side.
         vec2 cp = d.xz / max(0.08, d.y + 0.12) * 1.4 + vec2(uTime * 0.004, 0.0);
         float cl = smoothstep(0.55, 0.85, noise(cp * vec2(0.6, 2.2)) * 0.7 + noise(cp * 2.3) * 0.3);
@@ -1282,7 +1380,14 @@ function sky(): THREE.Mesh {
         vec2 sg = floor(vec2(atan(d.z, d.x) * 95.0, d.y * 130.0));
         float star = step(0.9965, hash(sg)) * smoothstep(0.1, 0.35, d.y) * (1.0 - cl);
         float tw = 0.55 + 0.45 * sin(uTime * 2.3 + hash(sg + 1.7) * 30.0);
-        c += vec3(0.92, 0.94, 1.0) * star * tw * uFlood * uFlood * 1.2;
+        c += vec3(0.92, 0.94, 1.0) * star * tw * uFlood * uFlood * 1.2 * (1.0 - uRain);
+        if (uRain > 0.0) {
+          // Low, heavy rain cloud rolling over, its belly lit from below by the floodlights.
+          vec2 rp = d.xz / max(0.05, d.y + 0.15) * 0.9 + vec2(uTime * 0.02, uTime * 0.008);
+          float ov = noise(rp * 0.8) * 0.6 + noise(rp * 2.1 + 3.0) * 0.3 + noise(rp * 5.3) * 0.1;
+          vec3 belly = vec3(0.16, 0.18, 0.24) * (0.6 + 0.8 * ov) * (1.0 - smoothstep(0.0, 0.7, d.y) * 0.7);
+          c = mix(c, belly, uRain);
+        }
         gl_FragColor = vec4(c, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>

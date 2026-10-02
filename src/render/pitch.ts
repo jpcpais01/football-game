@@ -85,6 +85,8 @@ export function createPitch(renderer: THREE.WebGLRenderer, marks: THREE.Texture)
         /* glsl */ `#include <common>
         varying vec3 vGrassWorld;
         uniform float uDew;
+        uniform float uRain;
+        float gPuddle;
         uniform float uFlood;
         uniform vec3 uShadeTint;
         uniform vec3 uFloodColor;
@@ -171,6 +173,11 @@ export function createPitch(renderer: THREE.WebGLRenderer, marks: THREE.Texture)
           gLine = (1.0 - smoothstep(0.06 - aa, 0.06 + aa, d)) * (1.0 - mk.r * 0.85);
           col = mix(col, vec3(0.92, 0.92, 0.88) * (0.94 + nf.a * 0.06), gLine * 0.9);
           gWet = (0.6 + 0.4 * nc.g) * (1.0 - gLine) * (1.0 - mk.r * 0.7);
+          // Rain: soaked grass goes darker and deeper green; water stands in the low spots
+          // and the worn goalmouths, and in the mud of the slide marks.
+          gPuddle = smoothstep(0.72, 0.84, nc.g * 0.55 + nf.r * 0.45 + wb * 0.18 + mk.r * 0.3) * uRain;
+          col *= mix(vec3(1.0), vec3(0.7, 0.78, 0.72), uRain);
+          col = mix(col, col * vec3(0.4, 0.45, 0.52), gPuddle * 0.8);
           return pow(col, vec3(2.2));
         }`,
       )
@@ -182,7 +189,8 @@ export function createPitch(renderer: THREE.WebGLRenderer, marks: THREE.Texture)
       .replace(
         '#include <roughnessmap_fragment>',
         `#include <roughnessmap_fragment>
-        roughnessFactor = mix(0.95, 0.42, uDew * gWet);`,
+        roughnessFactor = mix(0.95, mix(0.42, 0.24, uRain), uDew * gWet);
+        roughnessFactor = mix(roughnessFactor, 0.07, gPuddle);`,
       )
       .replace(
         '#include <lights_fragment_end>',
@@ -195,12 +203,22 @@ export function createPitch(renderer: THREE.WebGLRenderer, marks: THREE.Texture)
           // Dew glinting under the floodlights.
           vec2 gc = floor(vGrassWorld.xz * 7.0);
           float glint = step(0.9975, cHash(gc + floor(uTime * 1.3 + cHash(gc) * 5.0))) * (1.0 - gLine);
-          reflectedLight.directSpecular += uFloodColor * glint * uDew * 2.5;
+          reflectedLight.directSpecular += uFloodColor * glint * uDew * (2.5 - 1.7 * uRain);
           reflectedLight.indirectDiffuse += diffuseColor.rgb * uShadeTint * sh * 0.45;
           // Floodlight pools: a touch brighter through the middle, falling off to the corners.
           vec2 q = vGrassWorld.xz / vec2(HL, HW);
           float pool = 1.12 - 0.3 * smoothstep(0.35, 1.25, length(q * vec2(0.85, 1.0)));
           reflectedLight.indirectDiffuse += diffuseColor.rgb * uFloodColor * uFlood * 0.5 * pool;
+          // Standing water mirrors the floodlit stands, brightest at a glancing angle, with
+          // rings spreading where the drops land.
+          if (gPuddle > 0.001) {
+            float fres = pow(1.0 - clamp(gView.y, 0.0, 1.0), 3.0);
+            vec2 rc = floor(vGrassWorld.xz * 3.0);
+            vec2 rf = fract(vGrassWorld.xz * 3.0) - 0.5;
+            float rp = fract(uTime * 1.4 + cHash(rc) * 7.0);
+            float ring = (1.0 - smoothstep(0.0, 0.06, abs(length(rf - (vec2(cHash(rc + 3.1), cHash(rc + 5.7)) - 0.5) * 0.4) - rp * 0.45))) * (1.0 - rp);
+            reflectedLight.indirectSpecular += uFloodColor * gPuddle * (0.02 + 0.12 * fres + 0.16 * ring) * uFlood;
+          }
         }`,
       );
   };

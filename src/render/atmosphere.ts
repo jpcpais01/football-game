@@ -4,6 +4,10 @@ import { clamp, lerp, smoothstep } from '../sim/vec';
 
 const SHADE_DUSK = new THREE.Color(0x8c9ae0);
 
+export type Weather = 'evening' | 'sunny' | 'rain';
+export const WEATHERS: Weather[] = ['evening', 'sunny', 'rain'];
+export const WEATHER_NAMES: Record<Weather, string> = { evening: 'Evening', sunny: 'Sunny day', rain: 'Rainy night' };
+
 /**
  * Time of day across the match: kick-off in warm late-afternoon sun, full time at dusk
  * with the floodlights doing most of the work. Drives lights, sky, fog and the shared
@@ -21,8 +25,8 @@ export class Atmosphere {
   private c2 = new THREE.Color();
   private shadowTarget = new THREE.Vector3();
   /** 'evening': kick-off at golden hour, full time under floodlights. 'sunny': a clear,
-   * crisp midday match. */
-  weather: 'evening' | 'sunny' = 'evening';
+   * crisp midday match. 'rain': a wet night under the floodlights. */
+  weather: Weather = 'evening';
   /** How much atmospheric haze the background gets (read by the stadium shaders). */
   haze = 1;
 
@@ -67,7 +71,9 @@ export class Atmosphere {
 
   /** Sets the time of day. */
   set(progress: number): void {
+    SHARED.uRain.value = this.weather === 'rain' ? 1 : 0;
     if (this.weather === 'sunny') return this.setSunny();
+    if (this.weather === 'rain') return this.setRain();
     this.haze = 1;
     this.fog.near = 95;
     this.fog.far = 300;
@@ -129,6 +135,38 @@ export class Atmosphere {
     SHARED.uShadeTint.value.setHex(0x9cc4f0);
     SHARED.uClouds.value = 1;
     SHARED.uSunColor.value.copy(this.sun.color);
+  }
+
+  /**
+   * A wet night: black overcast sky, the floodlights carrying everything — a cool-white key
+   * from high over the main stand roof, deep blue fill, rain haze closing in on the far
+   * stands, the grass soaked and shining.
+   */
+  private setRain(): void {
+    const elev = (58 * Math.PI) / 180;
+    const az = -0.35;
+    const h = Math.cos(elev);
+    SUN_DIR.set(Math.sin(-az) * h, -Math.sin(elev), -Math.cos(az) * h).normalize();
+    this.sun.color.setHex(0xdfe7ff);
+    this.sun.intensity = 1.45;
+    this.hemi.color.setHex(0x46557c);
+    this.hemi.groundColor.setHex(0x1d281a);
+    this.hemi.intensity = 0.55;
+    this.skyTop.setHex(0x05070d);
+    this.skyHorizon.setHex(0x1b2130);
+    this.sunGlow.setHex(0x000000);
+    this.fog.color.setHex(0x232a38);
+    this.bg.setHex(0x232a38);
+    this.fog.near = 50;
+    this.fog.far = 230;
+    this.haze = 1.15;
+    // No sun: nothing casts the stand's shadow.
+    SHARED.uShadowZ0.value = 80;
+    SHARED.uFlood.value = 1.05;
+    SHARED.uDew.value = 1;
+    SHARED.uShadeTint.value.setHex(0x5d71a8);
+    SHARED.uClouds.value = 0;
+    SHARED.uSunColor.value.setHex(0x9fb2e0);
   }
 
   /** Keeps the shadow map centred on what the camera sees (snapped to texels: no shimmer). */

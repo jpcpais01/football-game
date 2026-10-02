@@ -36,6 +36,8 @@ export const SHARED = {
   uWind: { value: new THREE.Vector2(0.85, 0.35) },
   /** Strength of drifting cloud shadows on the pitch (sunny ≈ 1). */
   uClouds: { value: 0.5 },
+  /** 0 = dry, 1 = pouring: wet, darker grass with standing water, beams through the rain. */
+  uRain: { value: 0 },
   /** Sun colour for the warm rim light. */
   uSunColor: { value: new THREE.Color(0xffe2b8) },
 };

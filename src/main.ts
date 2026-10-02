@@ -12,7 +12,8 @@ import { createGoals } from './render/goals';
 import { PlayersView } from './render/players';
 import { BallView } from './render/ballView';
 import { CAMERA_PRESETS, CameraRig, type CameraPreset } from './render/cameraRig';
-import { Atmosphere } from './render/atmosphere';
+import { Atmosphere, WEATHERS, WEATHER_NAMES, type Weather } from './render/atmosphere';
+import { Rain } from './render/rain';
 import { PixelPass } from './render/pixelPass';
 import { PALETTES } from './render/palettes';
 import { Particles } from './render/particles';
@@ -67,6 +68,8 @@ let match = new Match(Date.now() & 0xffff, club.matchSetup(Date.now() & 0xffff))
 match.autoPlay = true;
 
 const turfMarks = new TurfMarks();
+const rain = new Rain();
+scene.add(rain.group);
 scene.add(createPitch(renderer, turfMarks.texture));
 // The stands wear the club's colours and crest; rebuilt when the kit or crest changes.
 const makeStadium = () => createStadium(club.info().kit.shirt, club.opponentInfo().kit.shirt, { crest: crestCanvas(club.state.crest, 256), name: club.info().name, motto: club.bannerColors() });
@@ -130,14 +133,15 @@ const pixelPass = new PixelPass();
 /** Both pixel looks render through the pixel pass. */
 const pixelLook = () => graphics !== 'hd';
 
-// Match weather: evening (golden hour into floodlights) or a sunny day.
+// Match weather: evening (golden hour into floodlights), a sunny day or a rainy night.
 try {
-  const w = localStorage.getItem('weather');
-  if (w === 'sunny' || w === 'evening') atmo.weather = w;
+  const w = localStorage.getItem('weather') as Weather | null;
+  if (w && WEATHERS.includes(w)) atmo.weather = w;
 } catch {
   /* keep default */
 }
-if (params.get('weather') === 'sunny') atmo.weather = 'sunny';
+const wq = params.get('weather') as Weather | null;
+if (wq && WEATHERS.includes(wq)) atmo.weather = wq;
 if (params.has('zoom')) rig.distOverride = Number(params.get('zoom')) || 10;
 const FIXED_DPR = params.has('dpr');
 if (FIXED_DPR) renderer.setPixelRatio((dpr = Number(params.get('dpr')) || 1));
@@ -399,10 +403,10 @@ quitBtn.addEventListener('click', () => {
   home.toast('Match forfeited · 0–3 defeat');
 });
 const weatherBtn = pauseMenu.querySelector('.weather') as HTMLButtonElement;
-const weatherLabel = () => (weatherBtn.textContent = `Match: ${atmo.weather === 'sunny' ? 'Sunny day' : 'Evening'}`);
+const weatherLabel = () => (weatherBtn.textContent = `Match: ${WEATHER_NAMES[atmo.weather]}`);
 weatherLabel();
 weatherBtn.addEventListener('click', () => {
-  atmo.weather = atmo.weather === 'sunny' ? 'evening' : 'sunny';
+  atmo.weather = WEATHERS[(WEATHERS.indexOf(atmo.weather) + 1) % WEATHERS.length];
   weatherLabel();
   try {
     localStorage.setItem('weather', atmo.weather);
@@ -718,6 +722,8 @@ function frame(now: number): void {
 
   particles.setScale(pixelLook() ? pixelPass.pixelHeight : renderer.domElement.height, rig.camera.fov);
   particles.update(running ? dt : 0, now / 1000, match, rig.focusX, rig.focusZ);
+  rain.update(atmo.weather === 'rain', rig.camera, rig.focusX, rig.focusZ, pixelLook() ? pixelPass.pixelHeight : renderer.domElement.height);
+  audio.setRain(atmo.weather === 'rain');
   // A full-screen menu covers the stadium: don't spend the battery drawing it.
   if (home.opaque) {
     /* skip */

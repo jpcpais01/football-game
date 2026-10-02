@@ -146,6 +146,16 @@ export class Particles {
       const shade = Math.random() < 0.3 ? 0x6b8a3a : Math.random() < 0.5 ? 0x4c7a2c : 0x8a7a4a;
       this.spawn(Kind.Grass, x, 0.05, z, Math.cos(a) * s * 0.5 + dirX * s, 1.2 + Math.random() * 2.4 * (0.5 + strength), Math.sin(a) * s * 0.5 + dirZ * s, 0.5 + Math.random() * 0.5, 0.05 + Math.random() * 0.03, shade);
     }
+    if (SHARED.uRain.value > 0.5) this.spray(x, z, 6 + strength * 14, 1 + strength, dirX, dirZ);
+  }
+
+  /** Rain: water flung off the soaked turf (strikes, slides, a ball skidding through). */
+  spray(x: number, z: number, n: number, power: number, dirX = 0, dirZ = 0): void {
+    for (let k = 0; k < n; k++) {
+      const a = Math.random() * Math.PI * 2;
+      const s = (0.5 + Math.random() * 1.8) * power;
+      this.spawn(Kind.Grass, x, 0.04, z, Math.cos(a) * s * 0.6 + dirX * s * 1.5, 0.8 + Math.random() * 1.8 * power, Math.sin(a) * s * 0.6 + dirZ * s * 1.5, 0.35 + Math.random() * 0.3, 0.035 + Math.random() * 0.025, Math.random() < 0.5 ? 0xd8e2f0 : 0xa9b8cc);
+    }
   }
 
   /** Goal: confetti and ticker tape from the stands. */
@@ -170,6 +180,13 @@ export class Particles {
     const moteG = this.c.g;
     const moteB = this.c.b;
 
+    // Rain: the ball throws up a wake skidding over the wet grass; sprinting boots splash.
+    if (SHARED.uRain.value > 0.5 && dt > 0) {
+      const b = match.ball;
+      const bs = Math.hypot(b.vel.x, b.vel.z);
+      if (b.pos.y < 0.2 && bs > 4 && Math.random() < bs * dt * 2.5) this.spray(b.pos.x, b.pos.z, 2, 0.4 + bs * 0.04, b.vel.x * 0.05, b.vel.z * 0.05);
+      for (const p of match.players) if (p.speed > 6 && Math.random() < dt * 3) this.spray(p.pos.x, p.pos.z, 2, 0.5, p.vel.x * 0.04, p.vel.z * 0.04);
+    }
     // Breath puffs on cold evenings, from players who are working hard.
     if (flood > 0.45) {
       for (const p of match.players) {

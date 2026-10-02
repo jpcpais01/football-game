@@ -8,6 +8,8 @@ export class GameAudio {
   private crowdGain!: GainNode;
   private chatterGain!: GainNode;
   private noise!: AudioBuffer;
+  private rainGain: GainNode | null = null;
+  private raining = false;
   private excite = 0.2;
   muted = false;
 
@@ -71,6 +73,30 @@ export class GameAudio {
     lfo.start();
     chat.connect(bp).connect(this.chatterGain).connect(this.master);
     chat.start();
+
+    // Rain: a hiss of drops on the roofs and the turf, with a softer low rumble under it.
+    const rain = ctx.createBufferSource();
+    rain.buffer = this.noise;
+    rain.loop = true;
+    rain.playbackRate.value = 0.83;
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 1600;
+    const shelf = ctx.createBiquadFilter();
+    shelf.type = 'peaking';
+    shelf.frequency.value = 4200;
+    shelf.gain.value = 5;
+    this.rainGain = ctx.createGain();
+    this.rainGain.gain.value = this.raining ? 0.22 : 0;
+    rain.connect(hp).connect(shelf).connect(this.rainGain).connect(this.master);
+    rain.start();
+  }
+
+  /** Rain on (or off) the stadium. */
+  setRain(on: boolean): void {
+    if (on === this.raining) return;
+    this.raining = on;
+    if (this.ctx && this.rainGain) this.rainGain.gain.setTargetAtTime(on ? 0.22 : 0, this.ctx.currentTime, 0.6);
   }
 
   setMuted(m: boolean): void {
