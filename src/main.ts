@@ -25,6 +25,10 @@ import { crestCanvas } from './meta/crest';
 import { HomeUI } from './home/home';
 
 const app = document.getElementById('app')!;
+// The boot screen in index.html: report milestones, dismiss it after the first frame.
+const boot = window as unknown as { __boot?: (p: number) => void; __bootDone?: () => void };
+boot.__boot?.(0.5);
+let booted = false;
 const params = new URLSearchParams(location.search);
 const DEBUG = params.has('debug');
 
@@ -66,6 +70,7 @@ scene.add(createPitch(renderer));
 const makeStadium = () => createStadium(club.info().kit.shirt, club.opponentInfo().kit.shirt, { crest: crestCanvas(club.state.crest, 256), name: club.info().name, motto: club.bannerColors() });
 let stadium = makeStadium();
 scene.add(stadium.group);
+boot.__boot?.(0.75);
 let fanPhoto: HTMLCanvasElement | null = null;
 
 function rebuildStadium(): void {
@@ -167,6 +172,7 @@ const home = new HomeUI(ui, club, audio, {
   },
 });
 home.show();
+boot.__boot?.(0.9);
 
 const pauseBtn = document.createElement('button');
 pauseBtn.className = 'pause-btn';
@@ -652,6 +658,11 @@ function showcase(dt: number): void {
 
 let cpuAvg = 0;
 function frame(now: number): void {
+  if (!booted) {
+    // The first frame has been drawn by the time the next one starts: lift the curtain.
+    booted = true;
+    requestAnimationFrame(() => boot.__bootDone?.());
+  }
   requestAnimationFrame(frame);
   const t0 = performance.now();
   const frameMs = now - last;

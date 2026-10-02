@@ -12,8 +12,220 @@
     <link rel="icon" type="image/svg+xml" href="/icons/icon.svg" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <title>GameNight</title>
+    <!--
+      Boot screen: plain HTML and CSS, painted before any script downloads, so the phone's
+      splash hands straight over to it. A stadium powering up for a night match: the
+      floodlights come on bank by bank, the pitch glows, a ball rolls along the touchline
+      as the game loads. Animations are opacity / transform only.
+    -->
+    <style>
+      #boot {
+        --c: #14123a;
+        position: fixed; inset: 0; z-index: 1000; overflow: hidden; background: var(--c);
+        font-family: 'Barlow Condensed', 'Arial Narrow', 'Roboto Condensed', sans-serif-condensed, system-ui, sans-serif;
+        color: #f4efe3; transition: opacity 0.55s ease, visibility 0s 0.55s;
+        -webkit-user-select: none; user-select: none;
+      }
+      #boot.done { opacity: 0; visibility: hidden; }
+      #boot .sky {
+        position: absolute; inset: 0;
+        background:
+          radial-gradient(ellipse 90% 60% at 50% 105%, #2b2a6e 0%, transparent 70%),
+          linear-gradient(#0c0b26 0%, #14123a 45%, #241f55 100%);
+      }
+      /* Stars, twinkling. */
+      #boot .stars {
+        position: absolute; inset: 0 0 45% 0; opacity: 0.7;
+        background-image:
+          radial-gradient(1.2px 1.2px at 12% 18%, #fff 50%, transparent 51%),
+          radial-gradient(1px 1px at 27% 8%, #fff 50%, transparent 51%),
+          radial-gradient(1.4px 1.4px at 44% 22%, #fff 50%, transparent 51%),
+          radial-gradient(1px 1px at 63% 11%, #fff 50%, transparent 51%),
+          radial-gradient(1.2px 1.2px at 78% 26%, #fff 50%, transparent 51%),
+          radial-gradient(1px 1px at 88% 9%, #fff 50%, transparent 51%),
+          radial-gradient(1px 1px at 6% 34%, #fff 50%, transparent 51%),
+          radial-gradient(1.3px 1.3px at 54% 4%, #fff 50%, transparent 51%);
+        animation: boot-twinkle 3.2s ease-in-out infinite alternate;
+      }
+      @keyframes boot-twinkle { to { opacity: 0.35; } }
+
+      /* The stands: a dark silhouette with a band of tiny crowd lights. */
+      #boot .stand {
+        position: absolute; left: -5%; right: -5%; bottom: 30%; height: 22%;
+        background: linear-gradient(#0a0a1c, #15143a);
+        clip-path: polygon(0 40%, 18% 18%, 82% 18%, 100% 40%, 100% 100%, 0 100%);
+      }
+      #boot .stand::after {
+        content: ''; position: absolute; left: 0; right: 0; top: 46%; height: 30%; opacity: 0;
+        background-image: radial-gradient(1px 1px, rgba(255, 238, 200, 0.85) 50%, transparent 51%);
+        background-size: 7px 5px; animation: boot-on 0.8s 1.5s ease forwards;
+      }
+
+      /* Floodlight banks: they come on one after another, then the beams. */
+      #boot .lamp {
+        position: absolute; top: 16%; width: 18vmin; height: 5vmin; border-radius: 1vmin; opacity: 0.25;
+        background: repeating-linear-gradient(90deg, #fff6dc 0 18%, #3a3850 18% 25%);
+        box-shadow: 0 0 2vmin rgba(255, 244, 214, 0.9), 0 0 9vmin rgba(255, 236, 190, 0.55);
+        animation: boot-lamp 0.5s ease forwards;
+      }
+      #boot .lamp.l1 { left: 8%; animation-delay: 0.25s; transform: rotate(-8deg); }
+      #boot .lamp.l2 { left: 31%; top: 11%; animation-delay: 0.55s; }
+      #boot .lamp.l3 { right: 31%; top: 11%; animation-delay: 0.85s; }
+      #boot .lamp.l4 { right: 8%; animation-delay: 1.15s; transform: rotate(8deg); }
+      @keyframes boot-lamp {
+        0% { opacity: 0.25; } 30% { opacity: 1; } 45% { opacity: 0.45; } 60%, 100% { opacity: 1; }
+      }
+      #boot .beam {
+        position: absolute; top: 18%; width: 34vmin; height: 70%; opacity: 0; transform-origin: 50% 0;
+        background: linear-gradient(rgba(255, 244, 214, 0.22), rgba(255, 244, 214, 0) 85%);
+        clip-path: polygon(42% 0, 58% 0, 100% 100%, 0 100%);
+        animation: boot-on 1s ease forwards;
+      }
+      #boot .beam.b1 { left: 0%; transform: rotate(-24deg); animation-delay: 0.4s; }
+      #boot .beam.b2 { left: 22%; top: 13%; transform: rotate(-8deg); animation-delay: 0.7s; }
+      #boot .beam.b3 { right: 22%; top: 13%; transform: rotate(8deg); animation-delay: 1s; }
+      #boot .beam.b4 { right: 0%; transform: rotate(24deg); animation-delay: 1.3s; }
+      @keyframes boot-on { to { opacity: 1; } }
+
+      /* The pitch, in perspective, lit as the floodlights come on. */
+      #boot .pitch {
+        position: absolute; left: -30%; right: -30%; bottom: -8%; height: 42%;
+        transform: perspective(60vmin) rotateX(52deg); transform-origin: 50% 100%;
+        background:
+          linear-gradient(rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.55)) 50% 0 / 0.5% 100% no-repeat,
+          radial-gradient(ellipse 50% 40% at 50% 30%, rgba(255, 255, 255, 0.12), transparent 70%),
+          repeating-linear-gradient(90deg, #2f7a3e 0 6%, #2a7038 6% 12%);
+        filter: brightness(0.35); animation: boot-pitch 1.4s 0.6s ease forwards;
+      }
+      @keyframes boot-pitch { to { filter: brightness(1); } }
+      #boot .pitch::after {
+        content: ''; position: absolute; left: 50%; top: 18%; width: 18%; aspect-ratio: 1; transform: translateX(-50%);
+        border: 0.4vmin solid rgba(255, 255, 255, 0.55); border-radius: 50%;
+      }
+
+      /* Wordmark and loader. */
+      #boot .mid {
+        position: absolute; left: 0; right: 0; top: 34%; display: flex; flex-direction: column; align-items: center;
+        transform: translateY(-50%); text-align: center;
+      }
+      #boot .kicker {
+        font-size: clamp(11px, 2.2vmin, 15px); font-weight: 600; letter-spacing: 0.42em; text-transform: uppercase; color: #ffd447;
+        opacity: 0; animation: boot-rise 0.7s 0.3s ease forwards;
+      }
+      #boot h1 {
+        margin: 0.15em 0 0; font-size: clamp(44px, 14vmin, 120px); font-weight: 800; line-height: 0.88; letter-spacing: 0.04em;
+        text-transform: uppercase; opacity: 0; animation: boot-rise 0.8s 0.45s cubic-bezier(0.2, 1.2, 0.4, 1) forwards;
+        text-shadow: 0 0.06em 0 rgba(0, 0, 0, 0.3), 0 0 0.6em rgba(255, 220, 160, 0.25);
+      }
+      #boot h1 b { color: #ffd447; font-weight: 800; }
+      @keyframes boot-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+
+      #boot .bar { position: relative; width: min(62vw, 420px); height: 4px; margin-top: clamp(18px, 5vmin, 34px); }
+      #boot .bar::before { content: ''; position: absolute; inset: 0; border-radius: 2px; background: rgba(255, 255, 255, 0.16); }
+      #boot .fill {
+        position: absolute; left: 0; top: 0; bottom: 0; width: 100%; border-radius: 2px; transform-origin: 0 50%;
+        transform: scaleX(0.02); background: linear-gradient(90deg, #f4efe3, #ffd447); transition: transform 0.4s ease;
+      }
+      /* The ball rolls along the line to where it has loaded. */
+      #boot .ball {
+        position: absolute; top: -8px; left: 0; width: 20px; height: 20px; margin-left: -10px; border-radius: 50%;
+        transform: translateX(0); transition: transform 0.4s ease; filter: drop-shadow(0 3px 3px rgba(0, 0, 0, 0.4));
+      }
+      #boot .ball i {
+        position: absolute; inset: 0; border-radius: 50%; animation: boot-spin 0.6s linear infinite;
+        background:
+          radial-gradient(circle at 50% 50%, #1b1b22 0 18%, transparent 19%),
+          radial-gradient(circle at 50% 4%, #1b1b22 0 12%, transparent 13%),
+          radial-gradient(circle at 96% 38%, #1b1b22 0 12%, transparent 13%),
+          radial-gradient(circle at 80% 92%, #1b1b22 0 12%, transparent 13%),
+          radial-gradient(circle at 20% 92%, #1b1b22 0 12%, transparent 13%),
+          radial-gradient(circle at 4% 38%, #1b1b22 0 12%, transparent 13%),
+          radial-gradient(circle at 35% 30%, #ffffff, #dcdcd6 70%, #a9a9a2);
+      }
+      @keyframes boot-spin { to { transform: rotate(360deg); } }
+      #boot .tip {
+        margin-top: 14px; min-height: 1.3em; font-size: clamp(12px, 2.4vmin, 16px); font-weight: 600; letter-spacing: 0.12em;
+        text-transform: uppercase; color: rgba(244, 239, 227, 0.72); transition: opacity 0.35s;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #boot *, #boot *::before, #boot *::after { animation-duration: 0.01s !important; animation-delay: 0s !important; }
+      }
+    </style>
   </head>
   <body>
+    <div id="boot" aria-label="Loading">
+      <div class="sky"></div>
+      <div class="stars"></div>
+      <div class="beam b1"></div><div class="beam b2"></div><div class="beam b3"></div><div class="beam b4"></div>
+      <div class="lamp l1"></div><div class="lamp l2"></div><div class="lamp l3"></div><div class="lamp l4"></div>
+      <div class="stand"></div>
+      <div class="pitch"></div>
+      <div class="mid">
+        <div class="kicker">Matchday</div>
+        <h1>Game<b>Night</b></h1>
+        <div class="bar"><div class="fill"></div><div class="ball"><i></i></div></div>
+        <div class="tip">Floodlights on</div>
+      </div>
+    </div>
+    <script>
+      // Boot progress: creeps on its own while the code downloads, and the app reports real
+      // milestones with __boot(p). __bootDone() fades the screen out.
+      (function () {
+        var el = document.getElementById('boot');
+        var fill = el.querySelector('.fill');
+        var ball = el.querySelector('.ball');
+        var bar = el.querySelector('.bar');
+        var tip = el.querySelector('.tip');
+        var shown = 0.02;
+        var target = 0.35;
+        var tips = [
+          'Floodlights on',
+          'Hold Shoot for power',
+          'Slide up on Pass to loft it',
+          'Through balls find the runner',
+          'Tap Switch to change player',
+          'Sprint, then slide down to tackle',
+          'Open packs in the Store',
+          'Design your kit and crest',
+        ];
+        var ti = 0;
+        function draw() {
+          fill.style.transform = 'scaleX(' + shown.toFixed(3) + ')';
+          ball.style.transform = 'translateX(' + (shown * bar.clientWidth).toFixed(1) + 'px)';
+        }
+        var timer = setInterval(function () {
+          // Ease toward the last reported milestone, and keep inching forward meanwhile.
+          target = Math.min(0.94, target + 0.004);
+          shown += (target - shown) * 0.12;
+          draw();
+        }, 60);
+        var tipTimer = setInterval(function () {
+          tip.style.opacity = '0';
+          setTimeout(function () {
+            ti = (ti + 1) % tips.length;
+            tip.textContent = tips[ti];
+            tip.style.opacity = '1';
+          }, 350);
+        }, 2200);
+        window.__boot = function (p) {
+          target = Math.max(target, Math.min(1, p));
+        };
+        window.__bootDone = function () {
+          target = 1;
+          shown = 1;
+          draw();
+          clearInterval(timer);
+          clearInterval(tipTimer);
+          setTimeout(function () {
+            el.classList.add('done');
+            setTimeout(function () { el.remove(); }, 700);
+          }, 380);
+        };
+        draw();
+        // Never leave the curtain down if the game hits a problem starting up.
+        setTimeout(function () { if (document.getElementById('boot')) window.__bootDone(); }, 20000);
+      })();
+    </script>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
