@@ -1,5 +1,6 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.60.2', note: 'The score card after a goal now pops up in the middle of the screen.' },
   { v: '0.60', note: 'Goal kicks seen from behind the keeper, like free kicks. The other side’s goal kicks, direct free kicks and penalties too: the camera drops in behind their taker as he lines up.' },
   { v: '0.59', note: 'Five body types — lean, athletic, muscular, stocky, tall & lanky — read from each player’s height, weight and strength. Proportions, limb thickness and length now differ; everyone still stands at his real height. Shown in the squad.' },
   { v: '0.58', note: 'A 90s game-night look for the menus: pixel type, square pixel-cornered panels with hard shadows, banded colours and CRT scanlines.' },
