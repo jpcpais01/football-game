@@ -31,6 +31,9 @@ export class ChantAudio {
   private ends: GainNode[] = [];
   private scheduledId = -1;
   private scheduledTo = 0;
+  /** Per end: the anticipation — a rising wall of noise and a swelling "oooOOO". */
+  private tension: { noiseF: BiquadFilterNode; noiseG: GainNode; voices: OscillatorNode[]; choirG: GainNode }[] = [];
+  private paramsAt = -1;
 
   constructor(
     private ctx: AudioContext,
@@ -60,6 +63,81 @@ export class ChantAudio {
       pan.pan.value = END_PAN[e];
       g.connect(pan).connect(this.out);
       this.ends.push(g);
+      this.tension.push(this.tensionLayer(g, e));
+    }
+    this.murmur();
+  }
+
+  /** An end's anticipation layer: always running, its level and pitch set by the danger. */
+  private tensionLayer(bus: AudioNode, e: number) {
+    const ctx = this.ctx;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise;
+    src.loop = true;
+    src.playbackRate.value = e ? 1.07 : 0.93;
+    const noiseF = ctx.createBiquadFilter();
+    noiseF.type = 'bandpass';
+    noiseF.frequency.value = 550;
+    noiseF.Q.value = 0.7;
+    const noiseG = ctx.createGain();
+    noiseG.gain.value = 0;
+    src.connect(noiseF).connect(noiseG).connect(bus);
+    src.start(0, e * 1.3);
+    const choirG = ctx.createGain();
+    choirG.gain.value = 0;
+    const f1 = ctx.createBiquadFilter();
+    f1.type = 'bandpass';
+    f1.frequency.value = FORMANTS.o[0];
+    f1.Q.value = 2.5;
+    const f2 = ctx.createBiquadFilter();
+    f2.type = 'bandpass';
+    f2.frequency.value = FORMANTS.o[1];
+    f2.Q.value = 3;
+    f1.connect(choirG);
+    f2.connect(choirG);
+    choirG.connect(bus);
+    const voices: OscillatorNode[] = [];
+    for (const m of [1, 1.011, 0.5]) {
+      const o = ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.value = ROOT[e] * 0.85 * m;
+      o.connect(f1);
+      o.connect(f2);
+      o.start();
+      voices.push(o);
+    }
+    return { noiseF, noiseG, voices, choirG };
+  }
+
+  /**
+   * The murmur of the whole ground: two streams of breath through formants that wander
+   * slowly (vowels coming and going), so the bed sounds like people, not static.
+   */
+  private murmur(): void {
+    const ctx = this.ctx;
+    const g = ctx.createGain();
+    g.gain.value = 0.05;
+    g.connect(this.out);
+    for (const [rate, f, lfoHz, depth] of [
+      [0.97, 620, 0.13, 220],
+      [1.11, 1250, 0.19, 380],
+    ]) {
+      const src = ctx.createBufferSource();
+      src.buffer = this.noise;
+      src.loop = true;
+      src.playbackRate.value = rate;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = f;
+      bp.Q.value = 3;
+      const lfo = ctx.createOscillator();
+      lfo.frequency.value = lfoHz;
+      const lg = ctx.createGain();
+      lg.gain.value = depth;
+      lfo.connect(lg).connect(bp.frequency);
+      src.connect(bp).connect(g);
+      src.start(0, rate);
+      lfo.start();
     }
   }
 
@@ -90,6 +168,22 @@ export class ChantAudio {
     const horizon = dir.t + 0.35;
     for (const end of dir.boos.splice(0)) this.boo(end, ctx.currentTime + 0.15);
     for (const lv of dir.oohs.splice(0)) this.ooh(lv, ctx.currentTime + 0.05);
+    for (const end of dir.erupts.splice(0)) this.erupt(end, ctx.currentTime + 0.02);
+    for (const end of dir.groans.splice(0)) this.groan(end, ctx.currentTime + 0.05);
+    // The anticipation follows each team's danger: louder and louder, the "ooo" rising.
+    const now = ctx.currentTime;
+    if (now - this.paramsAt > 0.08) {
+      this.paramsAt = now;
+      for (let e = 0; e < 2; e++) {
+        const d = dir.danger[e];
+        const L = this.tension[e];
+        L.noiseG.gain.setTargetAtTime(0.015 + 0.6 * d * d, now, 0.2);
+        L.noiseF.frequency.setTargetAtTime(480 + 750 * d, now, 0.25);
+        const sw = Math.max(0, (d - 0.25) / 0.75);
+        L.choirG.gain.setTargetAtTime(0.16 * sw * Math.sqrt(sw), now, 0.25);
+        for (const [i, o] of L.voices.entries()) o.frequency.setTargetAtTime(ROOT[e] * 0.85 * [1, 1.011, 0.5][i] * (1 + 0.5 * d), now, 0.3);
+      }
+    }
     if (!s) return;
     if (s.id !== this.scheduledId) {
       this.scheduledId = s.id;
@@ -197,6 +291,54 @@ export class ChantAudio {
     ng.connect(b2);
     nz.start(t, Math.random() * 3);
     nz.stop(end + 0.3);
+  }
+
+  /** A goal: the scoring end explodes — a wall of noise, a held roar, the claps after. */
+  private erupt(end: 0 | 1, t: number): void {
+    const bus = this.ends[end];
+    this.burst(bus, t, 6.5, 'bandpass', 950, 0.45, 0.75);
+    this.burst(bus, t + 0.05, 4.5, 'highpass', 2600, 0.5, 0.22);
+    const r = ROOT[end] * 1.2;
+    this.sing(bus, t + 0.1, r, 3.4, 'a', 1.4);
+    this.sing(bus, t + 0.15, r * 1.498, 3.2, 'a', 1.0);
+    this.sing(bus, t + 0.2, r * 2, 3.0, 'a', 0.7);
+    for (let i = 0; i < 9; i++) this.clap(bus, t + 3.4 + i * 0.42, 1);
+    // The other end: the air goes out of it.
+    this.groan(end === 0 ? 1 : 0, t + 0.3);
+  }
+
+  /** A shot just wide: "aaaah-ohhh", falling. */
+  private groan(end: 0 | 1, t: number): void {
+    const ctx = this.ctx;
+    const bus = this.ends[end];
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.14, t + 0.12);
+    g.gain.setTargetAtTime(0.0001, t + 0.6, 0.4);
+    const f1 = ctx.createBiquadFilter();
+    f1.type = 'bandpass';
+    f1.Q.value = 2.5;
+    f1.frequency.setValueAtTime(FORMANTS.a[0], t);
+    f1.frequency.linearRampToValueAtTime(FORMANTS.o[0], t + 1.0);
+    const f2 = ctx.createBiquadFilter();
+    f2.type = 'bandpass';
+    f2.Q.value = 3;
+    f2.frequency.setValueAtTime(FORMANTS.a[1], t);
+    f2.frequency.linearRampToValueAtTime(FORMANTS.o[1], t + 1.0);
+    f1.connect(g);
+    f2.connect(g);
+    g.connect(bus);
+    for (const m of [1, 1.014, 0.5, 0.497]) {
+      const o = ctx.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(200 * m, t);
+      o.frequency.exponentialRampToValueAtTime(118 * m, t + 1.4);
+      o.connect(f1);
+      o.connect(f2);
+      o.start(t);
+      o.stop(t + 2.2);
+    }
+    this.burst(bus, t, 1.6, 'bandpass', 700, 0.6, 0.12);
   }
 
   /** A whole end clapping: many hands, scattered over a few tens of ms. */

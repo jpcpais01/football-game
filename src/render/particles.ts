@@ -10,7 +10,9 @@ import type { Terraces } from '../ui/terraces';
  * evenings, goal confetti and flare smoke in the stands. Everything follows the shared wind.
  */
 
-const MAX = 1800;
+const MAX = 2200;
+/** Confetti lying on the pitch (a ring: the oldest pieces go first). */
+const GROUND = 1600;
 const MOTES = 170;
 const FLOOD_MOTE = new THREE.Color(0.85, 0.9, 1);
 
@@ -35,6 +37,15 @@ export class Particles {
   private kind = new Uint8Array(MAX);
   private baseSize = new Float32Array(MAX);
   private next = MOTES;
+  private gPos = new Float32Array(GROUND * 3);
+  private gCol = new Float32Array(GROUND * 3);
+  private gSize = new Float32Array(GROUND);
+  private gAlpha = new Float32Array(GROUND);
+  private gLife = new Float32Array(GROUND);
+  private gNext = 0;
+  private gLive = 0;
+  private gLanded = false;
+  private groundGeo: THREE.BufferGeometry;
   private mat: THREE.ShaderMaterial;
   private geo: THREE.BufferGeometry;
   private c = new THREE.Color();
@@ -91,6 +102,18 @@ export class Particles {
     this.points = new THREE.Points(g, this.mat);
     this.points.frustumCulled = false;
     this.points.renderOrder = 8;
+    // Landed confetti: its own little layer, so it stays put for a while instead of being
+    // recycled with the rest (same sprites, drawn with the particles).
+    const gg = new THREE.BufferGeometry();
+    gg.setAttribute('position', new THREE.BufferAttribute(this.gPos, 3).setUsage(THREE.DynamicDrawUsage));
+    gg.setAttribute('color', new THREE.BufferAttribute(this.gCol, 3).setUsage(THREE.DynamicDrawUsage));
+    gg.setAttribute('aSize', new THREE.BufferAttribute(this.gSize, 1).setUsage(THREE.DynamicDrawUsage));
+    gg.setAttribute('aAlpha', new THREE.BufferAttribute(this.gAlpha, 1).setUsage(THREE.DynamicDrawUsage));
+    this.groundGeo = gg;
+    const ground = new THREE.Points(gg, this.mat);
+    ground.frustumCulled = false;
+    ground.renderOrder = 7;
+    this.points.add(ground);
     for (let i = 0; i < MOTES; i++) this.spawnMote(i, 0, 0, true);
   }
 
@@ -150,6 +173,37 @@ export class Particles {
     }
   }
 
+  /**
+   * Ticker tape and confetti thrown from an end (0 = home, behind the left goal): it
+   * flutters out over the goalmouth on the wind and settles on the grass.
+   */
+  throwConfetti(end: 0 | 1, amount: number): void {
+    const s = end === 0 ? -1 : 1;
+    const teamCol = end === 0 ? this.home : this.away;
+    for (let k = 0; k < amount; k++) {
+      const x = s * (PITCH.halfL + 6 + Math.random() * 14);
+      const r = Math.random();
+      const color = r < 0.45 ? teamCol : r < 0.78 ? 0xf6f1e3 : r < 0.9 ? 0xffd447 : 0x9fd0ff;
+      this.spawn(Kind.Confetti, x, 5 + Math.random() * 8, (Math.random() - 0.5) * 46, -s * (1.5 + Math.random() * 4), -0.5, (Math.random() - 0.5) * 1.6, 16, 0.09 + Math.random() * 0.05, color);
+    }
+  }
+
+  /** A piece of confetti has landed: it lies on the grass for half a minute or so. */
+  private land(i: number): void {
+    const j = this.gNext;
+    this.gNext = (j + 1) % GROUND;
+    this.gLive = Math.min(GROUND, this.gLive + 1);
+    this.gPos[j * 3] = this.pos[i * 3];
+    this.gPos[j * 3 + 1] = 0.03;
+    this.gPos[j * 3 + 2] = this.pos[i * 3 + 2];
+    this.gCol[j * 3] = this.col[i * 3];
+    this.gCol[j * 3 + 1] = this.col[i * 3 + 1];
+    this.gCol[j * 3 + 2] = this.col[i * 3 + 2];
+    this.gSize[j] = this.baseSize[i] * 0.8;
+    this.gLife[j] = 30 + Math.random() * 30;
+    this.gLanded = true;
+  }
+
   /** Goal: confetti and ticker tape from the stands. */
   confetti(cx: number, team: 0 | 1): void {
     const teamCol = team === 0 ? this.home : this.away;
@@ -193,6 +247,25 @@ export class Particles {
         if (p.action === 'slide' && p.actionT < 0.5 && Math.random() < 0.5) this.grassBurst(p.pos.x, p.pos.z, 0.3, p.vel.x * 0.15, p.vel.z * 0.15);
       }
     }
+    // Confetti the terraces throw.
+    if (terraces) for (const c of terraces.confetti.splice(0)) this.throwConfetti(c.end, c.amount);
+    // Confetti on the grass: lies there, then fades away.
+    if (this.gLive > 0 && dt > 0) {
+      for (let j = 0; j < GROUND; j++) {
+        if (this.gLife[j] <= 0) continue;
+        this.gLife[j] -= dt;
+        this.gAlpha[j] = this.gLife[j] > 0 ? Math.min(0.95, this.gLife[j] / 6) : 0;
+      }
+      const gg = this.groundGeo.attributes;
+      (gg.aAlpha as THREE.BufferAttribute).needsUpdate = true;
+      if (this.gLanded) {
+        this.gLanded = false;
+        (gg.position as THREE.BufferAttribute).needsUpdate = true;
+        (gg.color as THREE.BufferAttribute).needsUpdate = true;
+        (gg.aSize as THREE.BufferAttribute).needsUpdate = true;
+      }
+    }
+
     // Pyro in the ends (the terraces director decides what burns where): each flare spits
     // sparks and pours out smoke that the wind carries off over the stand; smoke bombs
     // billow in the club's colour.
@@ -273,9 +346,13 @@ export class Particles {
           // Flutter down, carried by the wind.
           vx += (wind.x * 0.6 - vx) * dt * 0.8 + Math.sin(time * 5 + i) * 1.2 * dt;
           vz += (wind.y * 0.6 - vz) * dt * 0.3;
-          vy += (-0.9 - vy) * dt * 2;
+          vy += (-1.25 - vy) * dt * 2;
           if (this.pos[i3 + 1] < 0.05) {
-            vx = vy = vz = 0;
+            // On the grass (the pitch and its surrounds): it stays there for a while.
+            if (Math.abs(this.pos[i3]) < PITCH.halfL + 4 && Math.abs(this.pos[i3 + 2]) < PITCH.halfW + 4) this.land(i);
+            this.life[i] = 0;
+            this.alpha[i] = 0;
+            continue;
           }
           this.alpha[i] = Math.min(1, (1 - t) * 3);
           this.size[i] = this.baseSize[i] * (0.6 + 0.4 * Math.abs(Math.sin(time * 9 + i)));
