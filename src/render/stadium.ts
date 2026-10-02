@@ -369,6 +369,8 @@ function crowdMaterial(o: CrowdOpts): THREE.ShaderMaterial {
 export interface StadiumClub {
   crest?: Promise<CanvasImageSource>;
   name?: string;
+  /** The big drop banner over the home end: its words and colours. */
+  motto?: { text: string; bg: number; fg: number };
 }
 
 /** Draws `img` (a 100 x 124 crest) centred at (x, y), `h` tall. */
@@ -1168,7 +1170,8 @@ function banners(path: PathPt[], home: number, away: number, club: StadiumClub):
   rail('AWAY DAYS', hex(away), W, 10, 2, 2, 0.72);
   // The drop banner over the boxes in the home end.
   const end = straights[1][Math.floor(straights[1].length / 2)];
-  specs.push({ text: 'ONE CLUB · ONE NIGHT', bg: hex(home), fg: W, w: 34, h: 4.2, style: 2, p: end, o: 20.9, y: 15.8 - 2.1, crests: true });
+  const motto = club.motto;
+  specs.push({ text: (motto?.text || 'ONE CLUB · ONE NIGHT').toUpperCase(), bg: motto ? hex(motto.bg) : hex(home), fg: motto ? hex(motto.fg) : W, w: 34, h: 4.2, style: 2, p: end, o: 20.9, y: 15.8 - 2.1, crests: true });
 
   // All artwork in one atlas (rows of 512 px), so every banner is one draw together.
   const rows = specs.map((sp) => Math.max(32, Math.round((512 * sp.h) / sp.w / 4) * 4));

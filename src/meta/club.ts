@@ -42,6 +42,8 @@ export interface ClubState {
   packsOpened: number;
   kit: ClubKit;
   crest: Crest;
+  /** The drop banner over the home end: its words, and which club colour it's painted in. */
+  banner: { text: string; color: 'main' | 'secondary' | 'dark' };
   freePackAt: number; // ms timestamp when the free pack is next available
 }
 
@@ -79,6 +81,7 @@ export class Club {
       packsOpened: 0,
       kit: defaultKit(),
       crest: defaultCrest(),
+      banner: { text: 'ONE CLUB · ONE NIGHT', color: 'main' },
       freePackAt: 0,
     };
     this.state = s;
@@ -101,6 +104,7 @@ export class Club {
   private repair(): void {
     this.state.kit = { ...defaultKit(), ...(this.state.kit ?? {}) };
     this.state.crest = { ...defaultCrest(), ...(this.state.crest ?? {}) };
+    this.state.banner = { ...{ text: 'ONE CLUB · ONE NIGHT', color: 'main' as const }, ...(this.state.banner ?? {}) };
     const l = this.state.lineup;
     l.slots = Array.from({ length: 11 }, (_, i) => l.slots?.[i] ?? null);
     l.custom = Array.from({ length: 11 }, (_, i) => l.custom?.[i] ?? null);
@@ -340,6 +344,22 @@ export class Club {
   setKit(k: Partial<ClubKit>): void {
     this.state.kit = { ...this.state.kit, ...k };
     this.save();
+  }
+
+  setBanner(b: Partial<ClubState['banner']>): void {
+    this.state.banner = { ...this.state.banner, ...b };
+    this.save();
+  }
+
+  /** Banner colours: painted in the chosen club colour, lettering in whatever reads on it. */
+  bannerColors(): { text: string; bg: number; fg: number } {
+    const { text, color } = this.state.banner;
+    const k = this.state.kit;
+    const bg = color === 'main' ? k.main : color === 'secondary' ? k.secondary : 0x14123a;
+    const other = color === 'main' ? k.secondary : color === 'secondary' ? k.main : 0xffd447;
+    const lum = (c: number) => 0.299 * ((c >> 16) & 255) + 0.587 * ((c >> 8) & 255) + 0.114 * (c & 255);
+    const fg = Math.abs(lum(other) - lum(bg)) > 70 ? other : lum(bg) > 140 ? 0x14121c : 0xf3eee2;
+    return { text, bg, fg };
   }
 
   setCrest(c: Partial<Crest>): void {

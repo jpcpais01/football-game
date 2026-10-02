@@ -63,7 +63,7 @@ match.autoPlay = true;
 
 scene.add(createPitch(renderer));
 // The stands wear the club's colours and crest; rebuilt when the kit or crest changes.
-const makeStadium = () => createStadium(club.info().kit.shirt, club.opponentInfo().kit.shirt, { crest: crestCanvas(club.state.crest, 256), name: club.info().name });
+const makeStadium = () => createStadium(club.info().kit.shirt, club.opponentInfo().kit.shirt, { crest: crestCanvas(club.state.crest, 256), name: club.info().name, motto: club.bannerColors() });
 let stadium = makeStadium();
 scene.add(stadium.group);
 let fanPhoto: HTMLCanvasElement | null = null;
