@@ -7,6 +7,7 @@ import { CELEBRATIONS, Match } from './sim/match';
 import { createPitch } from './render/pitch';
 import { TurfMarks } from './render/turfMarks';
 import { createStadium } from './render/stadium';
+import { createOldGround } from './render/oldGround';
 import { clearFanBanner, loadFanBanner, pickFanBanner } from './ui/fanBanner';
 import { createGoals } from './render/goals';
 import { PlayersView } from './render/players';
@@ -92,7 +93,13 @@ const terraces = new Terraces();
 scene.add(rain.group);
 scene.add(createPitch(renderer, turfMarks.texture));
 // The stands wear the club's colours and crest; rebuilt when the kit or crest changes.
-const makeStadium = () => createStadium(club.info().kit.shirt, club.opponentInfo().kit.shirt, { crest: crestCanvas(club.state.crest, 256), name: club.info().name, motto: club.bannerColors() });
+const makeStadium = () =>
+  (club.state.ground === 'old' ? createOldGround : createStadium)(club.info().kit.shirt, club.opponentInfo().kit.shirt, {
+    crest: crestCanvas(club.state.crest, 256),
+    name: club.info().name,
+    motto: club.bannerColors(),
+    founded: club.state.crest.year,
+  });
 let stadium = makeStadium();
 scene.add(stadium.group);
 boot.__boot?.(0.75);

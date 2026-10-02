@@ -120,7 +120,16 @@ export class ClubScreen {
       <h4>Colours</h4>
       <div class="slot-row">${slots.map(([key, label, c]) => `<button class="slot ${this.kitSlot === key ? 'on' : ''}" data-kslot="${key}"><i style="background:${hex(c)}"></i>${label}</button>`).join('')}</div>
       ${this.swatches(slots.find((x) => x[0] === this.kitSlot)![2])}
-      ${this.bannerSection()}`;
+      ${this.bannerSection()}
+      <h4>Home ground</h4>
+      <div class="chip-row">${(
+        [
+          ['stadium', 'Big stadium'],
+          ['old', 'Old ground'],
+        ] as const
+      )
+        .map(([k, n]) => `<button class="chip ${(this.club.state.ground ?? 'stadium') === k ? 'on' : ''}" data-ground="${k}">${n}</button>`)
+        .join('')}</div>`;
   }
 
   /** The big drop banner the fans hang over the home end. */
@@ -229,6 +238,13 @@ export class ClubScreen {
     all('[data-bcolor]').forEach((b) =>
       b.addEventListener('click', () => {
         this.club.setBanner({ color: b.dataset.bcolor as 'main' | 'secondary' | 'dark' });
+        this.ui.identityChanged();
+        this.render();
+      }),
+    );
+    all('[data-ground]').forEach((b) =>
+      b.addEventListener('click', () => {
+        this.club.setGround(b.dataset.ground as 'stadium' | 'old');
         this.ui.identityChanged();
         this.render();
       }),

@@ -46,6 +46,8 @@ export interface ClubState {
   crest: Crest;
   /** The drop banner over the home end: its words, and which club colour it's painted in. */
   banner: { text: string; color: 'main' | 'secondary' | 'dark' };
+  /** Home ground: the big stadium, or the old second-division ground. */
+  ground?: 'stadium' | 'old';
   freePackAt: number; // ms timestamp when the free pack is next available
 }
 
@@ -352,6 +354,11 @@ export class Club {
 
   setKit(k: Partial<ClubKit>): void {
     this.state.kit = { ...this.state.kit, ...k };
+    this.save();
+  }
+
+  setGround(g: NonNullable<ClubState['ground']>): void {
+    this.state.ground = g;
     this.save();
   }
 
