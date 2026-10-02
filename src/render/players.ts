@@ -49,6 +49,30 @@ const BASE_HEIGHT = HIP_Y + 0.04 + 0.6 + HEAD_TOP;
 const HAIR_PARTS: PartName[] = ['hairShort', 'hairCurly', 'hairBun'];
 /** Too small to show in the sun's shadow map (~4-8 cm per texel). */
 const NO_SHADOW = new Set<PartName>(['hand', 'neck', 'boot', 'flag', ...HAIR_PARTS]);
+/**
+ * Secondary-motion channels. Arms, forearms, head and shoulders carry inertia: they lag
+ * and overshoot as the body speeds up, brakes, turns and lands, and swing into sudden
+ * poses instead of snapping. Each channel: spring frequency (rad/s) and damping ratio.
+ */
+const SEC = {
+  armL: 0,
+  armR: 1,
+  outL: 2,
+  outR: 3,
+  elbowL: 4,
+  elbowR: 5,
+  headPitch: 6,
+  headRoll: 7,
+  twist: 8,
+  count: 9,
+} as const;
+const SEC_W = [10, 10, 9, 9, 13, 13, 14, 14, 11];
+const SEC_Z = [0.45, 0.45, 0.4, 0.4, 0.42, 0.42, 0.5, 0.5, 0.5];
+/** Channels that soak up a jump in the pose (the arms) rather than following it at once. */
+const SEC_SOAK = 6;
+
+/** Per-instance attributes written every frame by the pose (the rest only change with kits). */
+const POSE_ATTRS = ['aBend', 'aToe'];
 
 function lathe(points: [number, number][], segments = 14): THREE.BufferGeometry {
   return new THREE.LatheGeometry(
@@ -224,7 +248,8 @@ function buildGeometries(): Record<PartName, THREE.BufferGeometry> {
     12,
   );
   shin.scale(1, 1, 1.08);
-  const boot = new THREE.CapsuleGeometry(0.046, 0.16, 3, 10);
+  // Enough rings along the boot for the toe to bend at the ball of the foot (see TOE_GLSL).
+  const boot = new THREE.CapsuleGeometry(0.046, 0.16, 3, 10, 8);
   boot.rotateX(Math.PI / 2);
   boot.scale(0.92, 0.72, 1);
   boot.translate(0, -0.035, 0.05);
@@ -278,6 +303,36 @@ function withBend<T extends THREE.Material>(mat: T, kind: 'torso' | 'thigh'): T 
     injectBend(shader, kind);
   };
   mat.customProgramCacheKey = () => `bend-${kind}-${mat.uuid}`;
+  return mat;
+}
+
+/**
+ * Toe break: each boot instance carries aToe (radians, + = toes bent up); the front of the
+ * boot rotates about the ball of the foot, so the heel can lift off a planted toe and the
+ * foot rolls through a step.
+ */
+const TOE_PIVOT = { y: -0.068, z: 0.105 };
+const TOE_GLSL = /* glsl */ `
+attribute float aToe;
+vec3 toeRot(vec3 v, float w) {
+  float a = -aToe * w;
+  float c = cos(a), s = sin(a);
+  return vec3(v.x, v.y * c - v.z * s, v.y * s + v.z * c);
+}
+float toeW(vec3 p) { return smoothstep(${TOE_PIVOT.z - 0.02}, ${TOE_PIVOT.z + 0.025}, p.z); }
+`;
+
+function withToe<T extends THREE.Material>(mat: T): T {
+  const orig = mat.onBeforeCompile.bind(mat);
+  mat.onBeforeCompile = (shader, r) => {
+    orig(shader, r);
+    const pv = `vec3(0.0, ${TOE_PIVOT.y}, ${TOE_PIVOT.z})`;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>\n${TOE_GLSL}`)
+      .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\nobjectNormal = toeRot(objectNormal, toeW(position));')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>\ntransformed = ${pv} + toeRot(transformed - ${pv}, toeW(position));`);
+  };
+  mat.customProgramCacheKey = () => `toe-${mat.uuid}`;
   return mat;
 }
 
@@ -462,6 +517,7 @@ export class PlayersView {
   private root = new THREE.Matrix4();
   private pelvis = new THREE.Matrix4();
   private chest = new THREE.Matrix4();
+  private neck = new THREE.Matrix4();
   private j1 = new THREE.Matrix4();
   private j2 = new THREE.Matrix4();
   private j3 = new THREE.Matrix4();
@@ -477,6 +533,33 @@ export class PlayersView {
   private sS: Float32Array;
   private spS: Float32Array;
   private headYaw: Float32Array;
+  /** Secondary motion: per player and channel (see SEC), a damped spring offset on top of
+   * the pose, its velocity, and the last pose value (to soak up sudden pose changes). */
+  private sec: Float32Array;
+  private secV: Float32Array;
+  private secPose: Float32Array;
+  private secReady: Uint8Array;
+  /** Vertical motion of the hips (height, velocity, smoothed acceleration) and the last
+   * facing seen, which drive the springs. */
+  private bodyY: Float32Array;
+  private bodyVy: Float32Array;
+  private bodyAy: Float32Array;
+  private lastFacing: Float32Array;
+  /** Feet, per leg: where the planted foot's ball is on the grass, how much the leg is
+   * held to it (0 = free, 1 = planted), and whether it's in its stance. Per player: how
+   * much foot planting applies at all (off during actions that pose the legs). */
+  private plantX: Float32Array;
+  private plantZ: Float32Array;
+  private footW: Float32Array;
+  private inStance: Uint8Array;
+  private ikOn: Float32Array;
+  private secPoseNow = new Float32Array(SEC.count);
+  private secWant = new Float32Array(SEC.count);
+  private pinv = new THREE.Matrix4();
+  private ikH = 0;
+  private ikK = 0;
+  private ikOut = 0;
+  private tv = new THREE.Vector3();
   /** Per player: body shape (see sim/body), hip height in the skeleton, and the overall
    * scale that keeps him at his real height whatever his proportions. */
   private body: BodyShape[] = [];
@@ -499,6 +582,19 @@ export class PlayersView {
     this.sS = new Float32Array(this.n);
     this.spS = new Float32Array(this.n);
     this.headYaw = new Float32Array(this.n);
+    this.sec = new Float32Array(this.n * SEC.count);
+    this.secV = new Float32Array(this.n * SEC.count);
+    this.secPose = new Float32Array(this.n * SEC.count);
+    this.secReady = new Uint8Array(this.n);
+    this.bodyY = new Float32Array(this.n);
+    this.bodyVy = new Float32Array(this.n);
+    this.bodyAy = new Float32Array(this.n);
+    this.lastFacing = new Float32Array(this.n);
+    this.plantX = new Float32Array(this.n * 2);
+    this.plantZ = new Float32Array(this.n * 2);
+    this.footW = new Float32Array(this.n * 2);
+    this.inStance = new Uint8Array(this.n * 2);
+    this.ikOn = new Float32Array(this.n);
     this.hipBase = new Float32Array(this.n).fill(HIP_Y);
     this.bodyScale = new Float32Array(this.n).fill(1);
     const geos = buildGeometries();
@@ -536,7 +632,7 @@ export class PlayersView {
       shortsLeg: trimmedMaterial('diffuseColor.rgb = mix(diffuseColor.rgb, vTrim, (1.0 - smoothstep(0.015, 0.025, abs(vUv2.x - 0.25))) * 0.9 + band(vUv2.y, 0.9, 1.0) * 0.6);'),
       thigh: withBend(litMaterial({ groundAO: true, roughness: 0.62 }), 'thigh'),
       shin: trimmedMaterial('diffuseColor.rgb = mix(diffuseColor.rgb, vTrim, band(vUv2.y, 0.07, 0.11) + band(vUv2.y, 0.14, 0.17));'),
-      boot: trimmedMaterial('diffuseColor.rgb = mix(diffuseColor.rgb, vTrim, 1.0 - smoothstep(0.018, 0.03, vWorldPos.y));', 0.5),
+      boot: withToe(trimmedMaterial('diffuseColor.rgb = mix(diffuseColor.rgb, vTrim, 1.0 - smoothstep(0.018, 0.03, vWorldPos.y));', 0.5)),
       flag: litMaterial({
         roughness: 0.8,
         vertDecl: 'attribute float aCloth; varying float vCloth;',
@@ -557,6 +653,7 @@ export class PlayersView {
       const geo = geos[name];
       const add = (attr: string, size: number) => geo.setAttribute(attr, new THREE.InstancedBufferAttribute(new Float32Array(count * size), size));
       if (name === 'torso' || name === 'thigh') add('aBend', 3);
+      if (name === 'boot') add('aToe', 1);
       if (name === 'torso') {
         add('aTrim', 3);
         add('aNumCol', 3);
@@ -605,8 +702,12 @@ export class PlayersView {
   }
 
   applyColors(match: Match): void {
-    // A new match has new Player objects: always draw the current ones.
+    // A new match has new Player objects: always draw the current ones, from rest.
     this.list = [...match.players, ...this.extra];
+    this.secReady.fill(0);
+    this.footW.fill(0);
+    this.inStance.fill(0);
+    this.ikOn.fill(0);
     for (const p of this.list) {
       const b = bodyShape(p.attrs.height, p.attrs.weight, p.attrs.strength, p.id * 7 + p.index + (p.name ? p.name.length * 13 : 0));
       this.body[p.id] = b;
@@ -689,7 +790,7 @@ export class PlayersView {
       const keep = (attr: THREE.BufferAttribute | null) => attr && this.statics.push({ attr, master: (attr.array as Float32Array).slice(), per: perPlayer });
       keep(mesh.instanceColor);
       for (const [k, a] of Object.entries(mesh.geometry.attributes)) {
-        if (k !== 'aBend' && (a as THREE.InstancedBufferAttribute).isInstancedBufferAttribute) keep(a as THREE.BufferAttribute);
+        if (!POSE_ATTRS.includes(k) && (a as THREE.InstancedBufferAttribute).isInstancedBufferAttribute) keep(a as THREE.BufferAttribute);
       }
     }
   }
@@ -726,8 +827,10 @@ export class PlayersView {
         }
       };
       pack(mesh.instanceMatrix, 16);
-      const b = mesh.geometry.getAttribute('aBend') as THREE.BufferAttribute | undefined;
-      if (b) pack(b, 3);
+      for (const k of POSE_ATTRS) {
+        const b = mesh.geometry.getAttribute(k) as THREE.BufferAttribute | undefined;
+        if (b) pack(b, b.itemSize);
+      }
       mesh.count = n * per;
     }
     // Kit attributes: copied from the master in the same order — only when the visible set
@@ -751,10 +854,11 @@ export class PlayersView {
       const { mesh, perPlayer: per } = this.parts[name];
       mesh.instanceMatrix.clearUpdateRanges();
       mesh.instanceMatrix.addUpdateRange(0, n * per * 16);
-      const b = mesh.geometry.getAttribute('aBend') as THREE.BufferAttribute | undefined;
-      if (b) {
+      for (const k of POSE_ATTRS) {
+        const b = mesh.geometry.getAttribute(k) as THREE.BufferAttribute | undefined;
+        if (!b) continue;
         b.clearUpdateRanges();
-        b.addUpdateRange(0, n * per * 3);
+        b.addUpdateRange(0, n * per * b.itemSize);
       }
     }
   }
@@ -777,6 +881,41 @@ export class PlayersView {
     }
   }
 
+  /**
+   * Two-bone leg IK: hip swing, knee and hip roll (this.ikH/ikK/ikOut) that put the ankle
+   * on the world point in this.tv, for the leg at hipX on the pelvis (this.pinv is its
+   * inverse) with the given yaw. False when the point is out of reach.
+   */
+  private legIK(hipX: number, yaw: number, sideSign: number, l1: number, l2: number): boolean {
+    this.tv.applyMatrix4(this.pinv);
+    const dx0 = this.tv.x - hipX;
+    const dy = this.tv.y + 0.03;
+    const dz0 = this.tv.z;
+    const cy = Math.cos(yaw);
+    const sy = Math.sin(yaw);
+    const dx = dx0 * cy - dz0 * sy;
+    const dz = dx0 * sy + dz0 * cy;
+    const D = Math.hypot(dx, dy, dz);
+    if (D > (l1 + l2) * 1.12 || D < 0.25) return false;
+    // The knee from the distance (its bend is shared with the thigh's soft curve: the
+    // thigh turns by 0.22 of it at the hip, the shin by the rest at the knee) ...
+    const kr = Math.acos(clamp((D * D - l1 * l1 - l2 * l2) / (2 * l1 * l2), -1, 1));
+    const k = Math.min(2.4, kr / 0.78);
+    const sk = 0.22 * k;
+    const ay = -l1 - l2 * Math.cos(k - sk);
+    const az = -l2 * Math.sin(k - sk);
+    const vy = ay * Math.cos(sk) - az * Math.sin(sk);
+    const vz = ay * Math.sin(sk) + az * Math.cos(sk);
+    // ... then the hip roll that puts the leg over the point, then the swing onto it.
+    const th = Math.asin(clamp(dx / Math.max(0.05, -vy), -0.6, 0.6));
+    let h = Math.atan2(vz, vy * Math.cos(th)) - Math.atan2(dz, dy);
+    h -= Math.PI * 2 * Math.floor((h + Math.PI) / (Math.PI * 2));
+    this.ikH = h;
+    this.ikK = k;
+    this.ikOut = th * sideSign;
+    return true;
+  }
+
   update(match: Match, alpha: number, time: number): void {
     const dt = clamp(time - this.lastTime, 0, 0.05);
     this.lastTime = time;
@@ -785,6 +924,7 @@ export class PlayersView {
     const ball = match.ball;
     const bend = this.parts.torso.mesh.geometry.getAttribute('aBend') as THREE.InstancedBufferAttribute;
     const kneeBend = this.parts.thigh.mesh.geometry.getAttribute('aBend') as THREE.InstancedBufferAttribute;
+    const toe = this.parts.boot.mesh.geometry.getAttribute('aToe') as THREE.InstancedBufferAttribute;
     const off = this.officials;
     if (this.list[0] !== match.players[0]) this.applyColors(match);
     for (const p of this.list) {
@@ -816,7 +956,8 @@ export class PlayersView {
       let legOutR = 0.04;
       let legYawL = 0;
       let legYawR = 0;
-      // Extra ankle angle on top of the auto-levelled foot (- = toes pointed, instep strikes).
+      // Extra ankle angle on top of the auto-levelled foot (- = toes pointed, instep strikes;
+      // the final ankle angle itself is + = toes down).
       let ankleL = 0;
       let ankleR = 0;
       const aArm = (0.1 + 0.7 * s) * moveAmt;
@@ -830,7 +971,8 @@ export class PlayersView {
       let armRotL = 0;
       let armRotR = 0;
       const hip0 = this.hipBase[id];
-      let hipY = hip0 - (0.012 + 0.05 * s) * Math.abs(cosP) * moveAmt;
+      // (Less drop with planted feet: the knees then bend to take it instead.)
+      let hipY = hip0 - (0.012 + 0.05 * s) * Math.abs(cosP) * moveAmt * (1 - 0.45 * this.ikOn[id]);
       // Hips rotate and drop with each stride; the shoulders counter-rotate.
       let pelvisYaw = -0.1 * s * sinP * moveAmt;
       let pelvisRoll = 0.05 * (0.3 + s) * sinP * moveAmt;
@@ -894,10 +1036,6 @@ export class PlayersView {
         flexExtra += br * 0.6;
       }
 
-      // Into a turn: the outside arm swings wider for balance.
-      armOutL += Math.max(0, -leanS) * 0.5;
-      armOutR += Math.max(0, leanS) * 0.5;
-
       // Keeper ready stance: athletic crouch, hands out in front. When danger is close (an
       // opponent on the ball near goal, or a shot coming) he gets set: lower, weight on the
       // toes with a small bounce, hands up and forward.
@@ -915,7 +1053,7 @@ export class PlayersView {
         hipY -= (0.07 + 0.07 * set) * calm;
         if (speed < 1) hipY += Math.max(0, Math.sin(time * 9 + p.id)) * 0.018 * set;
         armOutL = armOutR = 0.38 + 0.12 * set;
-        armL = armR = -0.45 - 0.35 * set;
+        armL = armR = 0.45 + 0.35 * set;
         elbowL = elbowR = 0.7;
         flexExtra += 0.2 + 0.1 * set;
         legOutL = legOutR = Math.max(legOutL, 0.12);
@@ -1172,8 +1310,8 @@ export class PlayersView {
             legOutR = lerp(legOutR, 0.12, reach);
             hipL = lerp(hipL, -0.15, load);
             kneeL = lerp(kneeL, 0.75, load);
-            armL = lerp(armL, -0.65, reach);
-            armR = lerp(armR, 0.45, reach);
+            armL = lerp(armL, 0.65, reach);
+            armR = lerp(armR, -0.45, reach);
           } else {
             hipL = lerp(hipL, tHip, reach);
             kneeL = lerp(kneeL, tKnee, reach);
@@ -1181,8 +1319,8 @@ export class PlayersView {
             legOutL = lerp(legOutL, 0.12, reach);
             hipR = lerp(hipR, -0.15, load);
             kneeR = lerp(kneeR, 0.75, load);
-            armR = lerp(armR, -0.65, reach);
-            armL = lerp(armL, 0.45, reach);
+            armR = lerp(armR, 0.65, reach);
+            armL = lerp(armL, -0.45, reach);
           }
           hipY -= 0.17 * load;
           leanF += 0.12 * load - 0.22 * reach;
@@ -1290,7 +1428,7 @@ export class PlayersView {
             kneeL = trail.knee + kneelKnee * 0.6;
           }
           // Arms stretch along the body toward the ball; the top hand comes over.
-          const up = lerp(-0.6, -3.05, reach);
+          const up = lerp(0.6, 3.05, reach);
           armL = lerp(armL, up, Math.max(reach, 0.2));
           armR = lerp(armR, up, Math.max(reach, 0.2));
           armOutL = nearL ? 0.06 : 0.22 * reach + 0.08;
@@ -1306,8 +1444,8 @@ export class PlayersView {
           // Hands meet the ball at its height, then gather it into the chest.
           const yH = clamp(p.catchY, 0.1, 2.4);
           const meet = 1 - smoothstep(0.25, 0.6, pr);
-          const reachSwing = yH > 1.6 ? -2.5 : yH > 0.9 ? -1.5 : -0.75;
-          armL = armR = lerp(-1.0, reachSwing, meet);
+          const reachSwing = yH > 1.6 ? 2.5 : yH > 0.9 ? 1.5 : 0.75;
+          armL = armR = lerp(1.0, reachSwing, meet);
           elbowL = elbowR = lerp(1.35, 0.25, meet);
           armOutL = armOutR = lerp(0.0, 0.12, meet);
           const low = 1 - smoothstep(0.3, 0.8, yH);
@@ -1329,25 +1467,29 @@ export class PlayersView {
           flexExtra += pr < 0.45 ? -0.3 * (pr / 0.45) : lerp(-0.3, 0.35, smoothstep(0.45, 0.7, pr)) * (1 - smoothstep(0.75, 1, pr));
           headPitch = 0.35 * Math.sin(Math.min(1, pr * 2) * Math.PI);
           armOutL = armOutR = 0.7 * k + 0.1;
-          armL = armR = -0.4 * k;
+          armL = armR = 0.3 * k;
           kneeL = kneeR = 0.45 * k + 0.1;
           headLook = false;
           break;
         }
         case 'throw': {
           if (p.throwIn) {
-            const k = pr < 0.5 ? pr / 0.5 : 1 - (pr - 0.5) / 0.5;
-            armL = armR = lerp(-2.8, -1.4, 1 - k);
-            elbowL = elbowR = lerp(1.4, 0.2, 1 - k);
+            // From above the head, back behind it with the elbows bent, then over and
+            // through with the arms straight.
+            const back = smoothstep(0, 0.4, pr);
+            const over = smoothstep(0.4, 0.75, pr);
+            armL = armR = lerp(lerp(2.6, 3.45, back), 2.0, over);
+            elbowL = elbowR = lerp(lerp(0.5, 1.5, back), 0.15, over);
             flexExtra += lerp(-0.25, 0.25, smoothstep(0.3, 0.7, pr));
           } else {
             // Keeper's one-arm throw: wind back, whip over the top, step into it.
             const wind = 1 - smoothstep(0.15, 0.5, pr);
             const whip = smoothstep(0.35, 0.65, pr);
-            armR = lerp(lerp(0, 1.3, smoothstep(0, 0.3, pr)), -1.0, whip) + (whip > 0 && whip < 1 ? -1.6 * Math.sin(whip * Math.PI) : 0);
+            // (back, up over the head through -pi, and down in front)
+            armR = lerp(lerp(0, -1.3, smoothstep(0, 0.3, pr)), -5.0, whip);
             elbowR = lerp(0.9, 0.15, whip);
             armOutR = 0.25;
-            armL = -1.2 * wind - 0.4;
+            armL = 1.2 * wind - 0.3;
             armOutL = 0.2;
             twist = lerp(-0.45, 0.45, whip);
             pelvisYaw = lerp(-0.2, 0.25, whip);
@@ -1374,7 +1516,7 @@ export class PlayersView {
           hipY = lerp(hipY, 0.28, lying) + 0.3 * kneel;
           flexExtra += 0.25 * lying;
           // Arms reach toward the ground he's falling onto.
-          const reachArm = lerp(-0.6, -1.4, Math.max(0, fwd));
+          const reachArm = fwd >= 0 ? 0.6 + 0.8 * fwd : 0.6 + 1.5 * fwd;
           armL = lerp(armL, reachArm, lying);
           armR = lerp(armR, reachArm, lying);
           armOutL = lerp(armOutL, 0.55 + Math.max(0, lft) * 0.5, lying);
@@ -1405,14 +1547,16 @@ export class PlayersView {
       // Holding the ball.
       if (held === p && p.action === 'none') {
         if (throwIn) {
-          armL = armR = -2.8;
-          elbowL = elbowR = 1.5;
+          // Ball above the head, hands either side of it.
+          armL = armR = 2.6;
+          elbowL = elbowR = 0.5;
           armOutL = armOutR = 0.2;
           flexExtra -= 0.12;
         } else {
-          armL = armR = -1.0;
-          elbowL = elbowR = 0.9;
-          armOutL = armOutR = -0.05;
+          // Carried at the chest.
+          armL = armR = 0.45;
+          elbowL = elbowR = 1.25;
+          armOutL = armOutR = 0.12;
         }
       }
       // Goal celebration: the one picked with the buttons, or the classic.
@@ -1638,10 +1782,21 @@ export class PlayersView {
       // Officials' signals: the referee points for a restart, linesmen raise the flag.
       if (p.team === 2 && off) {
         if (p === off.ref && off.refPoint > 0) {
+          // Arm straight out, level, toward the way play goes: the arm on that side, swung
+          // up to horizontal and round from the front by the angle to it.
           const k = smoothstep(0, 0.25, off.refPoint) * smoothstep(2.2, 1.9, off.refPoint);
-          armR = lerp(armR, -1.45, k);
-          armOutR = lerp(armOutR, 0.15, k);
-          elbowR = lerp(elbowR, 0.05, k);
+          const fw = off.refPointSide * Math.cos(facing);
+          const lf = off.refPointSide * Math.sin(facing);
+          const ang = Math.atan2(Math.abs(lf), fw);
+          if (lf > 0) {
+            armL = lerp(armL, Math.PI / 2, k);
+            armOutL = lerp(armOutL, ang, k);
+            elbowL = lerp(elbowL, 0.05, k);
+          } else {
+            armR = lerp(armR, Math.PI / 2, k);
+            armOutR = lerp(armOutR, ang, k);
+            elbowR = lerp(elbowR, 0.05, k);
+          }
         }
         const li = off.lines.indexOf(p);
         if (li >= 0) {
@@ -1651,6 +1806,92 @@ export class PlayersView {
           elbowR = lerp(0.35, 0.05, up);
         }
       }
+
+      // ---------------- secondary motion: limbs and head carry inertia
+      // Body forces, in his own frame: forward acceleration, the lean into a turn (it
+      // follows the sideways acceleration), the hips' vertical acceleration (each footfall,
+      // a landing) and how fast he's turning.
+      const sc0 = this.secReady[id] === 0;
+      const yNow = hipY + lift;
+      if (sc0 || dt <= 0) {
+        this.bodyY[id] = yNow;
+        this.bodyVy[id] = 0;
+        this.bodyAy[id] = 0;
+        this.lastFacing[id] = facing;
+      } else {
+        const vy = (yNow - this.bodyY[id]) / dt;
+        const ay = clamp((vy - this.bodyVy[id]) / dt, -40, 40);
+        this.bodyAy[id] += (ay - this.bodyAy[id]) * (1 - Math.exp(-dt * 25));
+        this.bodyVy[id] = vy;
+        this.bodyY[id] = yNow;
+      }
+      let turnRate = 0;
+      if (dt > 0) {
+        let dF = facing - this.lastFacing[id];
+        if (dF > Math.PI) dF -= Math.PI * 2;
+        if (dF < -Math.PI) dF += Math.PI * 2;
+        turnRate = dF / dt;
+        this.lastFacing[id] = facing;
+      }
+      {
+        // Free to swing, or held to a pose the physics depends on (hands on the ball).
+        const free = p.action === 'dive' || p.action === 'catch' || p.action === 'throw' ? 0.25 : held === p ? 0.5 : 1;
+        const aF = clamp(p.accelFwd, -12, 12) * free;
+        const aY = this.bodyAy[id] * free;
+        const lat = leanS;
+        const base = id * SEC.count;
+        const pose = this.secPoseNow;
+        pose[0] = armL;
+        pose[1] = armR;
+        pose[2] = armOutL;
+        pose[3] = armOutR;
+        pose[4] = elbowL;
+        pose[5] = elbowR;
+        // Where each channel wants to sit for these forces: the arms trail a burst of
+        // speed and swing on through a stop, fling out of a turn (the outside one wider),
+        // forearms drop on a landing; the head nods into braking and footfalls; the
+        // shoulders lag a quick turn.
+        const want = this.secWant;
+        want[SEC.armL] = want[SEC.armR] = -0.03 * aF;
+        want[SEC.outL] = Math.max(0, -lat) * 0.5 - 0.15 * lat;
+        want[SEC.outR] = Math.max(0, lat) * 0.5 + 0.15 * lat;
+        want[SEC.elbowL] = want[SEC.elbowR] = -0.02 * aF - 0.006 * aY;
+        want[SEC.headPitch] = -0.012 * aF + 0.004 * aY;
+        want[SEC.headRoll] = -0.2 * lat;
+        want[SEC.twist] = clamp(0.03 * turnRate, -0.3, 0.3) * free;
+        for (let c = 0; c < SEC.count; c++) {
+          const i = base + c;
+          if (sc0) {
+            this.sec[i] = want[c];
+            this.secV[i] = 0;
+          } else {
+            // A pose that jumps (more than a fast swing could cover in a frame) is reached
+            // by swinging there: the jump goes into the spring, which carries the limb over.
+            if (c < SEC_SOAK) {
+              const jump = pose[c] - this.secPose[i];
+              if (Math.abs(jump) > 0.2 + 14 * dt) this.sec[i] = clamp(this.sec[i] - jump, -3, 3);
+            }
+            const w = SEC_W[c];
+            this.secV[i] += (w * w * (want[c] - this.sec[i]) - 2 * SEC_Z[c] * w * this.secV[i]) * dt;
+            this.sec[i] += this.secV[i] * dt;
+          }
+          this.secPose[i] = pose[c];
+        }
+        this.secReady[id] = 1;
+        armL += this.sec[base + SEC.armL];
+        armR += this.sec[base + SEC.armR];
+        armOutL += this.sec[base + SEC.outL];
+        armOutR += this.sec[base + SEC.outR];
+        elbowL = Math.max(0, elbowL + this.sec[base + SEC.elbowL]);
+        elbowR = Math.max(0, elbowR + this.sec[base + SEC.elbowR]);
+        headPitch += this.sec[base + SEC.headPitch];
+        twist += this.sec[base + SEC.twist];
+      }
+      const headLag = this.sec[id * SEC.count + SEC.headRoll];
+
+      // Feet plant during the stance of a stride (not while an action poses the legs).
+      const legsFree = p.action === 'none' && lift < 0.01 && !cel && !(match.phase === 'goal' && match.scorer === p);
+      this.ikOn[id] += ((legsFree ? 1 : 0) - this.ikOn[id]) * (1 - Math.exp(-dt * 10));
 
       // ---------------- body physics: a springy spine driven by the movement
       // The upper body carries inertia: it pitches with acceleration and braking, swings
@@ -1699,13 +1940,18 @@ export class PlayersView {
       const side = spineSide - pelvisRoll;
       bend.setXYZ(id, flex, tw, side);
       const C = this.chain(this.chest, T, 0, 0, 0, flex, tw, side);
-      this.chain(this.j1, C, 0, 0.58 * bs.torsoL, 0, 0, 0, 0);
-      this.put('neck', id, this.j1, bs.neck, bs.neckLen, bs.neck);
-
-      // Head: level gaze (counter the body's pitch and roll), turned toward the ball.
+      // Neck and head: level gaze (counter the body's pitch and roll), turned toward the
+      // ball, lagging the body a touch. The neck takes part of every turn and nod, so the
+      // head tips on the end of it rather than pivoting on a post.
       const headLevel = -(leanF + flex) * 0.75;
-      const headRoll = -(leanS + roll * 0.2 + side) * 0.6;
-      this.chain(this.j1, C, 0, 0.6 * bs.torsoL + (bs.neckLen - 1) * 0.08, 0, headPitch + headLevel, this.headYaw[id], headRoll);
+      const headRoll = -(leanS + roll * 0.2 + side) * 0.6 + headLag;
+      const hP = headPitch + headLevel;
+      const hY = this.headYaw[id];
+      const N = this.chain(this.neck, C, 0, 0.58 * bs.torsoL, 0, hP * 0.4, hY * 0.3, headRoll * 0.4);
+      this.put('neck', id, N, bs.neck, bs.neckLen, bs.neck);
+      const top = 0.075 * bs.neckLen;
+      this.chain(this.j1, N, 0, top, 0, hP * 0.6, hY * 0.7, headRoll * 0.6);
+      this.chain(this.j1, this.j1, 0, 0.02 * bs.torsoL + (bs.neckLen - 1) * 0.08 - top, 0, 0, 0, 0);
       this.put('head', id, this.j1);
       const style = p.look.hairStyle;
       const parts = this.parts;
@@ -1717,13 +1963,17 @@ export class PlayersView {
       else if (style === 2) this.put('hairCurly', id, this.j1);
       else this.put('hairBun', id, this.j1);
 
-      // Arms (left = +x local).
+      // Arms (left = +x local; swing + = forward). The shoulder itself moves: forward and
+      // back with the arm, up and a little in as the arm rises above the shoulder.
       for (let sd = 0; sd < 2; sd++) {
         const sideSign = sd === 0 ? 1 : -1;
         const swing = sd === 0 ? armL : armR;
         const out = sd === 0 ? armOutL : armOutR;
         const elbow = sd === 0 ? elbowL : elbowR;
-        this.chain(this.j1, C, sideSign * 0.198 * bs.shoulder, 0.5 * bs.torsoL, 0, -swing, 0, sideSign * out);
+        const raise = Math.acos(clamp(Math.cos(swing) * Math.cos(out), -1, 1));
+        const elev = smoothstep(1.1, 2.9, raise);
+        const protract = 0.028 * Math.sin(clamp(swing, -1.5, 1.5)) * (1 - 0.5 * elev);
+        this.chain(this.j1, C, sideSign * (0.198 * bs.shoulder - 0.014 * elev), 0.5 * bs.torsoL + 0.045 * elev, protract, -swing, 0, sideSign * out);
         this.put('upperArm', id * 2 + sd, this.j1, bs.arm, bs.armLen, bs.arm);
         this.chain(this.j2, this.j1, 0, -0.29 * bs.armLen, 0, -elbow, sideSign * (sd === 0 ? armRotL : armRotR), 0);
         this.put('forearm', id * 2 + sd, this.j2, 0.5 + 0.5 * bs.arm, bs.armLen, 0.5 + 0.5 * bs.arm);
@@ -1738,24 +1988,103 @@ export class PlayersView {
       }
 
       // Legs: the thigh curves into a soft knee (shader bend), the shin takes the rest.
+      // Through the stance of each stride the foot is planted: the ball of the foot stays
+      // where it landed on the grass and the leg is solved to reach it (two-bone IK), so
+      // feet don't skate. The foot lands heel first, rolls flat, and the heel lifts off
+      // the bent toe as the body passes over it; in the air it trails, then cocks up to land.
+      const ik = this.ikOn[id];
+      const cf = Math.cos(facing);
+      const sf = Math.sin(facing);
+      const duty = lerp(0.62, 0.32, s);
+      const dutyA = duty * Math.PI;
+      const standing = 1 - smoothstep(0.03, 0.3, stepAmt);
+      const stepLen = 0.7 + 0.12 * speed;
+      const l1 = THIGH * bs.leg;
+      const l2 = SHIN * bs.leg;
+      const upright = hipY > 0.55 && p.action !== 'slide' && p.action !== 'dive' && p.action !== 'fall';
+      this.pinv.copy(P).invert();
       for (let sd = 0; sd < 2; sd++) {
         const sideSign = sd === 0 ? 1 : -1;
-        const hip = sd === 0 ? hipL : hipR;
-        const knee = sd === 0 ? kneeL : kneeR;
-        const out = sd === 0 ? legOutL : legOutR;
+        const fi = id * 2 + sd;
+        let hip = sd === 0 ? hipL : hipR;
+        let knee = sd === 0 ? kneeL : kneeR;
+        let out = sd === 0 ? legOutL : legOutR;
         const yaw = sd === 0 ? legYawL : legYawR;
-        this.chain(this.j1, P, sideSign * 0.092 * (1 + (bs.torsoW - 1) * 0.6), -0.03, 0, -hip, yaw, sideSign * out);
-        this.put('shortsLeg', id * 2 + sd, this.j1, bs.thigh, 1, bs.thigh);
-        this.put('thigh', id * 2 + sd, this.j1, bs.thigh, bs.leg, bs.thigh);
+        const hipX = sideSign * 0.092 * (1 + (bs.torsoW - 1) * 0.6);
+
+        // Where this leg is in its stride: sg = 0 mid-stance (the foot under him), |q| < 1
+        // through the stance, sg < -dutyA coming in to land, sg > dutyA just pushed off.
+        let sg = phi + (sd === 0 ? 0 : Math.PI) - Math.PI;
+        sg -= Math.PI * 2 * Math.floor((sg + Math.PI) / (Math.PI * 2));
+        const q = standing > 0.5 ? 0 : sg / dutyA;
+        const stance = Math.abs(q) < 1;
+        const go = 1 - standing;
+        const heelUp = stance ? (0.35 + 0.25 * s) * smoothstep(0.15, 1, q) * go : 0;
+        const toesUp = (0.24 * (1 - 0.5 * s) * (stance ? 1 - smoothstep(-1, -0.55, q) : sg < 0 ? smoothstep(-dutyA - 0.9, -dutyA, sg) : 0)) * go;
+        const trail = !stance && sg > 0 ? 0.35 * (0.4 + s) * (1 - smoothstep(dutyA, dutyA + 1.0, sg)) * go : 0;
+
+        if (ik > 0.001 && stance) {
+          if (this.inStance[fi] === 0) {
+            // Touch-down: put the foot where the stance will be centred under him.
+            const ahead = -q * 0.85 * duty * stepLen * (1 - standing) + 0.11 * sc;
+            const lat = (hipX + sideSign * Math.sin(out) * (l1 + l2)) * sc;
+            this.plantX[fi] = x + cf * ahead + sf * lat;
+            this.plantZ[fi] = z + sf * ahead - cf * lat;
+            this.inStance[fi] = 1;
+          }
+          // Held through the stance, eased in and out at its ends; once let go, it fades.
+          this.footW[fi] = this.inStance[fi] === 1 ? (1 - smoothstep(0.6, 1, Math.abs(q))) * ik : this.footW[fi] * Math.exp(-dt * 30);
+        } else {
+          this.inStance[fi] = 0;
+          this.footW[fi] = 0;
+        }
+        const w = this.footW[fi];
+
+        if (w > 0.001) {
+          // Ankle target: behind the planted ball of the foot, raised as the heel lifts.
+          const rbY = (-0.068 * Math.cos(heelUp) - 0.11 * Math.sin(heelUp)) * sc;
+          const rbZ = (-0.068 * Math.sin(heelUp) + 0.11 * Math.cos(heelUp)) * sc;
+          this.tv.set(this.plantX[fi] - cf * rbZ, 0.003 - rbY, this.plantZ[fi] - sf * rbZ);
+          if (this.legIK(hipX, yaw, sideSign, l1, l2)) {
+            hip = lerp(hip, this.ikH, w);
+            knee = lerp(knee, this.ikK, w);
+            out = lerp(out, this.ikOut, w);
+          } else if (stance) this.inStance[fi] = 2; // out of reach (pushed off it): pick the foot up
+        }
+        if (upright && w < 0.999) {
+          // Never through the grass: an action's foot that would go below it stands on it.
+          this.chain(this.j1, P, hipX, -0.03, 0, -hip, yaw, sideSign * out);
+          this.chain(this.j2, this.j1, 0, 0, 0, knee * 0.22, 0, 0);
+          this.chain(this.j2, this.j2, 0, -THIGH * bs.leg, 0, knee * 0.78, 0, 0);
+          this.tv.set(0, -SHIN * bs.leg, 0).applyMatrix4(this.j2);
+          const floor = 0.07 * sc;
+          if (this.tv.y < floor) {
+            this.tv.y = floor;
+            if (this.legIK(hipX, yaw, sideSign, l1, l2)) {
+              hip = this.ikH;
+              knee = this.ikK;
+              out = this.ikOut;
+            }
+          }
+        }
+
+        this.chain(this.j1, P, hipX, -0.03, 0, -hip, yaw, sideSign * out);
+        this.put('shortsLeg', fi, this.j1, bs.thigh, 1, bs.thigh);
+        this.put('thigh', fi, this.j1, bs.thigh, bs.leg, bs.thigh);
         const soft = knee * 0.22;
-        kneeBend.setXYZ(id * 2 + sd, soft, 0, 0);
+        kneeBend.setXYZ(fi, soft, 0, 0);
         this.chain(this.j2, this.j1, 0, 0, 0, soft, 0, 0);
         this.chain(this.j2, this.j2, 0, -THIGH * bs.leg, 0, knee - soft, 0, 0);
-        this.put('shin', id * 2 + sd, this.j2, bs.calf, bs.leg, bs.calf);
-        // Keep the foot roughly level with the ground.
-        const ankle = clamp(hip - knee, -1.2, 0.6) + (knee > 0.8 ? -0.35 : 0) + (sd === 0 ? ankleL : ankleR);
+        this.put('shin', fi, this.j2, bs.calf, bs.leg, bs.calf);
+        // Ankle (+ = toes down). Free: roughly level with the ground, with the stride's
+        // trail and cock-up; planted: flat on the grass (or rolled up onto the toe).
+        const extra = sd === 0 ? ankleL : ankleR;
+        const freeA = clamp(hip - knee, -1.2, 0.6) - 0.35 * smoothstep(0.6, 1.0, knee) + (trail - toesUp) * ik - extra;
+        const flatA = hip - knee - leanF + heelUp - toesUp;
+        const ankle = lerp(freeA, flatA, w);
         this.chain(this.j3, this.j2, 0, -SHIN * bs.leg, 0, ankle, 0, 0);
-        this.put('boot', id * 2 + sd, this.j3);
+        this.put('boot', fi, this.j3);
+        toe.setX(fi, heelUp * w + 0.25 * trail * ik);
       }
 
       // Contact shadow.
@@ -1783,6 +2112,7 @@ export class PlayersView {
     }
     bend.needsUpdate = true;
     kneeBend.needsUpdate = true;
+    toe.needsUpdate = true;
 
     this.cull();
     for (const name of Object.keys(this.parts) as PartName[]) this.parts[name].mesh.instanceMatrix.needsUpdate = true;
