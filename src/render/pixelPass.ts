@@ -13,9 +13,10 @@ const MAX_PAL = 32;
  *    sub-pixel remainder. One texture read per screen pixel.
  *
  * Crispness:
- * - Every art pixel is an exact whole number of *device* pixels (the canvas runs at the
- *   screen's true resolution in this mode, which costs one texture read per pixel), so
- *   there are no uneven 2-and-3-pixel columns and no browser smoothing.
+ * - The canvas runs at the screen's true resolution (no browser smoothing), and the
+ *   upscale is "sharp bilinear": each art pixel is drawn solid, with only the one device
+ *   pixel on its border blended. So the art can be any height (the fineness slider moves
+ *   in small steps) and every pixel still looks the same size, with no blur.
  * - The world is rendered at 2x the art resolution and each art pixel keeps the one of
  *   its four samples closest to their average: pure colours and hard edges (no blended
  *   halo), but no single-sample speckle or shimmer from grass, crowd and line detail.
@@ -32,7 +33,7 @@ export class PixelPass {
   private quad: THREE.Mesh;
   private mat: THREE.ShaderMaterial;
   private blit: THREE.ShaderMaterial;
-  /** Wanted art height in pixels (the real one is the nearest whole-number fit). */
+  /** Art height in pixels. */
   height = 288;
   /** Supersampling of the world render (2 = 2x2 samples per art pixel, 1 = off). */
   ss = 2;
@@ -52,7 +53,8 @@ export class PixelPass {
     this.target.texture.generateMipmaps = false;
     this.target.depthTexture = new THREE.DepthTexture(4, 4);
     this.target.depthTexture.type = THREE.UnsignedIntType;
-    this.post = new THREE.WebGLRenderTarget(4, 4, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: false });
+    // Linear filtering, used only across the one-device-pixel seams by the sharp upscale.
+    this.post = new THREE.WebGLRenderTarget(4, 4, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false });
     this.post.texture.generateMipmaps = false;
 
     this.mat = new THREE.ShaderMaterial({
@@ -300,11 +302,14 @@ export class PixelPass {
         uniform vec2 uSub;
         uniform vec2 uOffset;
         uniform float uScale;
-        // Every art pixel is exactly uScale x uScale device pixels; the scroll moves in whole
-        // device pixels, so edges never smear.
+        // Sharp bilinear: position in art pixels; inside a pixel the colour is flat, and only
+        // within half a device pixel of a seam does it blend into the neighbour (linear
+        // filtering does the blend). Smooth sub-pixel scrolling comes for free.
         void main() {
-          vec2 art = floor((gl_FragCoord.xy + uOffset + floor(uSub * uScale + 0.5)) / uScale);
-          gl_FragColor = texture2D(tPost, (art + 0.5) / uRes);
+          vec2 p = (gl_FragCoord.xy + uOffset) / uScale + uSub;
+          vec2 seam = floor(p + 0.5);
+          p = seam + clamp((p - seam) * uScale, -0.5, 0.5);
+          gl_FragColor = texture2D(tPost, p / uRes);
         }
       `,
     });
@@ -331,17 +336,13 @@ export class PixelPass {
     u.uGrain.value = p.grain;
   }
 
-  /**
-   * Art resolution for a drawing buffer of w x h *device* pixels: the whole-number pixel
-   * size nearest the wanted art height, the art covering the screen (the odd leftover
-   * device pixels are split between the edges).
-   */
+  /** Art resolution for a drawing buffer of w x h *device* pixels: exactly `height` tall. */
   resize(w: number, h: number): void {
     this.devW = w;
     this.devH = h;
-    const scale = Math.max(1, Math.round(h / this.height));
+    const lh = Math.max(16, Math.min(h, Math.round(this.height)));
+    const scale = h / lh;
     const lw = Math.ceil(w / scale);
-    const lh = Math.ceil(h / scale);
     this.artW = lw;
     this.artH = lh;
     this.target.setSize(lw * this.ss, lh * this.ss);
@@ -349,7 +350,7 @@ export class PixelPass {
     (this.mat.uniforms.uRes.value as THREE.Vector2).set(lw, lh);
     this.mat.uniforms.uSS.value = this.ss;
     this.blit.uniforms.uScale.value = scale;
-    (this.blit.uniforms.uOffset.value as THREE.Vector2).set(Math.floor((lw * scale - w) / 2), Math.floor((lh * scale - h) / 2));
+    (this.blit.uniforms.uOffset.value as THREE.Vector2).set((lw * scale - w) / 2, 0);
   }
 
   /** Turn supersampling on or off (performance), keeping the same art resolution. */

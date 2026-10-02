@@ -139,11 +139,14 @@ try {
 }
 const pixelPass = new PixelPass();
 // Pixel fineness (pause menu slider): the art height, from chunky to fine.
-const FINENESS = [180, 216, 250, 288, 330, 380, 440];
-let fineIdx = 3;
+const PIXELS_MIN = 140;
+const PIXELS_MAX = 560;
+let pixelsH = 288;
 try {
-  const f = Number(localStorage.getItem('pixelFine'));
-  if (localStorage.getItem('pixelFine') !== null && f >= 0 && f < FINENESS.length) fineIdx = f;
+  const saved = Number(localStorage.getItem('pixelH'));
+  const old = localStorage.getItem('pixelFine'); // the old 7-step slider
+  if (saved >= PIXELS_MIN && saved <= PIXELS_MAX) pixelsH = saved;
+  else if (old !== null) pixelsH = [180, 216, 250, 288, 330, 380, 440][Number(old)] ?? 288;
 } catch {
   /* keep default */
 }
@@ -226,7 +229,7 @@ pauseMenu.innerHTML = `
     <button class="camera ghost">Camera: Normal</button>
     <button class="sound ghost">Sound: on</button>
     <button class="smooth ghost">Smoothing: on</button>
-    <label class="fine wide"><span>Pixels</span><input class="fine-in" type="range" min="0" max="${FINENESS.length - 1}" step="1"><em>Chunky ‹ › Fine</em></label>
+    <label class="fine wide"><span>Pixels</span><input class="fine-in" type="range" min="${PIXELS_MIN}" max="${PIXELS_MAX}" step="4"><b class="fine-val">288</b></label>
     <button class="stats ghost wide">FPS counter: off</button>
     <button class="fan ghost wide">Your banner: add photo</button>
   </div>`;
@@ -502,12 +505,15 @@ cameraBtn.addEventListener('click', () => {
 });
 const fineRow = pauseMenu.querySelector('.fine') as HTMLElement;
 const fineIn = pauseMenu.querySelector('.fine-in') as HTMLInputElement;
-fineIn.value = String(fineIdx);
+const fineVal = pauseMenu.querySelector('.fine-val') as HTMLElement;
+fineIn.value = String(pixelsH);
+fineVal.textContent = `${pixelsH} px`;
 fineIn.addEventListener('input', () => {
-  fineIdx = Number(fineIn.value);
+  pixelsH = Number(fineIn.value);
+  fineVal.textContent = `${pixelsH} px`;
   onResize();
   try {
-    localStorage.setItem('pixelFine', String(fineIdx));
+    localStorage.setItem('pixelH', String(pixelsH));
   } catch {
     /* ignore */
   }
@@ -590,7 +596,7 @@ function onResize(): void {
   if (!FIXED_DPR) renderer.setPixelRatio(pixelLook() ? deviceDpr : dpr);
   renderer.setSize(w, h);
   rig.setAspect(w / h);
-  pixelPass.height = FINENESS[fineIdx];
+  pixelPass.height = pixelsH;
   pixelPass.resize(renderer.domElement.width, renderer.domElement.height);
   renderer.domElement.style.imageRendering = pixelLook() ? 'pixelated' : '';
   fineRow.style.display = pixelLook() ? '' : 'none';

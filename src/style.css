@@ -352,4 +352,4 @@ html, body {
   font-weight: 800; font-size: 15px; letter-spacing: 0.08em; text-transform: uppercase;
 }
 .menu.pause .fine input { flex: 1; min-width: 0; accent-color: var(--accent); height: 26px; }
-.menu.pause .fine em { font-style: normal; font-weight: 600; font-size: 12px; letter-spacing: 0.06em; color: var(--ink-dim); white-space: nowrap; }
+.menu.pause .fine b { min-width: 4.2em; text-align: right; font-weight: 800; font-size: 15px; letter-spacing: 0.04em; color: var(--accent); font-variant-numeric: tabular-nums; white-space: nowrap; }
