@@ -213,3 +213,8 @@ html, body {
 .charge.shot .fill { background: linear-gradient(90deg, #ffd447, #ff9d3c); }
 .charge.over .fill { background: linear-gradient(90deg, #ffd447 0%, #ff9d3c 70%, #e5483b 100%); }
 .charge .tick { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: rgba(15, 20, 17, 0.85); }
+
+.version {
+  position: absolute; right: calc(14px + var(--safe-r)); bottom: calc(10px + var(--safe-b));
+  font-size: 13px; font-weight: 600; letter-spacing: 0.1em; color: var(--ink-dim); opacity: 0.7;
+}

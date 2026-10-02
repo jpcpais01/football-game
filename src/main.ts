@@ -99,6 +99,10 @@ menu.innerHTML = `
     <p class="hint">Landscape · joystick to move · Pass / Through / Shoot</p>
   </div>`;
 ui.appendChild(menu);
+const version = document.createElement('div');
+version.className = 'version';
+version.textContent = `v${__APP_VERSION__}`;
+menu.appendChild(version);
 
 const pauseBtn = document.createElement('button');
 pauseBtn.className = 'pause-btn';

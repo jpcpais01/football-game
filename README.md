@@ -26,6 +26,11 @@ npm run build      # production build + service worker into dist/
 
 Debug URL flags: `?debug` (overlay), `?dpr=1` (fixed resolution), `?zoom=10` (close camera).
 
+## Versioning
+
+The version in `package.json` is shown on the home screen (bottom right). Bump it with every
+pushed update.
+
 ## Deploy (Vercel)
 
 Import the repo in Vercel. It detects Vite; `vercel.json` sets the build and the cache headers
