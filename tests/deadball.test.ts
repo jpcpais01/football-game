@@ -1,3 +1,4 @@
+import { Ball } from '../src/sim/ball';
 import { describe, expect, it } from 'vitest';
 import { Match } from '../src/sim/match';
 import { Btn, makeInput, type InputState } from '../src/sim/input';
@@ -69,4 +70,42 @@ describe('dead-ball shots', () => {
     run(m, () => Math.abs(m.ball.pos.x) > PITCH.halfL - 0.5 || m.phase === 'goal', makeInput(), 120 * 3);
     expect(Math.sign(m.ball.pos.z)).toBe(1);
   });
+});
+
+describe('aimed corners', () => {
+  for (const float of [false, true]) {
+    it(`the ${float ? 'floated' : 'whipped'} delivery comes down on the ring`, () => {
+      const m = new Match(11);
+      m.autoPlay = true;
+      run(m, () => m.phase === 'play' && m.time > 4);
+      const dir = m.teams[m.humanTeam].dir;
+      (m as unknown as { startSetPiece: (k: string, t: number, x: number, z: number) => void }).startSetPiece('corner', m.humanTeam, dir * PITCH.halfL, PITCH.halfW);
+      m.autoPlay = false;
+      run(m, () => m.aimingCorner, makeInput(), 120 * 5);
+      expect(m.aimingCorner).toBe(true);
+      const t = { x: dir * (PITCH.halfL - 7), z: -2 };
+      m.setPiece!.target = { ...t };
+      const input = makeInput();
+      m.switchT = 99;
+      input.events.push({ btn: float ? Btn.C : Btn.A, kind: 'up', hold: 0.3, swipeUp: false });
+      m.step(input);
+      expect(m.setPiece!.taker.plan?.landX).toBeCloseTo(t.x, 5);
+      // Wait for the strike, then fly the struck ball on its own (nobody gets to head it).
+      run(m, () => m.ball.vel.y > 2, makeInput(), 120 * 6);
+      const b = new Ball();
+      b.pos.copy(m.ball.pos);
+      b.prevPos.copy(b.pos);
+      b.vel.copy(m.ball.vel);
+      b.spin.copy(m.ball.spin);
+      b.onGround = false;
+      let land: { x: number; z: number } | null = null;
+      for (let i = 0; i < 120 * 6 && !land; i++) {
+        const falling = b.vel.y <= 0;
+        b.step(1 / 120);
+        if (falling && b.pos.y < 0.115) land = { x: b.pos.x, z: b.pos.z };
+      }
+      expect(land).not.toBeNull();
+      expect(Math.hypot(land!.x - t.x, land!.z - t.z)).toBeLessThan(4);
+    });
+  }
 });

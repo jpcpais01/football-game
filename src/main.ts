@@ -22,6 +22,8 @@ import { SHARED } from './render/look';
 import { Controls } from './ui/controls';
 import { Hud } from './ui/hud';
 import { Minimap } from './ui/minimap';
+import { CornerAim } from './render/cornerAim';
+import { Btn } from './sim/input';
 import { GameAudio } from './ui/audio';
 import { Club } from './meta/club';
 import { crestCanvas } from './meta/crest';
@@ -107,6 +109,8 @@ playersView.officials = officials;
 scene.add(playersView.group);
 const ballView = new BallView();
 scene.add(ballView.group);
+const cornerAim = new CornerAim();
+scene.add(cornerAim.group);
 let particles = new Particles(match.teams[0].info.kit.shirt, match.teams[1].info.kit.shirt);
 scene.add(particles.points);
 const rig = new CameraRig(window.innerWidth / window.innerHeight);
@@ -830,6 +834,8 @@ function frame(now: number): void {
   turfMarks.update(match, renderer);
   if (playing) hud.update(match, now / 1000), minimap.update(match, now / 1000);
   updateAim();
+  // Corner ring and flight preview (holding Shoot shows the floated ball).
+  cornerAim.update(match, playing && controls.input.held[Btn.C], now / 1000);
   updateCharge(alpha);
 
   particles.setScale(pixelLook() ? pixelPass.pixelHeight : renderer.domElement.height, rig.camera.fov);

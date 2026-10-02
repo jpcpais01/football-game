@@ -24,6 +24,8 @@ export interface SetPiece {
   /** Human dead-ball shot: the aim point on the goal mouth (world z, height). */
   aimZ?: number;
   aimY?: number;
+  /** Human corner: where the delivery is aimed to land (the gold ring on the grass). */
+  target?: { x: number; z: number };
 }
 
 /** The last foul given (for the HUD, the referee and the commentary of the moment). */
@@ -398,6 +400,10 @@ export class Match {
     this.ball.reset(x, z);
     this.ball.pos.y = BALL.radius;
     this.heldBy = null;
+    if (kind === 'corner' && team === this.humanTeam) {
+      // Start the ring around the penalty spot, a little toward the far post.
+      this.setPiece.target = { x: goalX - dir * 9, z: -(Math.sign(z) || 1) * 1.5 };
+    }
     if (kind === 'penalty' || direct) {
       // Where the human starts aiming: free kicks over the wall to the far post, penalties
       // low to the keeper's right... well, the middle; the stick moves it.
@@ -425,6 +431,10 @@ export class Match {
     if (sp.kind === 'throw') {
       fx = 0;
       fz = -Math.sign(sp.z);
+    } else if (sp.kind === 'corner' && sp.target) {
+      // Lined up over the ball toward the aim ring.
+      fx = sp.target.x - sp.x;
+      fz = sp.target.z - sp.z;
     } else if (sp.kind === 'corner') {
       fx = -Math.sign(sp.x) * 0.6;
       fz = -Math.sign(sp.z);
@@ -453,6 +463,34 @@ export class Match {
     // Right of the facing direction is (-f.z, f.x); the taker stands on his kicking foot's far side.
     const lat = runUp ? (sp.kind === 'penalty' ? 0.45 : 0.7) * back * sp.taker.foot : 0;
     return { x: sp.x - f.x * back + f.z * lat, z: sp.z - f.z * back - f.x * lat, runUp };
+  }
+
+  /** The human is lining up a corner: the landing ring and the flight preview are up. */
+  get aimingCorner(): boolean {
+    const sp = this.setPiece;
+    return (
+      !!sp && !this.autoPlay && this.phase === 'setpiece' && sp.kind === 'corner' && sp.team === this.humanTeam &&
+      sp.taker === this.controlled && !sp.taker.plan && sp.taker.action === 'none' && !!sp.target
+    );
+  }
+
+  /**
+   * The corner delivery that lands on (lx, lz): whipped (flatter, faster, curling in toward
+   * goal) or floated (high and hanging). Shared by the kick and the on-screen preview, so
+   * the arc you see is the ball you get (before the taker's error).
+   */
+  solveCorner(lx: number, lz: number, float: boolean, from: V3 = this.ball.pos): { vel: V3; spin: V3; time: number } {
+    const team = this.setPiece ? this.teams[this.setPiece.team] : this.teams[this.humanTeam];
+    const gx = PITCH.halfL * team.dir;
+    const d = Math.max(1, dist2D(from.x, from.z, lx, lz));
+    const fx = (lx - from.x) / d;
+    const fz = (lz - from.z) / d;
+    // Inswinging: bend toward the goal line (right of travel is (-fz, fx)).
+    const toGoalX = gx - lx;
+    const toGoalZ = -lz;
+    const bend = Math.sign(-fz * toGoalX + fx * toGoalZ) || 1;
+    const angle = float ? clamp(30 + d * 0.15, 32, 40) : clamp(14 + d * 0.3, 17, 26);
+    return solveLofted(from, lx, lz, angle, float ? 22 : 14, bend * (float ? 7 : 15));
   }
 
   /** The human is lining up a dead-ball shot (third-person camera, aim reticle). */
@@ -730,6 +768,12 @@ export class Match {
           const spk = this.setPiece?.kind;
           if (spk && spk !== 'freekick' && spk !== 'penalty' && plan.type === 'shot') plan.type = spk === 'corner' ? 'cross' : 'lob';
           if (this.heldBy === c && plan.type === 'shot') plan.type = 'clear';
+          if (this.aimingCorner) {
+            // Corner: Pass whips it in, Shoot floats it, Through plays it short.
+            const t = this.setPiece!.target!;
+            if (ev.btn === Btn.B) plan = { type: 'pass', dirX: ax, dirZ: az, power: 0.5, targetId: -1, expires: exp, aimed: false };
+            else plan = { type: 'cross', dirX: ax, dirZ: az, power: plan.power, targetId: -1, expires: this.time + 6, aimed: true, landX: t.x, landZ: t.z, float: ev.btn === Btn.C };
+          }
           if (plan.type === 'shot' && this.aimingShot) {
             plan.aimZ = this.setPiece!.aimZ;
             plan.aimY = this.setPiece!.aimY;
@@ -770,6 +814,17 @@ export class Match {
     // (screen-relative in the third-person view: right is the taker's right, up is higher).
     if (this.setPiece && this.setPiece.taker === c) {
       const sp = this.setPiece;
+      if (this.aimingCorner && m > 0.12) {
+        // The ring moves with the stick as you see it: right is right, up is away.
+        const t = sp.target!;
+        const dir = this.teams[sp.team].dir;
+        const gx = PITCH.halfL * dir;
+        t.x += input.moveX * 9 * DT;
+        t.z -= input.moveY * 9 * DT;
+        const depth = clamp((gx - t.x) * dir, 1.5, 32);
+        t.x = gx - dir * depth;
+        t.z = clamp(t.z, -PITCH.halfW + 2.5, PITCH.halfW - 2.5);
+      }
       if (this.aimingShot && m > 0.12) {
         const dir = this.teams[sp.team].dir;
         const lim = PITCH.goalHalfWidth + 0.9;
@@ -1597,6 +1652,42 @@ export class Match {
       vel = r.vel;
       spin = r.spin;
       strength = 0.5 + pw * 0.5;
+    } else if (plan.type === 'cross' && plan.landX !== undefined && plan.landZ !== undefined) {
+      // Aimed corner: onto the ring. The nearest team-mate attacks the landing spot, timed to
+      // arrive with the ball; others take the near post, the far post and the edge of the box.
+      const lx = plan.landX;
+      const lz = plan.landZ;
+      const r = this.solveCorner(lx, lz, !!plan.float, b.pos);
+      vel = r.vel;
+      spin = r.spin;
+      base = plan.float ? 0.035 : 0.045;
+      strength = plan.float ? 0.6 : 0.75;
+      let best: Player | null = null;
+      let bestD = 1e9;
+      for (const q of team.players) {
+        if (q === p || q.role === 'GK') continue;
+        const d = dist2D(q.pos.x, q.pos.z, lx, lz);
+        if (d < bestD) (bestD = d), (best = q);
+      }
+      receiver = best;
+      if (best) this.ai.setRun(best, lx, lz, r.time + 0.6);
+      const gx = PITCH.halfL * team.dir;
+      const near = Math.sign(b.pos.z || 1);
+      const spots: [number, number][] = [
+        [gx - team.dir * 5.5, near * 2.5],
+        [gx - team.dir * 7, -near * 3.5],
+        [gx - team.dir * 14, 0],
+      ];
+      let k = 0;
+      for (const q of team.players) {
+        if (q === p || q === best || q.role === 'GK' || q.role === 'DEF' || k >= spots.length) continue;
+        if (dist2D(q.pos.x, q.pos.z, gx, 0) > 34) continue;
+        // Skip a spot the ball is already landing on.
+        if (dist2D(spots[k][0], spots[k][1], lx, lz) < 3) k++;
+        if (k >= spots.length) break;
+        this.ai.setRun(q, spots[k][0], spots[k][1], r.time + 0.6);
+        k++;
+      }
     } else if ((plan.type === 'lob' || plan.type === 'cross') && !fromHands && this.inCrossZone(p.team, b.pos.x, b.pos.z)) {
       // Cross: a lofted ball from the wide areas near the byline is whipped into the box.
       const c = this.planCross(p, plan);
