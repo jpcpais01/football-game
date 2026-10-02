@@ -170,7 +170,7 @@ export class Terraces {
     // Ambient pyro: an occasional flare as the night goes on, more when it's tense.
     const ex = match.excitement;
     const rate = (0.012 + 0.05 * ex) * (match.phase === 'play' ? 1 : 0.4);
-    if (this.rnd() < rate * dt && this.pyro.length < 12) this.light(this.rnd() < 0.7 ? 0 : 1, this.rnd() < 0.08, 14 + this.rnd() * 18);
+    if (this.rnd() < rate * dt && this.pyro.length < 9) this.light(this.rnd() < 0.7 ? 0 : 1, this.rnd() < 0.08, 14 + this.rnd() * 18);
     this.pyro = this.pyro.filter((f) => t - f.born < f.life);
 
     // The songs: one end at a time, a pause between, the end whose team is pressing more

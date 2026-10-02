@@ -10,7 +10,7 @@ import type { Terraces } from '../ui/terraces';
  * evenings, goal confetti and flare smoke in the stands. Everything follows the shared wind.
  */
 
-const MAX = 2600;
+const MAX = 1800;
 const MOTES = 170;
 const FLOOD_MOTE = new THREE.Color(0.85, 0.9, 1);
 
@@ -203,17 +203,17 @@ export class Particles {
         const fade = Math.min(1, age / 0.6, (f.life - age) / 1.5);
         if (fade <= 0) continue;
         if (f.smoke) {
-          if (Math.random() < 9 * dt * fade) {
+          if (Math.random() < 4.5 * dt * fade) {
             const col = f.end === 0 ? this.home : this.away;
-            this.spawn(Kind.Smoke, f.x + (Math.random() - 0.5) * 1.2, f.y - 0.6, f.z + (Math.random() - 0.5) * 1.2, wind.x * 0.6 + (Math.random() - 0.5) * 1.2, 0.5 + Math.random() * 0.6, wind.y * 0.6 + (Math.random() - 0.5) * 1.2, 7 + Math.random() * 4, 1.9, col);
+            this.spawn(Kind.Smoke, f.x + (Math.random() - 0.5) * 1.2, f.y - 0.6, f.z + (Math.random() - 0.5) * 1.2, wind.x * 0.6 + (Math.random() - 0.5) * 1.2, 0.5 + Math.random() * 0.6, wind.y * 0.6 + (Math.random() - 0.5) * 1.2, 7 + Math.random() * 3, 2.5, col);
           }
           continue;
         }
-        if (Math.random() < 0.85 * fade) {
+        if (Math.random() < 0.6 * fade) {
           this.spawn(Kind.Flare, f.x + (Math.random() - 0.5) * 0.35, f.y + Math.random() * 0.2, f.z + (Math.random() - 0.5) * 0.35, (Math.random() - 0.5) * 1.6, 0.6 + Math.random() * 1.6, (Math.random() - 0.5) * 1.6, 0.18 + Math.random() * 0.15, 0.2 + Math.random() * 0.25, Math.random() < 0.4 ? 0xffd9a0 : 0xff4a2a);
         }
-        if (Math.random() < 5 * dt * fade) {
-          this.spawn(Kind.Smoke, f.x, f.y + 0.4, f.z, wind.x * 0.8 + (Math.random() - 0.5) * 0.5, 0.55 + Math.random() * 0.45, wind.y * 0.8 + (Math.random() - 0.5) * 0.5, 9 + Math.random() * 4, 1.3, Math.random() < 0.5 ? 0xe2b3ad : 0xc9b8b6);
+        if (Math.random() < 2.2 * dt * fade) {
+          this.spawn(Kind.Smoke, f.x, f.y + 0.4, f.z, wind.x * 0.8 + (Math.random() - 0.5) * 0.5, 0.55 + Math.random() * 0.45, wind.y * 0.8 + (Math.random() - 0.5) * 0.5, 8 + Math.random() * 3, 1.7, Math.random() < 0.5 ? 0xe2b3ad : 0xc9b8b6);
         }
       }
     }

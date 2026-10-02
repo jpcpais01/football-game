@@ -42,7 +42,7 @@ export class ChantAudio {
     // The bowl: a long, dark reverb (a decaying noise impulse, a touch of early echo off
     // the far stand), mixed under the dry sound.
     const verb = ctx.createConvolver();
-    verb.buffer = this.impulse(3.2);
+    verb.buffer = this.impulse(2.2);
     const wet = ctx.createGain();
     wet.gain.value = 0.55;
     const dry = ctx.createGain();
@@ -169,11 +169,9 @@ export class ChantAudio {
     // section starting a few tens of ms apart, with a little scoop up into the note.
     const voices: [number, number][] = [
       [1, 0],
-      [1.012, 0.02],
-      [0.989, 0.035],
+      [1.012, 0.025],
       [0.5, 0.01],
       [0.503, 0.04],
-      [2.0, 0.03],
     ];
     for (const [m, off] of voices) {
       const o = ctx.createOscillator();
@@ -182,7 +180,7 @@ export class ChantAudio {
       o.frequency.setValueAtTime(f0 * m * 0.97, at);
       o.frequency.exponentialRampToValueAtTime(f0 * m * (1 + (Math.random() - 0.5) * 0.008), at + 0.08);
       const vg = ctx.createGain();
-      vg.gain.value = m === 2 ? 0.25 : m === 1 ? 0.5 : 0.6;
+      vg.gain.value = m === 1 ? 0.6 : 0.7;
       o.connect(vg);
       vg.connect(b1);
       vg.connect(b2);

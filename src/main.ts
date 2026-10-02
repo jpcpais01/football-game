@@ -608,6 +608,7 @@ function setPaused(p: boolean): void {
   quitBtn.classList.remove('armed');
   quitBtn.textContent = 'Forfeit match';
   pauseMenu.classList.toggle('hidden', !p);
+  minimap.setVisible(!p);
   controls.enabled = !p;
   if (p) audio.suspend();
   else audio.resume();
@@ -646,6 +647,8 @@ onResize();
 // ---------------------------------------------------------------- loop
 let acc = 0;
 let last = performance.now();
+/** When the next frame is due (see the frame pacing in `frame`). */
+let nextFrameAt = 0;
 let simTime = 0;
 let frameAvg = 16.7;
 /** Frame pacing: the display's refresh interval, and the interval we actually draw at. */
@@ -785,13 +788,14 @@ function frame(now: number): void {
     void Promise.race([compiled, timeout]).then(() => requestAnimationFrame(() => boot.__bootDone?.()));
   }
   requestAnimationFrame(frame);
-  // Frame pacing: matches up to 120 fps (above that, refreshes are skipped). Behind the
-  // menus the stadium is ambience (30 fps); the pause screen barely moves (15 fps).
+  // Frame pacing: a frame scheduler at the target rate — 120 fps in play, 90 on the home
+  // screen, 60 under the pause menu. On a faster display, refreshes are skipped evenly to
+  // hold the rate; on a slower one every refresh is drawn.
   rafAvg += (Math.min(50, now - lastRaf) - rafAvg) * 0.1;
   lastRaf = now;
-  const menus = !playing;
-  targetMs = paused ? 1000 / 15 : menus ? 1000 / 30 : Math.max(1000 / 120, rafAvg);
-  if (now - last < targetMs - rafAvg * 0.5) return;
+  targetMs = 1000 / (paused ? 60 : playing ? 120 : 90);
+  if (now < nextFrameAt - rafAvg * 0.5) return;
+  nextFrameAt = now - nextFrameAt > targetMs ? now + targetMs : nextFrameAt + targetMs;
   const t0 = performance.now();
   const frameMs = now - last;
   const dt = Math.min(0.1, frameMs / 1000);

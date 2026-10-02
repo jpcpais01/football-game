@@ -38,7 +38,7 @@ export interface Stadium {
 }
 
 /** Flares lighting the crowd at once (the brightest, nearest are what matter). */
-export const MAX_FLARES = 12;
+export const MAX_FLARES = 8;
 
 const U = {
   uTime: { value: 0 },
@@ -61,6 +61,7 @@ const U = {
   uChant: { value: new THREE.Vector4() },
   /** Burning flares (xyz, brightness), lighting the fans around them. */
   uFlares: { value: Array.from({ length: MAX_FLARES }, () => new THREE.Vector4()) },
+  uFlareN: { value: 0 },
 };
 
 // ------------------------------------------------------------------ the ground
@@ -353,6 +354,7 @@ function crowdMaterial(o: CrowdOpts): THREE.ShaderMaterial {
       varying vec3 vNrm;
       uniform float uTime, uExcite, uFogNear, uFogFar, uFlood, uHaze, uTifoOn, uHasTifo, uHasTifoB, uStripes, uHasLetters, uFill;
       uniform vec4 uChant;
+      uniform float uFlareN;
       uniform vec4 uFlares[${MAX_FLARES}];
       uniform sampler2D uTifoB;
       uniform vec4 uTifoRectB;
@@ -547,14 +549,17 @@ function crowdMaterial(o: CrowdOpts): THREE.ShaderMaterial {
         vec3 alb = pow(c, vec3(2.2));
         c = alb * uLight;
         // Flares: a flickering red-orange glow on everyone around them.
-        vec3 flare = vec3(0.0);
-        for (int i = 0; i < ${MAX_FLARES}; i++) {
-          vec4 f = uFlares[i];
-          if (f.w <= 0.0) continue;
-          vec3 d = vWorld - f.xyz;
-          flare += f.w / (1.0 + dot(d, d) * 0.1);
+        // (They burn in the ends: the side stands are out of their reach.)
+        if (uFlareN > 0.0 && abs(vWorld.x) > 50.0) {
+          float flare = 0.0;
+          for (int i = 0; i < ${MAX_FLARES}; i++) {
+            if (float(i) >= uFlareN) break;
+            vec4 f = uFlares[i];
+            vec3 d = vWorld - f.xyz;
+            flare += f.w / (1.0 + dot(d, d) * 0.1);
+          }
+          c += alb * vec3(1.0, 0.36, 0.14) * flare * 3.2 + vec3(1.0, 0.3, 0.1) * flare * flare * 0.08;
         }
-        c += alb * vec3(1.0, 0.36, 0.14) * flare * 3.2 + vec3(1.0, 0.3, 0.1) * flare * flare * 0.08;
         // Phone torches once it's dark.
         c += vec3(1.0, 0.97, 0.9) * gTorch * uFlood * 1.6;
 
@@ -2060,7 +2065,7 @@ export function createStadium(homeColor: number, awayColor: number, club: Stadiu
           const flick = 0.75 + 0.25 * Math.sin(time * 31 + f.seed * 40) * Math.sin(time * 17.3 + f.seed * 13);
           U.uFlares.value[i++].set(f.x, f.y, f.z, fade * flick);
         }
-        for (; i < MAX_FLARES; i++) U.uFlares.value[i].w = 0;
+        U.uFlareN.value = i;
       }
       U.uExcite.value = excitement;
       U.uTifoOn.value += (tifo - U.uTifoOn.value) * 0.04;
