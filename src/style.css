@@ -228,7 +228,13 @@ html, body {
 
 .version {
   position: absolute; right: calc(14px + var(--safe-r)); bottom: calc(10px + var(--safe-b));
-  font-size: 13px; font-weight: 600; letter-spacing: 0.1em; color: var(--ink-dim); opacity: 0.7;
+  font-size: 13px; font-weight: 600; letter-spacing: 0.1em; color: var(--ink-dim);
+  display: flex; align-items: center; gap: 10px;
+}
+.version span { opacity: 0.7; }
+.menu .version button.update {
+  font-size: 13px; letter-spacing: 0.1em; padding: 6px 12px; background: transparent; color: var(--ink);
+  border: 1.5px solid rgba(244, 239, 227, 0.4); border-radius: 4px;
 }
 
 /* Sliding up on Pass / Through = lofted: the button lifts and shows an arrow. */

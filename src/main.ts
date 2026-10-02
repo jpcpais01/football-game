@@ -128,8 +128,20 @@ menu.innerHTML = `
 ui.appendChild(menu);
 const version = document.createElement('div');
 version.className = 'version';
-version.textContent = `v${__APP_VERSION__}`;
+version.innerHTML = `<span>v${__APP_VERSION__}</span><button class="update" aria-label="Check for update">Update ⟳</button>`;
 menu.appendChild(version);
+// Force-fetch the latest build: drop the service worker and its caches, then reload
+// (a plain reload could be answered from the precache).
+version.querySelector('.update')!.addEventListener('click', async (e) => {
+  (e.currentTarget as HTMLButtonElement).textContent = 'Updating…';
+  try {
+    const regs = (await navigator.serviceWorker?.getRegistrations()) ?? [];
+    await Promise.all(regs.map((r) => r.unregister()));
+    if ('caches' in window) await Promise.all((await caches.keys()).map((k) => caches.delete(k)));
+  } finally {
+    location.reload();
+  }
+});
 
 const pauseBtn = document.createElement('button');
 pauseBtn.className = 'pause-btn';
