@@ -206,6 +206,51 @@ function buildGeometries(): Record<PartName, THREE.BufferGeometry> {
   return { torso, pelvis, neck, head, hairShort, hairCurly, hairBun, upperArm, forearm, shortsLeg, thigh, shin, boot };
 }
 
+/**
+ * Soft-body bending on the GPU. Each instance carries aBend = (flex, twist, side) in radians;
+ * vertices rotate progressively about the part's origin, so the torso curves through the
+ * waist (spine) and thighs curve into the knee instead of hinging like a doll. The CPU side
+ * attaches child parts with the full rotation, which is exactly what the top/end vertices get.
+ */
+const BEND_GLSL = (kind: 'torso' | 'thigh') => /* glsl */ `
+attribute vec3 aBend;
+mat3 bendRot(vec3 a) {
+  float cx = cos(a.x), sx = sin(a.x), cy = cos(a.y), sy = sin(a.y), cz = cos(a.z), sz = sin(a.z);
+  mat3 rx = mat3(1.0, 0.0, 0.0, 0.0, cx, sx, 0.0, -sx, cx);
+  mat3 ry = mat3(cy, 0.0, -sy, 0.0, 1.0, 0.0, sy, 0.0, cy);
+  mat3 rz = mat3(cz, sz, 0.0, -sz, cz, 0.0, 0.0, 0.0, 1.0);
+  return ry * rx * rz;
+}
+float bendT(vec3 p) {
+  ${kind === 'torso' ? 'float t = clamp(p.y / 0.5, 0.0, 1.0); return t * t * (3.0 - 2.0 * t);' : 'float t = clamp(-p.y / 0.43, 0.0, 1.0); return t * t;'}
+}
+`;
+
+function injectBend(shader: { vertexShader: string }, kind: 'torso' | 'thigh'): void {
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', `#include <common>\n${BEND_GLSL(kind)}`)
+    .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\nobjectNormal = bendRot(aBend * bendT(position)) * objectNormal;')
+    .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed = bendRot(aBend * bendT(position)) * transformed;');
+}
+
+function withBend<T extends THREE.Material>(mat: T, kind: 'torso' | 'thigh'): T {
+  const orig = mat.onBeforeCompile.bind(mat);
+  mat.onBeforeCompile = (shader, r) => {
+    orig(shader, r);
+    injectBend(shader, kind);
+  };
+  mat.customProgramCacheKey = () => `bend-${kind}-${mat.uuid}`;
+  return mat;
+}
+
+/** Shadow-map material that bends the same way, so shadows match the body. */
+function bendDepth(kind: 'torso' | 'thigh'): THREE.MeshDepthMaterial {
+  const m = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+  m.onBeforeCompile = (shader) => injectBend(shader, kind);
+  m.customProgramCacheKey = () => `bend-depth-${kind}`;
+  return m;
+}
+
 /** Digits 0-9 in a strip, white on transparent, for shirt numbers. */
 function numberTexture(): THREE.CanvasTexture {
   const cv = document.createElement('canvas');
@@ -362,6 +407,13 @@ export class PlayersView {
   private s = new THREE.Vector3();
   private yAxis = new THREE.Vector3(0, 1, 0);
   private pose: DivePose = { roll: 0, lift: 0 };
+  // Body-physics springs per player (spine flex / side bend) and head yaw.
+  private sF = new Float32Array(22);
+  private spF = new Float32Array(22);
+  private sS = new Float32Array(22);
+  private spS = new Float32Array(22);
+  private headYaw = new Float32Array(22);
+  private lastTime = 0;
 
   constructor(match: Match) {
     this.n = match.players.length;
@@ -385,7 +437,7 @@ export class PlayersView {
     const hair = litMaterial({ groundAO: true, roughness: 0.9 });
     const cloth = litMaterial({ groundAO: true, roughness: 0.8 });
     const mats: Record<PartName, THREE.Material> = {
-      torso: torsoMaterial(numberTexture()),
+      torso: withBend(torsoMaterial(numberTexture()), 'torso'),
       pelvis: cloth,
       neck: skin,
       head: headMaterial(),
@@ -395,7 +447,7 @@ export class PlayersView {
       upperArm: sleeveMaterial(),
       forearm: forearmMaterial(),
       shortsLeg: trimmedMaterial('diffuseColor.rgb = mix(diffuseColor.rgb, vTrim, (1.0 - smoothstep(0.015, 0.025, abs(vUv2.x - 0.25))) * 0.9 + band(vUv2.y, 0.9, 1.0) * 0.6);'),
-      thigh: skin,
+      thigh: withBend(litMaterial({ groundAO: true, roughness: 0.62 }), 'thigh'),
       shin: trimmedMaterial('diffuseColor.rgb = mix(diffuseColor.rgb, vTrim, band(vUv2.y, 0.07, 0.11) + band(vUv2.y, 0.14, 0.17));'),
       boot: trimmedMaterial('diffuseColor.rgb = mix(diffuseColor.rgb, vTrim, 1.0 - smoothstep(0.018, 0.03, vWorldPos.y));', 0.5),
     };
@@ -405,6 +457,7 @@ export class PlayersView {
       const count = this.n * per[name];
       const geo = geos[name];
       const add = (attr: string, size: number) => geo.setAttribute(attr, new THREE.InstancedBufferAttribute(new Float32Array(count * size), size));
+      if (name === 'torso' || name === 'thigh') add('aBend', 3);
       if (name === 'torso') {
         add('aTrim', 3);
         add('aNumCol', 3);
@@ -419,6 +472,7 @@ export class PlayersView {
       mesh.frustumCulled = false;
       mesh.castShadow = true;
       mesh.receiveShadow = true;
+      if (name === 'torso' || name === 'thigh') mesh.customDepthMaterial = bendDepth(name);
       this.group.add(mesh);
       this.parts[name] = { mesh, perPlayer: per[name] };
     }
@@ -519,8 +573,13 @@ export class PlayersView {
   }
 
   update(match: Match, alpha: number, time: number): void {
+    const dt = clamp(time - this.lastTime, 0, 0.05);
+    this.lastTime = time;
     const held = match.heldBy;
     const throwIn = match.setPiece?.kind === 'throw';
+    const ball = match.ball;
+    const bend = this.parts.torso.mesh.geometry.getAttribute('aBend') as THREE.InstancedBufferAttribute;
+    const kneeBend = this.parts.thigh.mesh.geometry.getAttribute('aBend') as THREE.InstancedBufferAttribute;
     for (const p of match.players) {
       const x = lerp(p.prevPos.x, p.pos.x, alpha);
       const z = lerp(p.prevPos.z, p.pos.z, alpha);
@@ -532,19 +591,24 @@ export class PlayersView {
       const s = clamp(speed / 8.5, 0, 1);
       const phi = p.stridePhase;
       const h = p.look.height;
+      const id = p.id;
 
       // ---------------- base gait
       const sinP = Math.sin(phi);
       const cosP = Math.cos(phi);
       const moveAmt = smoothstep(0.15, 1.2, speed);
-      const aHip = (0.12 + 0.62 * s) * moveAmt;
+      // Feet shuffle when turning on the spot (the sim advances the stride for it).
+      const stepAmt = Math.max(moveAmt, Math.min(1, Math.abs(df) * 18));
+      const aHip = (0.12 + 0.62 * s) * stepAmt;
       let hipL = aHip * sinP;
       let hipR = -aHip * sinP;
-      const kneeAmp = (0.25 + 1.35 * s) * moveAmt;
+      const kneeAmp = (0.25 + 1.35 * s) * stepAmt;
       let kneeL = 0.06 + kneeAmp * Math.pow(Math.max(0, cosP), 1.4) + 0.12 * s;
       let kneeR = 0.06 + kneeAmp * Math.pow(Math.max(0, -cosP), 1.4) + 0.12 * s;
       let legOutL = 0.04;
       let legOutR = 0.04;
+      let legYawL = 0;
+      let legYawR = 0;
       const aArm = (0.1 + 0.7 * s) * moveAmt;
       let armL = -aArm * sinP;
       let armR = aArm * sinP;
@@ -553,20 +617,30 @@ export class PlayersView {
       let armOutL = 0.1;
       let armOutR = 0.1;
       let hipY = HIP_Y - (0.012 + 0.05 * s) * Math.abs(cosP) * moveAmt;
-      let twist = 0.14 * s * sinP * moveAmt;
-      let leanF = p.leanFwd;
+      // Hips rotate and drop with each stride; the shoulders counter-rotate.
+      let pelvisYaw = -0.1 * s * sinP * moveAmt;
+      let pelvisRoll = 0.05 * (0.3 + s) * sinP * moveAmt;
+      let twist = 0.16 * s * sinP * moveAmt;
+      let flexExtra = 0;
+      let sideExtra = 0;
+      let leanF = p.leanFwd * 0.5;
       let leanS = -p.leanSide;
       let roll = 0;
       let lift = 0;
       let headPitch = 0;
-      let chestLean = 0;
+      let headLook = true;
 
       // Idle breathing.
       if (moveAmt < 1) {
         const br = Math.sin(time * 2.1 + p.id) * 0.015 * (1 - moveAmt);
         armOutL += br;
         armOutR += br;
+        flexExtra += br * 0.6;
       }
+
+      // Into a turn: the outside arm swings wider for balance.
+      armOutL += Math.max(0, -leanS) * 0.5;
+      armOutR += Math.max(0, leanS) * 0.5;
 
       // Keeper ready stance.
       if (p.role === 'GK' && speed < 2.5 && p.action === 'none' && held !== p && match.phase === 'play') {
@@ -579,11 +653,11 @@ export class PlayersView {
         armOutR = 0.45;
         armL = -0.35;
         armR = -0.35;
-        leanF += 0.18;
+        flexExtra += 0.22;
         legOutL = legOutR = 0.12;
       }
 
-      // Dribble touch: quick flick of the leading leg.
+      // Dribble touch: quick flick of the leading leg, body over the ball.
       if (p.action === 'none' && p.sinceTouch < 0.2 && match.owner === p) {
         const k = Math.sin((p.sinceTouch / 0.2) * Math.PI);
         if (sinP > 0) {
@@ -593,48 +667,79 @@ export class PlayersView {
           hipR += 0.35 * k;
           kneeR *= 1 - 0.5 * k;
         }
+        flexExtra += 0.08 * k;
       }
 
       // ---------------- actions
       const pr = p.actionDur > 0 ? clamp(p.actionT / p.actionDur, 0, 1) : 0;
       switch (p.action) {
         case 'kick': {
+          // Body mechanics depend on the strike: side-foot passes open the hip toward the
+          // target; driven shots lean over the ball; lofted balls and over-hit shots lean
+          // back; the follow-through goes where the ball goes.
+          const type = p.kickType;
+          const power = Math.min(1.15, p.kickPower);
+          const shot = type === 'shot';
+          const lofted = type === 'lob' || type === 'cross' || type === 'clear' || (type === 'through' && power > 0);
+          const ground = !shot && !lofted;
+          const back = ground ? -0.5 : shot ? -(0.7 + 0.35 * Math.min(1, power)) : -1.0;
+          const fwd = ground ? 0.75 : shot ? 1.15 + 0.35 * power : 1.45;
+          const kneeTop = ground ? 1.15 : 1.6;
           let sw: number;
           let kn: number;
           if (pr < 0.4) {
-            sw = lerp(0, -0.85, pr / 0.4);
-            kn = lerp(0.2, 1.55, pr / 0.4);
+            sw = lerp(0, back, pr / 0.4);
+            kn = lerp(0.2, kneeTop, pr / 0.4);
           } else if (pr < 0.62) {
             const t = (pr - 0.4) / 0.22;
-            sw = lerp(-0.85, 1.3, t);
-            kn = lerp(1.55, 0.08, t);
+            sw = lerp(back, fwd, t);
+            kn = lerp(kneeTop, 0.08, t);
           } else {
             const t = (pr - 0.62) / 0.38;
-            sw = lerp(1.3, 0.25, t);
+            sw = lerp(fwd, 0.25, t);
             kn = lerp(0.08, 0.3, t);
           }
-          if (p.kickLeg > 0) {
+          // Target direction in the body's frame (+ = to the player's left).
+          const tgt = clamp(-p.kickRel, -1.2, 1.2);
+          const swingPhase = smoothstep(0.35, 0.65, pr);
+          const right = p.kickLeg > 0;
+          // Side-foot: hip turns out so the inside of the foot faces the target.
+          const open = ground ? (right ? -0.6 : 0.6) : 0;
+          const across = tgt * 0.55 * swingPhase;
+          const plantKnee = shot ? 0.42 : 0.28;
+          const counterArm = shot || lofted ? 1.05 : 0.8;
+          if (right) {
             hipR = sw;
             kneeR = kn;
+            legYawR = open + across;
             hipL = 0.12;
-            kneeL = 0.25;
-            armOutL = 0.85;
-            armL = -0.4;
-            armOutR = 0.5;
-            armR = 0.3;
+            kneeL = plantKnee;
+            armOutL = counterArm;
+            armL = -0.45;
+            armOutR = 0.45;
+            armR = 0.35;
           } else {
             hipL = sw;
             kneeL = kn;
+            legYawL = open + across;
             hipR = 0.12;
-            kneeR = 0.25;
-            armOutR = 0.85;
-            armR = -0.4;
-            armOutL = 0.5;
-            armL = 0.3;
+            kneeR = plantKnee;
+            armOutR = counterArm;
+            armR = -0.45;
+            armOutL = 0.45;
+            armL = 0.35;
           }
-          twist = -p.kickLeg * 0.25 * Math.sin(pr * Math.PI);
-          chestLean = -0.12 * Math.sin(pr * Math.PI);
-          hipY -= 0.04;
+          const wind = Math.sin(pr * Math.PI);
+          // Shoulders wind up away from the kicking leg, then unwind toward the target.
+          twist = -p.kickLeg * 0.28 * wind * (1 - swingPhase) + tgt * 0.4 * swingPhase;
+          pelvisYaw = p.kickLeg * 0.2 * wind * (1 - swingPhase) + tgt * 0.3 * swingPhase;
+          const lean = ground ? 0.08 : lofted ? -0.22 : power > 0.95 ? -0.24 : 0.16 - power * 0.06;
+          flexExtra += lean * smoothstep(0.25, 0.6, pr) * (1 - smoothstep(0.8, 1, pr));
+          sideExtra += -p.kickLeg * 0.12 * wind; // lean away from the kicking leg
+          hipY -= shot ? 0.06 : 0.04;
+          if (shot) lift = 0.05 * power * Math.max(0, Math.sin((pr - 0.6) * Math.PI * 2.5)) * (pr > 0.6 ? 1 : 0);
+          headLook = false;
+          headPitch = 0.25; // eyes on the ball at contact
           break;
         }
         case 'tackle': {
@@ -644,14 +749,15 @@ export class PlayersView {
           hipL = lerp(hipL, -0.3, k);
           kneeL = lerp(kneeL, 0.9, k);
           hipY -= 0.2 * k;
-          leanF += 0.3 * k;
+          leanF += 0.15 * k;
+          flexExtra += 0.3 * k;
           armOutL = armOutR = 0.6 * k + 0.1;
           break;
         }
         case 'slide': {
           const k = smoothstep(0, 0.18, pr) * (1 - smoothstep(0.75, 1, pr));
-          roll = 0;
-          leanF = lerp(leanF, -1.2, k);
+          leanF = lerp(leanF, -1.0, k);
+          flexExtra += 0.25 * k; // curl up over the legs
           hipY = lerp(hipY, 0.34, k);
           hipR = lerp(hipR, 1.45, k);
           kneeR = lerp(kneeR, 0.05, k);
@@ -673,7 +779,7 @@ export class PlayersView {
           hipY = HIP_Y;
           leanF = 0;
           leanS = 0;
-          // Both arms stretched along the body axis, past the head.
+          sideExtra += -side * 0.12 * k; // arch toward the ball
           armL = lerp(armL, -3.05, k);
           armR = lerp(armR, -3.05, k);
           armOutL = armOutR = lerp(0.1, 0.12, k);
@@ -681,26 +787,33 @@ export class PlayersView {
           hipL = hipR = lerp(hipL, 0.15, k);
           kneeL = lerp(kneeL, 0.5, k);
           kneeR = lerp(kneeR, 0.15, k);
+          headLook = false;
           break;
         }
         case 'header': {
           const k = Math.sin(pr * Math.PI);
           lift = 0.38 * k;
-          headPitch = 0.5 * Math.sin(Math.min(1, pr * 2) * Math.PI);
+          // Arch back, then snap the upper body through the ball.
+          flexExtra += pr < 0.45 ? -0.3 * (pr / 0.45) : lerp(-0.3, 0.35, smoothstep(0.45, 0.7, pr)) * (1 - smoothstep(0.75, 1, pr));
+          headPitch = 0.35 * Math.sin(Math.min(1, pr * 2) * Math.PI);
           armOutL = armOutR = 0.7 * k + 0.1;
-          kneeL = kneeR = 0.4 * k + 0.1;
+          armL = armR = -0.4 * k;
+          kneeL = kneeR = 0.45 * k + 0.1;
+          headLook = false;
           break;
         }
         case 'throw': {
           const k = pr < 0.5 ? pr / 0.5 : 1 - (pr - 0.5) / 0.5;
           armL = armR = lerp(-2.8, -1.4, 1 - k);
           elbowL = elbowR = lerp(1.4, 0.2, 1 - k);
-          chestLean = 0.15 * (1 - k);
+          flexExtra += lerp(-0.25, 0.25, smoothstep(0.3, 0.7, pr));
           break;
         }
         case 'stumble': {
           const k = Math.sin(pr * Math.PI);
-          leanF += 0.35 * k;
+          leanF += 0.2 * k;
+          flexExtra += 0.35 * k;
+          sideExtra += Math.sin(p.id * 3.1) * 0.25 * k;
           armOutL = armOutR = 0.9 * k;
           armL = armR = -0.5 * k;
           break;
@@ -713,6 +826,7 @@ export class PlayersView {
           armL = armR = -2.8;
           elbowL = elbowR = 1.5;
           armOutL = armOutR = 0.2;
+          flexExtra -= 0.12;
         } else {
           armL = armR = -1.0;
           elbowL = elbowR = 0.9;
@@ -724,8 +838,34 @@ export class PlayersView {
         armL = armR = -2.7;
         armOutL = armOutR = 0.5;
         elbowL = elbowR = 0.2;
+        flexExtra -= 0.25;
       } else if (match.phase === 'goal' && match.scorer && match.scorer.team === p.team && match.phaseT > 1.2) {
         armOutL = armOutR = 0.3 + 0.2 * Math.sin(time * 9 + p.id);
+      }
+
+      // ---------------- body physics: a springy spine driven by the movement
+      // The upper body carries inertia: it pitches with acceleration and braking, swings
+      // past and settles (underdamped spring), and bends a little out of turns. The head
+      // stays level and tracks the ball.
+      const flexTarget = clamp(p.leanFwd * 0.8 - p.accelFwd * 0.012 + s * 0.06 + flexExtra, -0.6, 0.7);
+      const sideTarget = clamp(-leanS * 0.4 + sideExtra, -0.45, 0.45);
+      const w = 13;
+      const zeta = 0.42;
+      this.spF[id] += (w * w * (flexTarget - this.sF[id]) - 2 * zeta * w * this.spF[id]) * dt;
+      this.sF[id] += this.spF[id] * dt;
+      this.spS[id] += (w * w * (sideTarget - this.sS[id]) - 2 * zeta * w * this.spS[id]) * dt;
+      this.sS[id] += this.spS[id] * dt;
+      const spineFlex = this.sF[id];
+      const spineSide = this.sS[id];
+
+      if (headLook) {
+        const rel = Math.atan2(ball.pos.z - z, ball.pos.x - x) - facing;
+        const r = Math.atan2(Math.sin(rel), Math.cos(rel));
+        const limit = 1.1 - 0.6 * s;
+        const want = Math.abs(r) < 2.4 ? clamp(-r, -limit, limit) : 0;
+        this.headYaw[id] += (want - this.headYaw[id]) * (1 - Math.exp(-dt * 6));
+      } else {
+        this.headYaw[id] *= Math.exp(-dt * 8);
       }
 
       // ---------------- skeleton
@@ -738,17 +878,24 @@ export class PlayersView {
       // Whole-body tilt about the ground point: lean into turns / accelerations.
       this.chain(R, R, 0, lift, 0, leanF, 0, leanS + roll);
 
-      const P = this.chain(this.pelvis, R, 0, hipY, 0, 0, twist * -0.4, 0);
-      const C = this.chain(this.chest, P, 0, 0.04, 0, chestLean + 0.04, twist, 0);
-      const id = p.id;
+      const P = this.chain(this.pelvis, R, 0, hipY, 0, 0, pelvisYaw, pelvisRoll);
       const build = p.look.build;
       this.put('pelvis', id, P, build, 1, 1);
-      this.put('torso', id, C, build, 1, 1);
+      // Torso mesh sits at the waist unrotated; the shader bends it through the spine.
+      const T = this.chain(this.j3, P, 0, 0.04, 0, 0, 0, 0);
+      this.put('torso', id, T, build, 1, 1);
+      const flex = spineFlex + 0.04;
+      const tw = twist - pelvisYaw;
+      const side = spineSide - pelvisRoll;
+      bend.setXYZ(id, flex, tw, side);
+      const C = this.chain(this.chest, T, 0, 0, 0, flex, tw, side);
       this.chain(this.j1, C, 0, 0.58, 0, 0, 0, 0);
       this.put('neck', id, this.j1);
 
-      // Head and hair.
-      this.chain(this.j1, C, 0, 0.6, 0, headPitch - leanF * 0.4, -twist * 0.5, 0);
+      // Head: level gaze (counter the body's pitch and roll), turned toward the ball.
+      const headLevel = -(leanF + flex) * 0.75;
+      const headRoll = -(leanS + roll * 0.2 + side) * 0.6;
+      this.chain(this.j1, C, 0, 0.6, 0, headPitch + headLevel, this.headYaw[id], headRoll);
       this.put('head', id, this.j1);
       const style = p.look.hairStyle;
       const parts = this.parts;
@@ -762,26 +909,30 @@ export class PlayersView {
 
       // Arms (left = +x local).
       for (let sd = 0; sd < 2; sd++) {
-        const side = sd === 0 ? 1 : -1;
+        const sideSign = sd === 0 ? 1 : -1;
         const swing = sd === 0 ? armL : armR;
         const out = sd === 0 ? armOutL : armOutR;
         const elbow = sd === 0 ? elbowL : elbowR;
-        this.chain(this.j1, C, side * 0.198 * build, 0.5, 0, -swing, 0, side * out);
+        this.chain(this.j1, C, sideSign * 0.198 * build, 0.5, 0, -swing, 0, sideSign * out);
         this.put('upperArm', id * 2 + sd, this.j1);
         this.chain(this.j2, this.j1, 0, -0.29, 0, -elbow, 0, 0);
         this.put('forearm', id * 2 + sd, this.j2);
       }
 
-      // Legs.
+      // Legs: the thigh curves into a soft knee (shader bend), the shin takes the rest.
       for (let sd = 0; sd < 2; sd++) {
-        const side = sd === 0 ? 1 : -1;
+        const sideSign = sd === 0 ? 1 : -1;
         const hip = sd === 0 ? hipL : hipR;
         const knee = sd === 0 ? kneeL : kneeR;
         const out = sd === 0 ? legOutL : legOutR;
-        this.chain(this.j1, P, side * 0.092, -0.03, 0, -hip, 0, side * out);
+        const yaw = sd === 0 ? legYawL : legYawR;
+        this.chain(this.j1, P, sideSign * 0.092, -0.03, 0, -hip, yaw, sideSign * out);
         this.put('shortsLeg', id * 2 + sd, this.j1);
         this.put('thigh', id * 2 + sd, this.j1);
-        this.chain(this.j2, this.j1, 0, -THIGH, 0, knee, 0, 0);
+        const soft = knee * 0.22;
+        kneeBend.setXYZ(id * 2 + sd, soft, 0, 0);
+        this.chain(this.j2, this.j1, 0, 0, 0, soft, 0, 0);
+        this.chain(this.j2, this.j2, 0, -THIGH, 0, knee - soft, 0, 0);
         this.put('shin', id * 2 + sd, this.j2);
         // Keep the foot roughly level with the ground.
         const ankle = clamp(hip - knee, -1.2, 0.6) + (knee > 0.8 ? -0.35 : 0);
@@ -812,6 +963,8 @@ export class PlayersView {
         this.flood.setMatrixAt(id * PYLONS.length + k, this.sm);
       }
     }
+    bend.needsUpdate = true;
+    kneeBend.needsUpdate = true;
 
     for (const name of Object.keys(this.parts) as PartName[]) this.parts[name].mesh.instanceMatrix.needsUpdate = true;
     this.contact.instanceMatrix.needsUpdate = true;

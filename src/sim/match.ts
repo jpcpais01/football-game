@@ -670,9 +670,30 @@ export class Match {
           a.vel.z += nz * rv * sa;
           b.vel.x -= nx * rv * (1 - sa);
           b.vel.z -= nz * rv * (1 - sa);
+          // A real shoulder-to-shoulder impact can knock the weaker / slower-braced player
+          // off balance (and off the ball).
+          if (rv < -3.2) this.bump(a, b, -rv);
         }
       }
     }
+  }
+
+  private bump(a: Player, b: Player, impact: number): void {
+    if (a.team === b.team || a.balanceCD > 0 || b.balanceCD > 0) return;
+    // Who gives way: strength, speed into the contact and a little luck.
+    const sa = a.attrs.strength + a.speed * 0.05 + this.rng.next() * 0.35;
+    const sb = b.attrs.strength + b.speed * 0.05 + this.rng.next() * 0.35;
+    const loser = sa < sb ? a : b;
+    a.balanceCD = b.balanceCD = 1.2;
+    if (this.rng.next() > clamp((impact - 3.2) / 3, 0.15, 0.75)) return;
+    if (loser.action === 'none') loser.startAction('stumble', 0.4 + impact * 0.04, 0, 0);
+    if (this.owner === loser) {
+      this.owner = null;
+      const b2 = this.ball;
+      b2.vel.x += (this.rng.next() - 0.5) * 3;
+      b2.vel.z += (this.rng.next() - 0.5) * 3;
+    }
+    this.events.tackle = Math.max(this.events.tackle, 0.5);
   }
 
   private confineToPitch(): void {
@@ -720,6 +741,9 @@ export class Match {
       const side = -Math.sin(p.facing) * (this.ball.pos.x - p.pos.x) + Math.cos(p.facing) * (this.ball.pos.z - p.pos.z);
       p.kickLeg = side >= 0 ? 1 : -1;
       p.startAction(kind, dur, plan.dirX, plan.dirZ);
+      p.kickType = plan.type;
+      p.kickPower = plan.power;
+      p.kickRel = angleDiff(p.facing, Math.atan2(plan.dirZ, plan.dirX));
     }
 
     if ((p.action === 'kick' || p.action === 'throw') && !p.actionDone && p.actionT >= p.actionDur * 0.55) {

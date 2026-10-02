@@ -55,8 +55,8 @@ export const PLAYER = {
   topSpeed: 8.6,
   jogSpeed: 5.6,
   accel: 6.5,
-  brake: 9.5,
-  lateral: 9,
+  brake: 8.0,
+  lateral: 8.5,
   dribbleSpeedFactor: 0.9,
 } as const;
 

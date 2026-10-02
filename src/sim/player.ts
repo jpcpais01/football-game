@@ -55,6 +55,14 @@ export class Player {
   actionDone = false;
   kickLeg = 1; // 1 = right, -1 = left
   plan: KickPlan | null = null;
+  /** The strike in progress (for body mechanics): type, power, target angle relative to the body. */
+  kickType: KickPlan['type'] = 'pass';
+  kickPower = 0;
+  kickRel = 0;
+  /** Smoothed forward acceleration (m/s²), used for body inertia. */
+  accelFwd = 0;
+  /** Seconds before this player can be knocked off balance again. */
+  balanceCD = 0;
   touchCooldown = 0;
   stamina = 1;
   sprinting = false;
@@ -190,8 +198,11 @@ export class Player {
         const aMax = along > 0 ? (accel * Math.max(0.1, 1 - Math.pow(sp / (top + 0.4), 1.6)) + 0.6) * dt : PLAYER.brake * dt;
         along = clamp(along, -aMax, aMax);
         const lat = Math.sqrt(lx * lx + lz * lz);
-        // Turning harder at speed: lateral grip limit (centripetal accel).
-        const latMax = (PLAYER.lateral * (0.85 + 0.2 * this.attrs.accel)) * dt;
+        // Turning harder at speed: lateral grip limit (centripetal accel). Direction changes
+        // happen through the planted foot, so grip pulses with the stride (strongest with a
+        // foot under the body), which gives cuts a natural rhythm.
+        const plant = Math.cos(this.stridePhase);
+        const latMax = PLAYER.lateral * (0.85 + 0.2 * this.attrs.accel) * (0.78 + 0.44 * plant * plant) * dt;
         if (lat > latMax) {
           lx *= latMax / lat;
           lz *= latMax / lat;
@@ -213,6 +224,8 @@ export class Player {
       latAcc = ((this.vel.z - vz) * (vx / Math.max(sp, 0.01)) - (this.vel.x - vx) * (vz / Math.max(sp, 0.01))) / dt;
     }
     const k = 1 - Math.exp(-dt * 8);
+    this.accelFwd += (clamp(accelFwd, -12, 12) - this.accelFwd) * (1 - Math.exp(-dt * 10));
+    this.balanceCD = Math.max(0, this.balanceCD - dt);
     this.leanFwd += (clamp(accelFwd * 0.03 + nsp * 0.018, -0.25, 0.35) - this.leanFwd) * k;
     this.leanSide += (clamp(-latAcc * 0.035, -0.35, 0.35) - this.leanSide) * k;
 
@@ -230,7 +243,10 @@ export class Player {
       const turnRate = 11 - nsp * 0.75;
       const d = angleDiff(this.facing, want);
       const step = turnRate * dt;
-      this.facing += clamp(d, -step, step);
+      const turn = clamp(d, -step, step);
+      this.facing += turn;
+      // Turning on the spot still takes steps: the feet shuffle round with the body.
+      if (nsp < 2.5) this.stridePhase += Math.abs(turn) * 1.6 * (1 - nsp / 2.5);
     }
 
     // Gait: one step = half a stride cycle.
