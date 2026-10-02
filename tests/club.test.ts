@@ -99,7 +99,7 @@ describe('club', () => {
       const m = new Match(100 + s, { teams: [team('legendary', s, 0), team('common', 50 + s, 1)] });
       m.autoPlay = true;
       const input = makeInput();
-      for (let i = 0; i < 120 * 400 && m.phase !== 'fulltime'; i++) m.step(input);
+      for (let i = 0; i < 120 * 500 && m.phase !== 'fulltime'; i++) m.step(input);
       strong += m.teams[0].score;
       weak += m.teams[1].score;
     }

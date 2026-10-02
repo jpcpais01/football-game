@@ -63,6 +63,13 @@ html, body {
   background: rgba(20, 26, 22, 0.6); border-radius: 4px; font-weight: 600;
   font-variant-numeric: tabular-nums; min-width: 46px; justify-content: center;
 }
+/* The fourth official's board: added time, lit when the half reaches 45' / 90'. */
+.scoreboard .added {
+  display: none; align-items: center; padding: 0 7px; margin-left: 3px;
+  background: #1f8f3a; color: #fff; border-radius: 4px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.scoreboard .added.show { display: flex; }
 
 .banner {
   position: absolute; top: calc(48px + var(--safe-t)); left: 50%; transform: translate(-50%, -6px);

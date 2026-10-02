@@ -10,11 +10,13 @@ export class Hud {
   private homeScore: HTMLElement;
   private awayScore: HTMLElement;
   private clock: HTMLElement;
+  /** The fourth official's board: +N, up once the half reaches 45' or 90'. */
+  private added: HTMLElement;
   private banner: HTMLElement;
   private caption: HTMLElement;
   private captionTitle: HTMLElement;
   private captionSub: HTMLElement;
-  private last = { h: -1, a: -1, min: -1, banner: '', caption: '' };
+  private last = { h: -1, a: -1, clock: '', banner: '', caption: '' };
   private captionUntil = 0;
   private card: HTMLElement;
   /** Score shown until the goal's score card reveals the new one. */
@@ -33,6 +35,7 @@ export class Hud {
         <div class="score"><b class="hs">0</b><em>–</em><b class="as">0</b></div>
         <div class="team away"><span>${a.info.short}</span><i style="background:${hex(a.info.kit.shirt)}"></i></div>
         <div class="clock">0'</div>
+        <div class="added"></div>
       </div>
       <div class="banner"></div>
       <div class="caption"><div class="c-title"></div><div class="c-sub"></div></div>
@@ -51,6 +54,7 @@ export class Hud {
     this.homeScore = this.root.querySelector('.hs')!;
     this.awayScore = this.root.querySelector('.as')!;
     this.clock = this.root.querySelector('.clock')!;
+    this.added = this.root.querySelector('.added')!;
     this.banner = this.root.querySelector('.banner')!;
     this.caption = this.root.querySelector('.caption')!;
     this.captionTitle = this.root.querySelector('.c-title')!;
@@ -66,7 +70,7 @@ export class Hud {
     const [h, a] = m.teams;
     this.held = [h.score - (team === 0 ? 1 : 0), a.score - (team === 1 ? 1 : 0)];
     const s = m.scorer;
-    this.reveal = { at: revealAt, team, line: `${s ? (s.name ? s.name.split(' ').slice(-1)[0] : '#' + (s.index + 1)) + ' · ' : ''}${m.teams[team].info.name} · ${Math.min(m.displayMinute, m.half === 1 ? 45 : 90)}'` };
+    this.reveal = { at: revealAt, team, line: `${s ? (s.name ? s.name.split(' ').slice(-1)[0] : '#' + (s.index + 1)) + ' · ' : ''}${m.teams[team].info.name} · ${m.clockLabel}` };
   }
 
   private showCard(m: Match, team: number, line: string, now: number): void {
@@ -94,7 +98,8 @@ export class Hud {
     (home.querySelector('i') as HTMLElement).style.background = hex(h.info.kit.shirt);
     away.querySelector('span')!.textContent = a.info.short;
     (away.querySelector('i') as HTMLElement).style.background = hex(a.info.kit.shirt);
-    this.last.h = this.last.a = this.last.min = -1;
+    this.last.h = this.last.a = -1;
+    this.last.clock = '';
   }
 
   setVisible(v: boolean): void {
@@ -133,10 +138,13 @@ export class Hud {
       this.awayScore.textContent = String(as);
       this.last.a = as;
     }
-    const min = Math.min(m.displayMinute, m.half === 1 ? 45 : 90);
-    if (min !== this.last.min) {
-      this.clock.textContent = `${min}'`;
-      this.last.min = min;
+    const label = m.clockLabel;
+    if (label !== this.last.clock) {
+      this.clock.textContent = label;
+      const board = label.includes('+');
+      this.added.textContent = board ? `+${m.addedTime}` : '';
+      this.added.classList.toggle('show', board);
+      this.last.clock = label;
     }
     let banner = '';
     if (m.phase === 'setpiece' && m.setPiece) {
