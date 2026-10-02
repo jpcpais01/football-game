@@ -1,5 +1,6 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.61', note: 'A new home ground: the Old Ground, a second-division classic. Four separate stands, lattice floodlight pylons in the open corners, a covered Shed for the home end, an away cage, terraced houses and a church spire beyond. Pick it under Club, Kit, Home ground.' },
   { v: '0.60.2', note: 'The score card after a goal now pops up in the middle of the screen.' },
   { v: '0.60', note: 'Goal kicks seen from behind the keeper, like free kicks. The other side’s goal kicks, direct free kicks and penalties too: the camera drops in behind their taker as he lines up.' },
   { v: '0.59', note: 'Five body types — lean, athletic, muscular, stocky, tall & lanky — read from each player’s height, weight and strength. Proportions, limb thickness and length now differ; everyone still stands at his real height. Shown in the squad.' },
