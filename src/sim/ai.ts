@@ -1150,22 +1150,20 @@ export class AI {
     const team = m.teams[p.team];
     const dir = team.dir;
     if (sp.taker === p) {
-      // Stand just behind the ball, facing into play.
-      let fx = dir;
-      let fz = 0;
-      if (sp.kind === 'throw') {
-        fx = 0;
-        fz = -Math.sign(sp.z);
-      } else if (sp.kind === 'corner') {
-        fx = -Math.sign(sp.x) * 0.6;
-        fz = -Math.sign(sp.z);
+      // Stand behind the ball facing into play (a run-up for shots from a dead ball).
+      const f = m.setPieceFacing(sp);
+      const back = m.setPieceBack(sp);
+      const runUp = sp.kind === 'penalty' || sp.direct;
+      if (runUp && p.plan) {
+        // Approach: run up and strike.
+        this.moveTo(p, sp.x - f.x * 0.35, sp.z - f.z * 0.35, false, false);
+        p.wantSpeed = Math.min(p.wantSpeed, 4.2);
+        p.facing = Math.atan2(sp.z - p.pos.z, sp.x - p.pos.x);
+        return;
       }
-      const n = Math.hypot(fx, fz);
-      fx /= n;
-      fz /= n;
-      const back = sp.kind === 'throw' ? 0.05 : 0.45;
-      const sx = sp.x - fx * back;
-      const sz = sp.z - fz * back;
+      // Run-ups are taken from a little to the side, like real takers.
+      const sx = sp.x - f.x * back + (runUp ? f.z * back * 0.45 : 0);
+      const sz = sp.z - f.z * back - (runUp ? f.x * back * 0.45 : 0);
       const d = dist2D(p.pos.x, p.pos.z, sx, sz);
       if (d > 0.3) {
         this.moveTo(p, sx, sz, d > 3, false);
@@ -1175,12 +1173,12 @@ export class AI {
       p.moveX = 0;
       p.moveZ = 0;
       p.wantSpeed = 0;
-      p.facing = Math.atan2(fz, fx);
-      p.lookTarget.set(p.pos.x + fx, 0, p.pos.z + fz);
+      p.facing = runUp ? Math.atan2(sp.z - p.pos.z, sp.x - p.pos.x) : Math.atan2(f.z, f.x);
+      p.lookTarget.set(sp.x + f.x * 20, 0, sp.z + f.z * 20);
       p.lookAt = p.lookTarget;
       if (sp.kind === 'throw' && m.heldBy !== p) m.catchBall(p);
       const human = p.team === m.humanTeam;
-      const wait = human ? 7 : 1.3;
+      const wait = human ? (runUp ? 12 : 7) : runUp ? 2.6 : sp.kind === 'freekick' ? 1.8 : 1.3;
       if (sp.t > wait && !p.plan) this.planSetPiece(p);
       return;
     }
@@ -1196,20 +1194,55 @@ export class AI {
       p.lookAt = p.lookTarget;
       return;
     }
-    if (sp.kind === 'corner' && p.role !== 'GK') {
+    // Penalty: everyone was placed outside the box; just stand and watch.
+    if (sp.kind === 'penalty') {
+      p.moveX = 0;
+      p.moveZ = 0;
+      p.wantSpeed = 0;
+      p.lookTarget.copy(m.ball.pos);
+      p.lookAt = p.lookTarget;
+      return;
+    }
+    // The wall holds its line, eyes on the ball.
+    const wi = sp.wall ? sp.wall.players.indexOf(p) : -1;
+    if (wi >= 0) {
+      const [wx, wz] = sp.wall!.slots[wi];
+      this.moveTo(p, wx, wz, false, true);
+      return;
+    }
+    const spGoal = PITCH.halfL * m.teams[sp.team].dir; // goal being attacked by the restart
+    const boxBall = sp.kind === 'corner' || (sp.kind === 'freekick' && !sp.direct && Math.abs(sp.x - spGoal) < 40);
+    if (boxBall && p.role !== 'GK') {
+      // Ball into the box: attackers take their runs, defenders pick them up.
       const attackers = p.team === sp.team;
-      const goal = Math.sign(sp.x) * PITCH.halfL;
-      const sideDir = -Math.sign(sp.x); // into the pitch
+      const sideDir = -Math.sign(spGoal); // into the pitch
       const order = [2, 3, 9, 6, 7, 10, 8, 5, 1, 4];
       const idx = order.indexOf(p.index);
       if (attackers && idx >= 0 && idx < 5) {
         const s = BOX_SPOTS[idx];
-        x = goal + sideDir * Math.abs(s[0]);
+        x = spGoal + sideDir * Math.abs(s[0]);
         z = s[1];
       } else if (!attackers && idx >= 0 && idx < 7) {
         const s = BOX_SPOTS[idx % BOX_SPOTS.length];
-        x = goal + sideDir * (Math.abs(s[0]) - 0.8);
+        x = spGoal + sideDir * (Math.abs(s[0]) - 0.8);
         z = s[1] * 0.9;
+      } else {
+        this.slot(p, this.tmp);
+        x = this.tmp.x;
+        z = this.tmp.z;
+      }
+    } else if (sp.direct && p.role !== 'GK') {
+      // Shot on: a dummy runner beside the ball, two lurking for rebounds, defenders on the edge of the box.
+      const sideDir = -Math.sign(spGoal);
+      if (p.team === sp.team && p.index === 8) {
+        x = sp.x - m.teams[sp.team].dir * 1.2;
+        z = sp.z + (sp.z > 0 ? -1.4 : 1.4);
+      } else if (p.team === sp.team && (p.index === 9 || p.index === 10)) {
+        x = spGoal + sideDir * 13;
+        z = (p.index === 9 ? -1 : 1) * 5;
+      } else if (p.team !== sp.team && (p.role === 'DEF' || p.index === 5)) {
+        x = spGoal + sideDir * 11.5;
+        z = ((p.index % 4) - 1.5) * 4;
       } else {
         this.slot(p, this.tmp);
         x = this.tmp.x;
@@ -1221,6 +1254,10 @@ export class AI {
       if (sp.kind === 'goalkick' && sp.team === p.team) {
         x = sp.x;
         z = sp.z;
+      } else if (sp.direct && sp.team !== p.team) {
+        // Free kick: the wall has the near post; the keeper covers the far side.
+        x = -dir * (PITCH.halfL - 0.6);
+        z = -(Math.sign(sp.z) || 1) * PITCH.goalHalfWidth * 0.3;
       }
     } else {
       this.slot(p, this.tmp);
@@ -1248,8 +1285,30 @@ export class AI {
     const team = m.teams[p.team];
     let target: Player | null = null;
     let type: 'pass' | 'lob' | 'cross' = 'pass';
+    const goalX = PITCH.halfL * team.dir;
+    if (sp.kind === 'penalty' || (sp.direct && m.rng.next() < 0.55 + p.attrs.shooting * 0.35)) {
+      // Pick a side and a height; now and then straight down the middle.
+      const r = m.rng.next();
+      const side = sp.kind === 'penalty' && r < 0.08 ? 0 : m.rng.next() < 0.5 ? -1 : 1;
+      const power = sp.kind === 'penalty' ? 0.35 + m.rng.next() * 0.6 : 0.6 + m.rng.next() * 0.35;
+      // dirZ only carries the side (|dirZ| > 0.3 picks a post).
+      const ax = Math.sign(goalX - p.pos.x) * 0.45;
+      const az = side * 0.9;
+      const n = Math.hypot(ax, az);
+      p.plan = { type: 'shot', dirX: ax / n, dirZ: az / n, power, targetId: -1, expires: m.time + 3, aimed: true };
+      return;
+    }
     if (sp.kind === 'kickoff') {
       target = team.players[7];
+    } else if (sp.kind === 'freekick') {
+      // Into the box when it's close enough to deliver, otherwise keep the ball.
+      if (Math.abs(sp.x - goalX) < 40) {
+        type = 'cross';
+        const cands = team.players.filter((q) => q.index === 2 || q.index === 3 || q.index === 9 || q.index === 10);
+        target = cands[Math.floor(m.rng.next() * cands.length)];
+      } else {
+        target = this.bestReceiver(p, false);
+      }
     } else if (sp.kind === 'corner') {
       type = 'cross';
       const cands = team.players.filter((q) => q.index === 2 || q.index === 3 || q.index === 9);
@@ -1416,21 +1475,40 @@ export class AI {
       this.moveTo(k, k.pos.x, cz - Math.sign(dz) * Math.min(Math.abs(dz), reachNow * 0.6), true, true);
       return true;
     }
-    if (!k.isBusy() && m.time > this.keeperDiveT[k.team] + 0.8) {
-      this.keeperDiveT[k.team] = m.time;
-      const s = Math.sign(dz) || 1;
-      const tt = Math.max(0.2, ct);
-      // Lateral push so the body line reaches the ball, then aim the body line at it.
-      const push = clamp((Math.abs(dz) - reachNow) / tt, 0, 6 + k.attrs.keeping * 2);
-      const aAtContact = Math.max(0, Math.abs(dz) - push * tt);
-      const plan = planDive(aAtContact, dh, k.look.height);
-      k.startAction('dive', 1.5, 0, s);
-      k.vel.set(-own * 0.6, 0, s * push);
-      this.diveHeight[k.id] = dh;
-      this.diveRoll[k.id] = plan.roll;
-      this.diveLift[k.id] = plan.lift;
-    }
+    if (!k.isBusy() && m.time > this.keeperDiveT[k.team] + 0.8) this.commitDive(k, dz, dh, Math.max(0.2, ct));
     return true;
+  }
+
+  /** Throw the body at a point `dz` along the line, `dh` high, arriving in `tt` seconds. */
+  private commitDive(k: Player, dz: number, dh: number, tt: number): void {
+    const own = -this.m.teams[k.team].dir;
+    this.keeperDiveT[k.team] = this.m.time;
+    const s = Math.sign(dz) || 1;
+    const reachNow = planDive(Math.abs(dz), dh, k.look.height).reach;
+    // Lateral push so the body line reaches the ball, then aim the body line at it.
+    const push = clamp((Math.abs(dz) - reachNow) / tt, 0, 6 + k.attrs.keeping * 2);
+    const aAtContact = Math.max(0, Math.abs(dz) - push * tt);
+    const plan = planDive(aAtContact, dh, k.look.height);
+    k.startAction('dive', 1.5, 0, s);
+    k.vel.set(-own * 0.6, 0, s * push);
+    this.diveHeight[k.id] = dh;
+    this.diveRoll[k.id] = plan.roll;
+    this.diveLift[k.id] = plan.lift;
+  }
+
+  /**
+   * Penalty: there's no time to react, so the keeper picks a side as the kick is struck.
+   * A good keeper reads the taker more often; sometimes he stays big in the middle.
+   */
+  penaltyGuess(k: Player, tz: number, ty: number): void {
+    const m = this.m;
+    const r = m.rng.next();
+    const read = 0.34 + k.attrs.keeping * 0.22;
+    if (r < 0.14) return; // stays: reacts to whatever comes at him
+    const side = r < 0.14 + read && Math.abs(tz) > 0.5 ? Math.sign(tz) : m.rng.next() < 0.5 ? -1 : 1;
+    const dz = side * (1.6 + m.rng.next() * 1.6) - k.pos.z;
+    const dh = clamp(r < 0.14 + read ? ty : 0.4 + m.rng.next() * 1.4, 0.2, 2.2);
+    this.commitDive(k, dz, dh, 0.42);
   }
 
   /** Hand contact for keepers. Returns true if the keeper dealt with the ball this step. */

@@ -23,6 +23,7 @@ export class Officials {
   refPointSide = 1;
   flagUp = [0, 0];
   private target = new V3();
+  private adv = false;
   private lastPhase = '';
 
   constructor() {
@@ -45,6 +46,12 @@ export class Officials {
       o.prevPos.copy(o.pos);
       o.vel.set(0, 0, 0);
     }
+  }
+
+  /** The foul behind the current stoppage, if any. */
+  private recentFoul(m: Match) {
+    const f = m.lastFoul;
+    return f && m.time - f.time < 12 && (m.phase === 'out' || m.setPiece?.kind === 'freekick' || m.setPiece?.kind === 'penalty') ? f : null;
   }
 
   /** Second-last defender line (x) of the team defending the goal at side `s` (±1). */
@@ -72,13 +79,20 @@ export class Officials {
     if (m.phase !== this.lastPhase) {
       if (m.phase === 'out' || (m.phase === 'setpiece' && this.lastPhase !== 'out')) {
         this.refPoint = 2.2;
-        const att = m.setPiece ? m.setPiece.team : m.possTeam;
+        const foul = this.recentFoul(m);
+        const att = foul ? foul.victim.team : m.setPiece ? m.setPiece.team : m.possTeam;
         this.refPointSide = m.teams[att]?.dir ?? 1;
         const li = ball.z < 0 ? 0 : 1;
-        if (Math.abs(ball.z) > PITCH.halfW - 1 || Math.abs(ball.x) > PITCH.halfL - 1) this.flagUp[li] = 2.0;
+        if (!foul && (Math.abs(ball.z) > PITCH.halfW - 1 || Math.abs(ball.x) > PITCH.halfL - 1)) this.flagUp[li] = 2.0;
       }
       this.lastPhase = m.phase;
     }
+    // Advantage: arm out toward the fouled side's attack, play on.
+    if (m.advantage && !this.adv) {
+      this.refPoint = 1.6;
+      this.refPointSide = m.teams[m.advantage.team].dir;
+    }
+    this.adv = m.advantage !== null;
     this.refPoint = Math.max(0, this.refPoint - dt);
     this.flagUp[0] = Math.max(0, this.flagUp[0] - dt);
     this.flagUp[1] = Math.max(0, this.flagUp[1] - dt);
@@ -104,6 +118,14 @@ export class Officials {
       const want = clamp(d, 12, 18);
       tx = ball.x + (dx / d) * want;
       tz = ball.z + (dz / d) * want;
+      // After a foul he goes to the spot to manage the free kick (or to the box for a penalty).
+      const foul = this.recentFoul(m);
+      if (foul && (m.phase === 'out' || m.phase === 'setpiece')) {
+        const fx = foul.penalty ? Math.sign(foul.x) * (PITCH.halfL - 14) : foul.x;
+        const fz = foul.penalty ? -6 : foul.z;
+        tx = fx + (fx > 0 ? -5 : 5);
+        tz = fz + (fz > 0 ? -4 : 4);
+      }
       if (m.setPiece?.kind === 'corner') {
         tx = Math.sign(m.setPiece.x) * (PITCH.halfL - 14);
         tz = -Math.sign(m.setPiece.z) * 6;
