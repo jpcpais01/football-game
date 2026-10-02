@@ -444,10 +444,12 @@ export class PlayersView {
   private headYaw: Float32Array;
   /** Everyone drawn: the 22 players plus the match officials. */
   private list: Player[];
+  private extra: Player[];
   officials: Officials | null = null;
   private lastTime = 0;
 
   constructor(match: Match, extra: Player[] = []) {
+    this.extra = extra;
     this.list = [...match.players, ...extra];
     this.n = this.list.length;
     this.sF = new Float32Array(this.n);
@@ -557,6 +559,8 @@ export class PlayersView {
   }
 
   applyColors(match: Match): void {
+    // A new match has new Player objects: always draw the current ones.
+    this.list = [...match.players, ...this.extra];
     const c = new THREE.Color();
     const set = (name: PartName, p: Player, hex: number) => {
       const part = this.parts[name];
@@ -650,6 +654,7 @@ export class PlayersView {
     const bend = this.parts.torso.mesh.geometry.getAttribute('aBend') as THREE.InstancedBufferAttribute;
     const kneeBend = this.parts.thigh.mesh.geometry.getAttribute('aBend') as THREE.InstancedBufferAttribute;
     const off = this.officials;
+    if (this.list[0] !== match.players[0]) this.applyColors(match);
     for (const p of this.list) {
       const x = lerp(p.prevPos.x, p.pos.x, alpha);
       const z = lerp(p.prevPos.z, p.pos.z, alpha);
