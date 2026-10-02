@@ -3,6 +3,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { PITCH } from '../sim/constants';
 import type { Atmosphere } from './atmosphere';
 import { SHARED, litMaterial } from './look';
+import type { Terraces } from '../ui/terraces';
 
 /**
  * An old English ground on a big night: four separate stands tight to the touchlines, the
@@ -31,10 +32,13 @@ export interface Stadium {
   /** Show the near stand (behind the broadcast camera) instead of its low paddock. */
   setNearStand(show: boolean): void;
   /** `tifo` 0..1: the ultras' card display (kick-off of each half). */
-  update(time: number, excitement: number, atmo: Atmosphere, tifo?: number): void;
+  update(time: number, excitement: number, atmo: Atmosphere, tifo?: number, terraces?: Terraces): void;
   /** The player's own photo, held up by fans in the stands (null = take it down). */
   setFanBanner(photo: CanvasImageSource | null): void;
 }
+
+/** Flares lighting the crowd at once (the brightest, nearest are what matter). */
+export const MAX_FLARES = 12;
 
 const U = {
   uTime: { value: 0 },
@@ -53,6 +57,10 @@ const U = {
   /** Background haze strength (1 = evening haze, low on a clear sunny day). */
   uHaze: { value: 1 },
   uTifoOn: { value: 0 },
+  /** The terraces: how hard the home / away end is singing, the beat (0..1), arms up. */
+  uChant: { value: new THREE.Vector4() },
+  /** Burning flares (xyz, brightness), lighting the fans around them. */
+  uFlares: { value: Array.from({ length: MAX_FLARES }, () => new THREE.Vector4()) },
 };
 
 // ------------------------------------------------------------------ the ground
@@ -276,6 +284,8 @@ interface CrowdOpts {
   shade: [number, number];
   /** Card mosaic over the home end: texture and its rect in uv metres (u0, u1, v0, v1). */
   tifo?: { tex: THREE.Texture; rect: THREE.Vector4 };
+  /** The travelling fans' card display in the away end. */
+  tifoB?: { tex: THREE.Texture; rect: THREE.Vector4 };
   /** Upper-tier card stunt: alternating colour bands all around. */
   stripes?: boolean;
   /** Seat colour (empty seats, the gaps between fans). */
@@ -301,6 +311,9 @@ function crowdMaterial(o: CrowdOpts): THREE.ShaderMaterial {
       uTifo: { value: o.tifo?.tex ?? null },
       uTifoRect: { value: o.tifo?.rect ?? new THREE.Vector4(0, 1, 0, 1) },
       uHasTifo: { value: o.tifo ? 1 : 0 },
+      uTifoB: { value: o.tifoB?.tex ?? null },
+      uTifoRectB: { value: o.tifoB?.rect ?? new THREE.Vector4(0, 1, 0, 1) },
+      uHasTifoB: { value: o.tifoB ? 1 : 0 },
       uStripes: { value: o.stripes ? 1 : 0 },
       uSeat: { value: new THREE.Color(o.seat ?? 0x2a3044) },
       uAisle: { value: new THREE.Vector2(...(o.aisles ?? [0, 0])) },
@@ -338,7 +351,11 @@ function crowdMaterial(o: CrowdOpts): THREE.ShaderMaterial {
       varying float vAway;
       varying vec3 vWorld;
       varying vec3 vNrm;
-      uniform float uTime, uExcite, uFogNear, uFogFar, uFlood, uHaze, uTifoOn, uHasTifo, uStripes, uHasLetters, uFill;
+      uniform float uTime, uExcite, uFogNear, uFogFar, uFlood, uHaze, uTifoOn, uHasTifo, uHasTifoB, uStripes, uHasLetters, uFill;
+      uniform vec4 uChant;
+      uniform vec4 uFlares[${MAX_FLARES}];
+      uniform sampler2D uTifoB;
+      uniform vec4 uTifoRectB;
       uniform vec2 uShade, uAisle;
       uniform vec3 uA, uB, uFog, uLight, uSeat, uVom;
       uniform sampler2D uTifo, uLetters;
@@ -389,6 +406,11 @@ function crowdMaterial(o: CrowdOpts): THREE.ShaderMaterial {
               on = step(0.0, t.x) * step(t.x, 1.0) * step(0.0, t.y) * step(t.y, 1.0) * ultra;
               card = texture2D(uTifo, clamp(t, 0.0, 1.0)).rgb;
             }
+            if (uHasTifoB > 0.5 && awayEnd > 0.5) {
+              vec2 t = (cardUv - uTifoRectB.xz) / (uTifoRectB.yw - uTifoRectB.xz);
+              on = step(0.0, t.x) * step(t.x, 1.0) * step(0.0, t.y) * step(t.y, 1.0);
+              card = texture2D(uTifoB, clamp(t, 0.0, 1.0)).rgb;
+            }
             if (uStripes > 0.5) {
               vec3 sc = mix(mix(uA, uB, awayEnd), vec3(0.95, 0.93, 0.88), step(0.5, fract(cardUv.x / 9.0)));
               card = mix(sc, card, on);
@@ -402,20 +424,25 @@ function crowdMaterial(o: CrowdOpts): THREE.ShaderMaterial {
           }
 
           // The fan: built and dressed by his seat's hash, standing or sitting, jumping with
-          // the ultras' bounce, up out of his seat when it gets loud.
+          // the ultras' bounce, up out of his seat when it gets loud. When an end sings, it
+          // bounces on the song's beat (rippling back up the rows), scarves go up, and for the
+          // Viking clap every arm goes up between the booms.
           float ph = hash(cell + 3.3) * 6.283;
-          float beat = sin(uTime * 7.5 - cell.y * 0.5 + hash(vec2(cell.y, 1.0)) * 0.6);
-          float jump = ultra * max(0.0, beat) * (0.08 + 0.1 * uExcite)
-            + (1.0 - ultra) * max(0.0, sin(uTime * (7.0 + hash(cell + 1.1) * 3.0) + ph)) * uExcite * uExcite * 0.18;
-          float stand = max(ultra, clamp(uExcite * 2.4 - 1.25 - hash(cell + 6.6) * 0.5, 0.0, 1.0));
+          float sing = ultra * uChant.x + awayEnd * uChant.y;
+          float idle = sin(uTime * 7.5 - cell.y * 0.5 + hash(vec2(cell.y, 1.0)) * 0.6);
+          float onBeat = sin((uChant.z - cell.y * 0.012 - hash(cell + 0.3) * 0.06) * 6.2832);
+          float beat = mix(idle * ultra, onBeat, step(0.05, sing));
+          float jump = max(ultra, step(0.05, sing)) * max(0.0, beat) * (0.08 + 0.1 * max(uExcite, sing)) * (1.0 - uChant.w * step(0.05, sing))
+            + (1.0 - max(ultra, awayEnd)) * max(0.0, sin(uTime * (7.0 + hash(cell + 1.1) * 3.0) + ph)) * uExcite * uExcite * 0.18;
+          float stand = max(max(ultra, awayEnd * step(0.05, sing)), clamp(uExcite * 2.4 - 1.25 - hash(cell + 6.6) * 0.5, 0.0, 1.0));
           float tall = 0.92 + 0.14 * hash(cell + 2.9);
           float wide = 0.85 + 0.3 * hash(cell + 1.7);
           float y = (hy - jump + (1.0 - stand) * 0.44) / tall;
           float x = (fx - sin(uTime * 1.3 + ph) * 0.02) / wide;
           float ax = abs(x);
           // Scarves held up overhead: always in the ends, everywhere when it's loud.
-          float scarfUp = step(hash(cell + 5.5), max(max(ultra, awayEnd) * 0.75, uExcite * uExcite * 0.8));
-          float armsUp = max(scarfUp, ultra * step(0.6, beat) * step(0.5, hash(cell + 7.7)));
+          float scarfUp = step(hash(cell + 5.5), max(max(max(ultra, awayEnd) * 0.75, uExcite * uExcite * 0.8), sing * 0.95)) * (1.0 - uChant.w * step(0.05, sing));
+          float armsUp = max(max(scarfUp, ultra * step(0.6, beat) * step(0.5, hash(cell + 7.7))), uChant.w * step(0.05, sing) * step(hash(cell + 2.2) * 0.25, uChant.z + 0.3));
 
           float h = hash(cell + 7.1);
           vec3 club = mix(uA, uB, step(hash(cell * 0.37 + floor(cell.x / 14.0)), mix(mix(0.22, 0.95, awayEnd), 0.02, ultra)));
@@ -517,7 +544,17 @@ function crowdMaterial(o: CrowdOpts): THREE.ShaderMaterial {
         // Rows under the roof sit in its shadow.
         c *= 1.0 - 0.38 * smoothstep(uShade.x, uShade.y, sv);
 
-        c = pow(c, vec3(2.2)) * uLight;
+        vec3 alb = pow(c, vec3(2.2));
+        c = alb * uLight;
+        // Flares: a flickering red-orange glow on everyone around them.
+        vec3 flare = vec3(0.0);
+        for (int i = 0; i < ${MAX_FLARES}; i++) {
+          vec4 f = uFlares[i];
+          if (f.w <= 0.0) continue;
+          vec3 d = vWorld - f.xyz;
+          flare += f.w / (1.0 + dot(d, d) * 0.1);
+        }
+        c += alb * vec3(1.0, 0.36, 0.14) * flare * 3.2 + vec3(1.0, 0.3, 0.1) * flare * flare * 0.08;
         // Phone torches once it's dark.
         c += vec3(1.0, 0.97, 0.9) * gTorch * uFlood * 1.6;
 
@@ -545,6 +582,45 @@ export interface StadiumClub {
 function drawCrest(c: CanvasRenderingContext2D, img: CanvasImageSource, x: number, y: number, h: number): void {
   const w = h * (100 / 124);
   c.drawImage(img, x - w / 2, y - h / 2, w, h);
+}
+
+/** The travelling fans' card display: their colours in bold diagonals and a big star. */
+function awayTifoTexture(away: number): THREE.CanvasTexture {
+  const cv = document.createElement('canvas');
+  cv.width = 512;
+  cv.height = 160;
+  const g = cv.getContext('2d')!;
+  const hex = '#' + away.toString(16).padStart(6, '0');
+  g.fillStyle = hex;
+  g.fillRect(0, 0, 512, 160);
+  g.fillStyle = '#f4efe2';
+  for (let x = -160; x < 640; x += 64) {
+    g.beginPath();
+    g.moveTo(x, 160);
+    g.lineTo(x + 32, 160);
+    g.lineTo(x + 32 + 120, 0);
+    g.lineTo(x + 120, 0);
+    g.fill();
+  }
+  g.fillStyle = '#14123a';
+  g.beginPath();
+  g.arc(256, 80, 66, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = hex;
+  g.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const r = i % 2 ? 22 : 54;
+    const a = -Math.PI / 2 + (i * Math.PI) / 5;
+    g.lineTo(256 + Math.cos(a) * r, 80 + Math.sin(a) * r);
+  }
+  g.fill();
+  g.lineWidth = 4;
+  g.strokeStyle = '#f4efe2';
+  g.stroke();
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.flipY = true;
+  return tex;
 }
 
 function tifoTexture(home: number, club: StadiumClub): THREE.CanvasTexture {
@@ -1705,6 +1781,7 @@ export function createStadium(homeColor: number, awayColor: number, club: Stadiu
   const seat = new THREE.Color(homeColor).multiplyScalar(0.62).getHex();
 
   const homeU = zoneRange(path, LOWER[0][0], 1);
+  const awayU = zoneRange(path, LOWER[0][0], 2);
   const lowerSlope = Math.hypot(LOWER[1][0] - LOWER[0][0], LOWER[1][1] - LOWER[0][1]);
   const lowerCrowd = crowdMaterial({
     home: homeColor,
@@ -1714,6 +1791,7 @@ export function createStadium(homeColor: number, awayColor: number, club: Stadiu
     aisles: [15, 1.1],
     voms: [30, 7.2, 10.2],
     tifo: { tex: tifoTexture(homeColor, club), rect: new THREE.Vector4(homeU[0] + 1, homeU[1] - 1, 0.6, lowerSlope - 0.4) },
+    tifoB: { tex: awayTifoTexture(awayColor), rect: new THREE.Vector4(awayU[0] + 1, awayU[1] - 1, 0.6, lowerSlope - 0.4) },
   });
   const upperCrowd = crowdMaterial({ home: homeColor, away: awayColor, shade: [-2, 10], stripes: true, seat, aisles: [15, 1.1] });
   // The main stand's top tier: the club name spelled out in white seats along the back rows.
@@ -1968,8 +2046,22 @@ export function createStadium(homeColor: number, awayColor: number, club: Stadiu
       nearStand.visible = show;
       paddockGroup.visible = !show;
     },
-    update(time, excitement, atmo, tifo = 0) {
+    update(time, excitement, atmo, tifo = 0, terraces) {
       U.uTime.value = time;
+      if (terraces) {
+        U.uChant.value.set(terraces.home, terraces.away, terraces.beat, terraces.arms);
+        // The flares burning now (and their flicker).
+        let i = 0;
+        for (const f of terraces.pyro) {
+          if (i >= MAX_FLARES) break;
+          const age = terraces.t - f.born;
+          if (f.smoke || age < 0) continue;
+          const fade = Math.min(1, age / 0.6, (f.life - age) / 1.5);
+          const flick = 0.75 + 0.25 * Math.sin(time * 31 + f.seed * 40) * Math.sin(time * 17.3 + f.seed * 13);
+          U.uFlares.value[i++].set(f.x, f.y, f.z, fade * flick);
+        }
+        for (; i < MAX_FLARES; i++) U.uFlares.value[i].w = 0;
+      }
       U.uExcite.value = excitement;
       U.uTifoOn.value += (tifo - U.uTifoOn.value) * 0.04;
       U.uSkyTop.value.copy(atmo.skyTop);

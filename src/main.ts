@@ -14,6 +14,7 @@ import { BallView } from './render/ballView';
 import { CAMERA_PRESETS, CameraRig, type CameraPreset } from './render/cameraRig';
 import { Atmosphere, WEATHERS, WEATHER_NAMES, type Weather } from './render/atmosphere';
 import { Rain } from './render/rain';
+import { Terraces } from './ui/terraces';
 import { PixelPass } from './render/pixelPass';
 import { PALETTES } from './render/palettes';
 import { Particles } from './render/particles';
@@ -70,6 +71,8 @@ let shadowTick = 0;
 const TOD = params.has('tod') ? Number(params.get('tod')) : -1;
 // ?showcase: frozen line-up near the camera, for judging the player models.
 const SHOWCASE = params.has('showcase');
+// ?crowd=-1 / 1: hold the goal crowd shot on the home / away end (for looking at the stands).
+const CROWD_SHOT = Number(params.get('crowd')) || 0;
 
 const club = new Club();
 // The attract mode behind the menus plays our own club.
@@ -78,6 +81,8 @@ match.autoPlay = true;
 
 const turfMarks = new TurfMarks();
 const rain = new Rain();
+/** The atmosphere in the stands: songs, drums, pyro (see Terraces). */
+const terraces = new Terraces();
 scene.add(rain.group);
 scene.add(createPitch(renderer, turfMarks.texture));
 // The stands wear the club's colours and crest; rebuilt when the kit or crest changes.
@@ -651,6 +656,7 @@ let lastPhase = match.phase;
 
 function handleEvents(now: number): void {
   const e = match.takeEvents();
+  terraces.onEvents(e, match);
   if (playing) {
     for (const k of e.kicks) audio.kick(k);
     if (e.bounce > 1.5) audio.bounce(e.bounce);
@@ -813,7 +819,7 @@ function frame(now: number): void {
   officials.update(match, running ? dt : 0);
   rig.cinematic = !playing || match.phase === 'halftime' || match.phase === 'fulltime';
   // A 4-second shot of the scoring side's fans going wild after each goal.
-  rig.crowdShot = playing && match.phase === 'goal' && match.phaseT >= GOAL_SEQ.crowd && match.phaseT < GOAL_SEQ.back && match.scorer ? (match.scorer.team === 0 ? -1 : 1) : 0;
+  rig.crowdShot = CROWD_SHOT || (playing && match.phase === 'goal' && match.phaseT >= GOAL_SEQ.crowd && match.phaseT < GOAL_SEQ.back && match.scorer ? (match.scorer.team === 0 ? -1 : 1) : 0);
   rig.update(match, alpha, dt, now / 1000);
   playersView.update(match, alpha, now / 1000);
   ballView.update(match, alpha, running ? dt : 0);
@@ -826,16 +832,18 @@ function frame(now: number): void {
   // The ultras hold up their card display for each kick-off and the opening seconds of the half.
   const tifo = match.phase === 'kickoff' || (match.phase === 'play' && match.clock < 8) ? 1 : 0;
   stadium.setNearStand(rig.groundLevel);
-  stadium.update(now / 1000, match.excitement, atmo, tifo);
+  terraces.update(running ? dt : 0, match);
+  stadium.update(now / 1000, match.excitement, atmo, tifo, terraces);
   turfMarks.update(match, renderer);
   if (playing) hud.update(match, now / 1000), minimap.update(match, now / 1000);
   updateAim();
   updateCharge(alpha);
 
   particles.setScale(pixelLook() ? pixelPass.pixelHeight : renderer.domElement.height, rig.camera.fov);
-  particles.update(running ? dt : 0, now / 1000, match, rig.focusX, rig.focusZ);
+  particles.update(running ? dt : 0, now / 1000, match, rig.focusX, rig.focusZ, terraces);
   rain.update(atmo.weather === 'rain', rig.camera, rig.focusX, rig.focusZ, pixelLook() ? pixelPass.pixelHeight : renderer.domElement.height);
   audio.setRain(atmo.weather === 'rain');
+  audio.terraces(terraces);
   // A full-screen menu covers the stadium: don't spend the battery drawing it.
   if (home.opaque) {
     /* skip */

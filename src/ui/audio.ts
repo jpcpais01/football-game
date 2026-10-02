@@ -2,12 +2,16 @@
  * All sound is synthesised with WebAudio: no audio files to download, instant start.
  * Crowd bed that breathes with the danger on the pitch, strikes, whistle, woodwork, net.
  */
+import { ChantAudio } from './chantAudio';
+import type { Terraces } from './terraces';
+
 export class GameAudio {
   private ctx: AudioContext | null = null;
   private master!: GainNode;
   private crowdGain!: GainNode;
   private chatterGain!: GainNode;
   private noise!: AudioBuffer;
+  private chants: ChantAudio | null = null;
   private rainGain: GainNode | null = null;
   private raining = false;
   private excite = 0.2;
@@ -74,6 +78,9 @@ export class GameAudio {
     chat.connect(bp).connect(this.chatterGain).connect(this.master);
     chat.start();
 
+    // The terraces: chants, drums, claps (see ChantAudio).
+    this.chants = new ChantAudio(ctx, this.master, this.noise);
+
     // Rain: a hiss of drops on the roofs and the turf, with a softer low rumble under it.
     const rain = ctx.createBufferSource();
     rain.buffer = this.noise;
@@ -99,6 +106,11 @@ export class GameAudio {
     if (this.ctx && this.rainGain) this.rainGain.gain.setTargetAtTime(on ? 0.22 : 0, this.ctx.currentTime, 0.6);
   }
 
+  /** Sing what the terraces are singing (call every frame). */
+  terraces(dir: Terraces): void {
+    if (this.ctx && this.chants && this.ctx.state === 'running') this.chants.update(dir);
+  }
+
   setMuted(m: boolean): void {
     this.muted = m;
     if (this.ctx) this.master.gain.setTargetAtTime(m ? 0 : 0.9, this.ctx.currentTime, 0.05);
@@ -117,6 +129,7 @@ export class GameAudio {
     if (Math.abs(e - this.excite) < 0.01) return;
     this.excite = e;
     const t = this.ctx.currentTime;
+    this.chants?.out.gain.setTargetAtTime(1, t, 0.5);
     this.crowdGain.gain.setTargetAtTime(0.1 + e * 0.32, t, 0.4);
     this.chatterGain.gain.setTargetAtTime(0.04 + e * 0.1, t, 0.4);
   }
@@ -268,6 +281,7 @@ export class GameAudio {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
     this.excite = -1;
+    this.chants?.out.gain.setTargetAtTime(0.35 * level, t, 0.5);
     this.crowdGain.gain.setTargetAtTime(0.1 * level, t, 0.5);
     this.chatterGain.gain.setTargetAtTime(0.04 * level, t, 0.5);
   }

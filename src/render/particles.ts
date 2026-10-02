@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { PITCH } from '../sim/constants';
 import type { Match } from '../sim/match';
 import { SHARED } from './look';
+import type { Terraces } from '../ui/terraces';
 
 /**
  * Life in the air, all in one draw call of point sprites (they land as crisp squares in the
@@ -9,17 +10,9 @@ import { SHARED } from './look';
  * evenings, goal confetti and flare smoke in the stands. Everything follows the shared wind.
  */
 
-const MAX = 1400;
+const MAX = 2600;
 const MOTES = 170;
 const FLOOD_MOTE = new THREE.Color(0.85, 0.9, 1);
-/** Flare spots in the ultras' end (lower tier behind the home goal). */
-const CURVA_FLARES: [number, number][] = [
-  [-PITCH.halfL - 19, -8],
-  [-PITCH.halfL - 18, 13],
-  [-PITCH.halfL - 21, -20],
-  [-PITCH.halfL - 17, 2],
-  [-PITCH.halfL - 20, 24],
-];
 
 enum Kind {
   Mote = 0,
@@ -46,7 +39,6 @@ export class Particles {
   private geo: THREE.BufferGeometry;
   private c = new THREE.Color();
   private breathT = new Float32Array(22);
-  private flareT = 0;
   private home: number;
   private away: number;
 
@@ -171,7 +163,7 @@ export class Particles {
     }
   }
 
-  update(dt: number, time: number, match: Match, focusX: number, focusZ: number): void {
+  update(dt: number, time: number, match: Match, focusX: number, focusZ: number, terraces?: Terraces): void {
     const wind = SHARED.uWind.value;
     const flood = SHARED.uFlood.value;
     // Motes: warm sparkles in the sun, cool specks under floodlights.
@@ -201,19 +193,27 @@ export class Particles {
         if (p.action === 'slide' && p.actionT < 0.5 && Math.random() < 0.5) this.grassBurst(p.pos.x, p.pos.z, 0.3, p.vel.x * 0.15, p.vel.z * 0.15);
       }
     }
-    // Pyro in the ultras' end once it's dark, and a proper show when a goal goes in:
-    // flares all along the curva and smoke drifting off in the club colour.
-    const goal = match.phase === 'goal';
-    if (flood > 0.55 || goal) {
-      this.flareT -= dt;
-      if (this.flareT <= 0) {
-        this.flareT = goal ? 0.05 : 0.12;
-        const spots = goal ? CURVA_FLARES : CURVA_FLARES.slice(0, 2);
-        for (const [fx, fz] of spots) {
-          const y = 7.2 + Math.random() * 0.3;
-          this.spawn(Kind.Flare, fx + (Math.random() - 0.5) * 0.6, y, fz + (Math.random() - 0.5) * 0.6, 0, 0.2, 0, 0.25, 0.5, 0xff5a3c);
-          const smoke = goal && Math.random() < 0.5 ? this.home : 0xd9b4b4;
-          this.spawn(Kind.Smoke, fx, y + 0.5, fz, wind.x * 0.8 + (Math.random() - 0.5) * 0.4, 0.6 + Math.random() * 0.4, wind.y * 0.8 + (Math.random() - 0.5) * 0.4, 6 + Math.random() * 3, 1.2, smoke);
+    // Pyro in the ends (the terraces director decides what burns where): each flare spits
+    // sparks and pours out smoke that the wind carries off over the stand; smoke bombs
+    // billow in the club's colour.
+    if (terraces && dt > 0) {
+      for (const f of terraces.pyro) {
+        const age = terraces.t - f.born;
+        if (age < 0) continue;
+        const fade = Math.min(1, age / 0.6, (f.life - age) / 1.5);
+        if (fade <= 0) continue;
+        if (f.smoke) {
+          if (Math.random() < 9 * dt * fade) {
+            const col = f.end === 0 ? this.home : this.away;
+            this.spawn(Kind.Smoke, f.x + (Math.random() - 0.5) * 1.2, f.y - 0.6, f.z + (Math.random() - 0.5) * 1.2, wind.x * 0.6 + (Math.random() - 0.5) * 1.2, 0.5 + Math.random() * 0.6, wind.y * 0.6 + (Math.random() - 0.5) * 1.2, 7 + Math.random() * 4, 1.9, col);
+          }
+          continue;
+        }
+        if (Math.random() < 0.85 * fade) {
+          this.spawn(Kind.Flare, f.x + (Math.random() - 0.5) * 0.35, f.y + Math.random() * 0.2, f.z + (Math.random() - 0.5) * 0.35, (Math.random() - 0.5) * 1.6, 0.6 + Math.random() * 1.6, (Math.random() - 0.5) * 1.6, 0.18 + Math.random() * 0.15, 0.2 + Math.random() * 0.25, Math.random() < 0.4 ? 0xffd9a0 : 0xff4a2a);
+        }
+        if (Math.random() < 5 * dt * fade) {
+          this.spawn(Kind.Smoke, f.x, f.y + 0.4, f.z, wind.x * 0.8 + (Math.random() - 0.5) * 0.5, 0.55 + Math.random() * 0.45, wind.y * 0.8 + (Math.random() - 0.5) * 0.5, 9 + Math.random() * 4, 1.3, Math.random() < 0.5 ? 0xe2b3ad : 0xc9b8b6);
         }
       }
     }
@@ -284,11 +284,12 @@ export class Particles {
           vx += (wind.x * 1.2 - vx) * dt * 0.4;
           vz += (wind.y * 1.2 - vz) * dt * 0.4;
           vy *= 1 - dt * 0.2;
-          this.alpha[i] = 0.16 * Math.sin(Math.min(1, t * 1.3) * Math.PI) * flood;
-          this.size[i] = this.baseSize[i] * (1 + t * 4);
+          this.alpha[i] = 0.2 * Math.sin(Math.min(1, t * 1.3) * Math.PI) * (0.5 + 0.5 * flood);
+          this.size[i] = this.baseSize[i] * (1 + t * 4.5);
           break;
         case Kind.Flare:
-          this.alpha[i] = 0.9 * (1 - t) * flood;
+          vy -= 4 * dt;
+          this.alpha[i] = 0.95 * (1 - t);
           this.size[i] = this.baseSize[i] * (0.8 + Math.random() * 0.4);
           break;
       }

@@ -35,7 +35,7 @@ Ultra-realistic, emergent football mechanics: physics-driven ball, bodies, tackl
   - Camera shots in `cameraRig.ts`: the broadcast camera, an over-the-shoulder view for free kicks and penalties, the front-on goal celebration shot, and the crowd shot.
   - `stadium.ts`: procedural stadium with a 2.5D shader crowd (rows of upright fan cards traced per pixel). It also has tifos, flags, banners, the fan photo banner, floodlights and beams, and the near stand shown during low camera shots.
   - Pitch and weather: `pitch.ts` (procedural grass, wet look, puddles), `turfMarks.ts` (slide-tackle scars), `atmosphere.ts` (time of day and weather), `rain.ts`, `particles.ts`.
-- `src/ui/`: HUD, touch controls, synthesised WebAudio (crowd, rain), fan banner.
+- `src/ui/`: HUD, touch controls, synthesised WebAudio (crowd, rain), fan banner. `terraces.ts` is the atmosphere director: songs, the Viking clap, pyro and smoke bombs, boos. `chantAudio.ts` synthesises the choir, drum and claps. The crowd shader (beat, scarves, arms, flare glow) and particles read the director.
 - `src/home/`, `src/meta/`: home screen, club studio, squad, store, cards and packs, formations, crest.
 - `tests/`: vitest scenario tests: dead balls, contact/fouls, keeper reach, club matches and more. `club.test.ts` "a club line-up plays a match" is known to be flaky.
 
@@ -45,4 +45,5 @@ Ultra-realistic, emergent football mechanics: physics-driven ball, bodies, tackl
 ## Useful knowledge
 - **Benchmarking gameplay.** Make a throwaway vitest file that runs about 20 seeded matches (`m.autoPlay = true`). Hook `m.log` (it logs every kick, e.g. `pass -> #9`) to classify outcomes. For the human's experience, set `autoPlay` only while the controlled player has the ball, so the human seeking code runs with an idle stick. Compare against `git stash` of `src`. Delete the file afterwards.
 - **Shaders.** New GLSL isn't checked by `tsc`. Check it by loading the built app in headless Chromium with Playwright: `import` from `/opt/node22/lib/node_modules/playwright/index.mjs`, use `executablePath /opt/pw-browsers/chromium` with the SwiftShader flags, and watch the console for shader errors. Avoid reserved words such as `flat`.
+- **Looking at the stands.** `?crowd=-1` / `?crowd=1` holds the goal crowd shot on the home / away end, and `?tod=1` sets night. Hide the UI in a headless screenshot with `body * { visibility: hidden }` and `canvas { visibility: visible }`.
 - **Human input.** A player switch cancels any held button. In tests, set `m.switchT = 99` before pressing.
