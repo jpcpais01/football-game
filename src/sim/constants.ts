@@ -64,3 +64,10 @@ export const MATCH = {
   // Real seconds per half
   halfSeconds: 150,
 } as const;
+
+/**
+ * After a goal (seconds into the 'goal' phase): the camera follows the celebration, then
+ * cuts to the crowd — while it's away the players are brought most of the way back — then
+ * returns to the field as they jog into their kick-off spots.
+ */
+export const GOAL_SEQ = { celebrate: 3, crowd: 5, cut: 3.9, end: 8 } as const;

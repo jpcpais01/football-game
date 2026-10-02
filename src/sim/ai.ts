@@ -1,4 +1,4 @@
-import { DT, PITCH, PLAYER } from './constants';
+import { DT, GOAL_SEQ, PITCH, PLAYER } from './constants';
 import { predictBallAt, rollTimeAt, rollingPass } from './kick';
 import type { Match } from './match';
 import type { Player } from './player';
@@ -1345,6 +1345,13 @@ export class AI {
     const s = m.scorer;
     if (!s) {
       p.wantSpeed = 0;
+      return;
+    }
+    // After the cut: jog back into the kick-off shape.
+    if (m.phaseT > GOAL_SEQ.cut) {
+      m.kickoffSpot(p, 1 - s.team, this.tmp);
+      this.moveTo(p, this.tmp.x, this.tmp.z, false, true);
+      p.wantSpeed = Math.min(p.wantSpeed, PLAYER.jogSpeed * 0.8);
       return;
     }
     if (p === s) {
