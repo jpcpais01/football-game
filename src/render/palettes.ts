@@ -23,7 +23,7 @@ export const PALETTES: Palette[] = [
   {
     // Soft and natural: lush greens, cream light, teal shade, warm skin.
     name: 'Meadow',
-    dither: 0.9,
+    dither: 0.75,
     sat: 1.0,
     contrast: 1.0,
     grain: 0,
@@ -42,7 +42,7 @@ export const PALETTES: Palette[] = [
   {
     // Late sun: amber light, olive grass, plum shadows.
     name: 'Golden Hour',
-    dither: 0.9,
+    dither: 0.75,
     sat: 1.05,
     contrast: 1.02,
     grain: 0,
@@ -61,7 +61,7 @@ export const PALETTES: Palette[] = [
   {
     // Under the floodlights: emerald grass, deep navy, cool whites, warm lamps.
     name: 'Moonlit',
-    dither: 0.85,
+    dither: 0.7,
     sat: 1.0,
     contrast: 1.04,
     grain: 0,

@@ -115,7 +115,7 @@ export class PixelPass {
           float t = clamp(dot(p * w - a, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
           // Like a pixel artist: colours near a palette entry stay flat, and the dither
           // only fills the real in-between zones (half-way = a clean 50% checker).
-          float mixAmt = clamp((t - 0.14) / 0.36, 0.0, 1.0) * 0.5 * uDither;
+          float mixAmt = clamp((t - 0.2) / 0.3, 0.0, 1.0) * 0.5 * uDither;
           return mixAmt > th ? uPalRGB[i2] : uPalRGB[i1];
         }
         uniform vec3 uOutline;
@@ -174,15 +174,26 @@ export class PixelPass {
           offs[8] = vec2(4.0, 0.0); offs[9] = vec2(-4.0, 0.0); offs[10] = vec2(0.0, 3.5); offs[11] = vec2(0.0, -3.5);
           for (int k = 0; k < TAPS; k++) {
             vec3 sc = texture2D(tColor, uv + offs[k] * e).rgb;
-            bloom += max(sc - vec3(0.85), 0.0);
+            bloom += max(sc - vec3(0.7), 0.0);
           }
-          c += bloom / float(TAPS) * 0.9;
+          c += bloom / float(TAPS) * 1.15;
 
-          // Clarity: a touch of local contrast against the 1-pixel neighbourhood, so shapes
-          // (kits, numbers, mown stripes) read crisply at low resolution.
           vec3 nb = (texture2D(tColor, uv + vec2(e.x, 0.0)).rgb + texture2D(tColor, uv - vec2(e.x, 0.0)).rgb +
                      texture2D(tColor, uv + vec2(0.0, e.y)).rgb + texture2D(tColor, uv - vec2(0.0, e.y)).rgb) * 0.25;
-          c = max(c + clamp(c - nb, -0.25, 0.25) * 0.35, 0.0);
+          if (uPalOn > 0.5) {
+            // Palette: smooth flat areas before the snap (sub-pixel grass grain and crowd
+            // detail would otherwise turn into palette speckle), but keep edges: only
+            // neighbours that are already close in colour are blended in.
+            vec3 nd = (texture2D(tColor, uv + e).rgb + texture2D(tColor, uv - e).rgb +
+                       texture2D(tColor, uv + vec2(e.x, -e.y)).rgb + texture2D(tColor, uv + vec2(-e.x, e.y)).rgb) * 0.25;
+            vec3 box = mix(nb, nd, 0.4);
+            float diff = length(c - box) / max(0.04, dot(box, vec3(0.333)));
+            c = mix(c, box, 0.7 * (1.0 - smoothstep(0.1, 0.35, diff)));
+          } else {
+            // Clarity: a touch of local contrast against the 1-pixel neighbourhood, so shapes
+            // (kits, numbers, mown stripes) read crisply at low resolution.
+            c = max(c + clamp(c - nb, -0.25, 0.25) * 0.35, 0.0);
+          }
 
           // Filmic tone map, then display gamma.
           c = acesFilmic(c);
@@ -192,7 +203,7 @@ export class PixelPass {
           // golden highlights, a little more colour overall.
           float l = dot(c, vec3(0.299, 0.587, 0.114));
           float green = smoothstep(0.0, 0.08, c.g - max(c.r, c.b));
-          c = mix(c, c * vec3(1.03, 1.06, 0.92), green * 0.6);
+          c = mix(c, c * vec3(1.02, 1.06, 0.92), green * 0.6);
           vec3 shade = mix(vec3(0.84, 0.97, 1.1), vec3(0.86, 0.84, 1.14), uNight);
           c = mix(c, c * shade, (1.0 - l) * (0.32 + 0.2 * uNight) * uCool);
           c = mix(c, c * vec3(1.07, 1.0, 0.88), smoothstep(0.55, 1.0, l) * 0.4);
@@ -202,13 +213,13 @@ export class PixelPass {
           // a filmic S-curve for punchy mid-tones, then vibrance — muted colours (grass in
           // shade, kits under ACES) gain the most, already-saturated ones are left alone so
           // skin and sky stay believable.
-          c = max(c - 0.03, 0.0) / 0.97;
-          c = mix(c, c * c * (3.0 - 2.0 * c), 0.42);
+          c = max(c - 0.015, 0.0) / 0.985;
+          c = mix(c, c * c * (3.0 - 2.0 * c), 0.3);
           float hi = max(c.r, max(c.g, c.b));
           float lo = min(c.r, min(c.g, c.b));
           float sat = (hi - lo) / max(hi, 1e-3);
           float l2 = dot(c, vec3(0.299, 0.587, 0.114));
-          c = mix(vec3(l2), c, 1.0 + 0.55 * (1.0 - sat) * smoothstep(0.03, 0.2, hi));
+          c = mix(vec3(l2), c, 1.0 + 0.6 * (1.0 - sat) * smoothstep(0.03, 0.2, hi));
           // Light and shadow split: warm light, cool shade, a little stronger than before.
           c *= mix(vec3(0.94, 0.98, 1.08), vec3(1.05, 1.01, 0.95), smoothstep(0.2, 0.75, l2));
 

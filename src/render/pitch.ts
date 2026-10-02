@@ -132,8 +132,8 @@ export function createPitch(renderer: THREE.WebGLRenderer): THREE.Mesh {
           float stripe = mod(floor((p.x + HL) / stripeW), 2.0) * 2.0 - 1.0; // -1 / +1
           // Blades lean toward +x or -x: brightness flips with the viewing direction.
           float lean = stripe * (0.45 + 0.55 * clamp(-viewDir.x * 1.6 + 0.35, -1.0, 1.0));
-          // A softer, slightly warm green: rich but never neon.
-          vec3 base = vec3(0.34, 0.45, 0.25);
+          // Lush, sunlit green: rich but never neon.
+          vec3 base = vec3(0.33, 0.47, 0.24);
           vec3 col = base * (1.0 + lean * 0.075);
           // Faint cross cut.
           col *= 1.0 + (mod(floor((p.y + HW) / (HW / 3.0)), 2.0) - 0.5) * 0.03;
@@ -180,14 +180,14 @@ export function createPitch(renderer: THREE.WebGLRenderer): THREE.Mesh {
         `#include <lights_fragment_end>
         {
           float sh = standShadow(vGrassWorld);
-          float sun = (1.0 - sh * 0.94) * (1.0 - cloudShadow(vGrassWorld) * 0.5);
+          float sun = (1.0 - sh * 0.9) * (1.0 - cloudShadow(vGrassWorld) * 0.42);
           reflectedLight.directDiffuse *= sun;
           reflectedLight.directSpecular *= sun;
           // Dew glinting under the floodlights.
           vec2 gc = floor(vGrassWorld.xz * 7.0);
           float glint = step(0.9975, cHash(gc + floor(uTime * 1.3 + cHash(gc) * 5.0))) * (1.0 - gLine);
           reflectedLight.directSpecular += uFloodColor * glint * uDew * 2.5;
-          reflectedLight.indirectDiffuse += diffuseColor.rgb * uShadeTint * sh * 0.28;
+          reflectedLight.indirectDiffuse += diffuseColor.rgb * uShadeTint * sh * 0.45;
           // Floodlight pools: a touch brighter through the middle, falling off to the corners.
           vec2 q = vGrassWorld.xz / vec2(HL, HW);
           float pool = 1.12 - 0.3 * smoothstep(0.35, 1.25, length(q * vec2(0.85, 1.0)));

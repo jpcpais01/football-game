@@ -44,7 +44,7 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 // Filmic tone mapping: warm highlights roll off softly instead of clipping.
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 0.95;
+renderer.toneMappingExposure = 1.12;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap; // (PCFSoft is gone in r18x; this is what it fell back to)
 app.appendChild(renderer.domElement);

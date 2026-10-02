@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { COLORS, SHARED, SUN_DIR } from './look';
 import { clamp, lerp, smoothstep } from '../sim/vec';
 
+const SHADE_DUSK = new THREE.Color(0x8c9ae0);
+
 /**
  * Time of day across the match: kick-off in warm late-afternoon sun, full time at dusk
  * with the floodlights doing most of the work. Drives lights, sky, fog and the shared
@@ -24,17 +26,18 @@ export class Atmosphere {
   /** How much atmospheric haze the background gets (read by the stadium shaders). */
   haze = 1;
 
-  // Key colours at kick-off (a) and at full time (b).
-  private sunA = new THREE.Color(0xffe6c2);
-  private sunB = new THREE.Color(0xffab6b);
-  private topA = new THREE.Color(0x86acd4);
-  private topB = new THREE.Color(0x26305e);
-  private horA = new THREE.Color(0xf3dcb6);
-  private horB = new THREE.Color(0xe08a62);
-  private fogA = new THREE.Color(COLORS.fog);
-  private fogB = new THREE.Color(0x6f6a86);
-  private hemiSkyA = new THREE.Color(COLORS.hemiSky);
-  private hemiSkyB = new THREE.Color(0x8d9cc7);
+  // Key colours at kick-off (a) and at full time (b). Ghibli light: a generous warm sun,
+  // and shade that is lit by a bright blue sky — coloured, never murky.
+  private sunA = new THREE.Color(0xfff0d4);
+  private sunB = new THREE.Color(0xffb47a);
+  private topA = new THREE.Color(0x6fa6e6);
+  private topB = new THREE.Color(0x2c3a78);
+  private horA = new THREE.Color(0xfbe6c0);
+  private horB = new THREE.Color(0xf09a6a);
+  private fogA = new THREE.Color(0xe6dcc4);
+  private fogB = new THREE.Color(0x8a82a8);
+  private hemiSkyA = new THREE.Color(0xc4dcff);
+  private hemiSkyB = new THREE.Color(0xa4b2ea);
 
   constructor(scene: THREE.Scene, quality: { shadowSize: number }) {
     this.bg = new THREE.Color(COLORS.fog);
@@ -77,9 +80,10 @@ export class Atmosphere {
 
     const dusk = smoothstep(0.35, 1, t);
     this.sun.color.copy(this.sunA).lerp(this.sunB, dusk);
-    this.sun.intensity = lerp(2.5, 1.15, dusk);
+    this.sun.intensity = lerp(3.1, 1.6, dusk);
     this.hemi.color.copy(this.hemiSkyA).lerp(this.hemiSkyB, dusk);
-    this.hemi.intensity = lerp(1.05, 0.42, dusk);
+    this.hemi.groundColor.setHex(0x6f8a45);
+    this.hemi.intensity = lerp(1.35, 0.85, dusk);
 
     this.skyTop.copy(this.topA).lerp(this.topB, dusk);
     this.skyHorizon.copy(this.horA).lerp(this.horB, dusk);
@@ -93,7 +97,7 @@ export class Atmosphere {
     // Floodlights: faintly on from the start, carrying the light by full time.
     SHARED.uFlood.value = lerp(0.12, 1.0, smoothstep(0.15, 0.95, t));
     SHARED.uDew.value = smoothstep(0.55, 1, t);
-    this.c2.setHex(0x9fb0cc).lerp(new THREE.Color(0x8a96c4), dusk);
+    this.c2.setHex(0x8fb8e8).lerp(SHADE_DUSK, dusk);
     SHARED.uShadeTint.value.copy(this.c2);
     SHARED.uClouds.value = lerp(0.55, 0.0, dusk);
     SHARED.uSunColor.value.copy(this.sun.color);
@@ -106,10 +110,10 @@ export class Atmosphere {
     const h = Math.cos(elev);
     SUN_DIR.set(Math.sin(-az) * h, -Math.sin(elev), -Math.cos(az) * h).normalize();
     this.sun.color.setHex(0xfff6e6);
-    this.sun.intensity = 3.1;
-    this.hemi.color.setHex(0xbcd6ff);
-    this.hemi.groundColor.setHex(0x5f7a3c);
-    this.hemi.intensity = 1.05;
+    this.sun.intensity = 3.4;
+    this.hemi.color.setHex(0xc6deff);
+    this.hemi.groundColor.setHex(0x6f8a45);
+    this.hemi.intensity = 1.3;
     this.skyTop.setHex(0x3f86e0);
     this.skyHorizon.setHex(0xc7e2f7);
     this.sunGlow.copy(this.sun.color);
@@ -122,7 +126,7 @@ export class Atmosphere {
     SHARED.uShadowZ0.value = 33;
     SHARED.uFlood.value = 0;
     SHARED.uDew.value = 0;
-    SHARED.uShadeTint.value.setHex(0xa9c3e8);
+    SHARED.uShadeTint.value.setHex(0x9cc4f0);
     SHARED.uClouds.value = 1;
     SHARED.uSunColor.value.copy(this.sun.color);
   }

@@ -150,12 +150,12 @@ export function litMaterial(o: LitOptions = {}): THREE.MeshStandardMaterial {
         `#include <lights_fragment_end>
         {
           float sh = standShadow(vWorldPos);
-          float sun = (1.0 - sh * 0.94) * (1.0 - cloudShadow(vWorldPos) * 0.5);
+          float sun = (1.0 - sh * 0.9) * (1.0 - cloudShadow(vWorldPos) * 0.42);
           reflectedLight.directDiffuse *= sun;
           reflectedLight.directSpecular *= sun;
           vec3 wn = normalize((vec4(normal, 0.0) * viewMatrix).xyz);
-          // Cool sky fill in the shade, floodlight wash from above in the evening.
-          reflectedLight.indirectDiffuse += diffuseColor.rgb * uShadeTint * sh * 0.28;
+          // Bright sky fill in the shade (blue, luminous), floodlight wash in the evening.
+          reflectedLight.indirectDiffuse += diffuseColor.rgb * uShadeTint * sh * 0.45;
           reflectedLight.indirectDiffuse += diffuseColor.rgb * uFloodColor * uFlood * (0.55 + 0.45 * wn.y) * 0.55;
           ${o.groundAO ? 'float ao = mix(0.62, 1.0, smoothstep(0.0, 0.6, vWorldPos.y)); reflectedLight.indirectDiffuse *= ao; reflectedLight.directDiffuse *= mix(0.85, 1.0, ao);' : ''}
           ${o.groundAO ? 'float rim = pow(1.0 - max(dot(normal, normalize(vViewPosition)), 0.0), 2.5); reflectedLight.indirectDiffuse += mix(diffuseColor.rgb, uSunColor, 0.55) * rim * (0.32 * sun + uFlood * 0.15);' : ''}
