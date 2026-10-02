@@ -19,7 +19,7 @@ function play(seed: number) {
   let lbx = 0, lbz = 0;
   let steps = 0;
   const t0 = performance.now();
-  while (m.phase !== 'fulltime' && steps < 120 * 400) {
+  while (m.phase !== 'fulltime' && steps < 120 * 500) {
     m.step(input);
     steps++;
     const e = m.takeEvents();
