@@ -79,8 +79,8 @@ it('defender can win the ball with press + tackle', () => {
     m.setControlled(def);
     let tackled = false;
     for (let i = 0; i < 120 * 6; i++) {
-      input.held[1] = true; // press
-      if (!tackled && m.ballDist(def) < 1.3 && !def.isBusy() && i % 30 === 0) input.events.push({ btn: 2, kind: 'down', hold: 0 });
+      input.held[2] = true; // press (middle button)
+      if (!tackled && m.ballDist(def) < 1.3 && !def.isBusy() && i % 30 === 0) input.events.push({ btn: 0, kind: 'down', hold: 0 }); // tackle (bottom button)
       m.step(input);
       m.takeEvents();
       if (m.owner && m.owner.team === 0) { tackled = true; break; }

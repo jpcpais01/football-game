@@ -7,8 +7,8 @@ import { Btn, type InputState, makeInput } from '../sim/input';
  */
 
 const LABELS = {
-  attack: ['PASS', 'THROUGH', 'SHOOT'],
-  defend: ['SWITCH', 'PRESS', 'TACKLE'],
+  attack: ['PASS', 'THROUGH', 'SHOOT', 'SPRINT'],
+  defend: ['TACKLE', 'SWITCH', 'PRESS', 'SPRINT<br><small>+ PRESS</small>'],
 };
 
 export class Controls {
@@ -89,6 +89,8 @@ export class Controls {
       (el.querySelector('span') as HTMLElement).textContent = labels[i];
       el.classList.toggle('defend', mode === 'defend');
     });
+    (this.sprintEl.querySelector('span') as HTMLElement).innerHTML = labels[3];
+    this.sprintEl.classList.toggle('defend', mode === 'defend');
   }
 
   /** Per-frame: hold timers and the shot power ring. */

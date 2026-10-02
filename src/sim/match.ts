@@ -324,6 +324,7 @@ export class Match {
     } else {
       ball.step(DT);
       this.consumeBallEvents();
+      this.closeControl();
       if (this.phase === 'play' || this.phase === 'goal' || this.phase === 'fulltime' || this.phase === 'halftime') this.ballTouches();
     }
 
@@ -397,15 +398,16 @@ export class Match {
           c.plan = plan;
         }
       } else {
-        if (ev.btn === Btn.A && ev.kind === 'down') this.manualSwitch();
-        if (ev.btn === Btn.C && ev.kind === 'down') {
+        if (ev.btn === Btn.B && ev.kind === 'down') this.manualSwitch();
+        if (ev.btn === Btn.A && ev.kind === 'down') {
           const dbl = this.time - this.lastTackleTap < 0.32;
           this.lastTackleTap = this.time;
           this.humanTackle(dbl);
         }
       }
     }
-    this.pressHeld = !attacking && input.held[Btn.B];
+    // Defence: the middle button presses; the big Sprint button sprints *and* presses.
+    this.pressHeld = !attacking && (input.held[Btn.C] || input.sprint);
     input.events.length = 0;
 
     if (this.phase === 'goal' || this.phase === 'halftime' || this.phase === 'fulltime') {
@@ -521,6 +523,33 @@ export class Match {
     if (ip.t >= 0) out.set(ip.x, 0, ip.z);
     else out.set(this.ball.pos.x + this.ball.vel.x * 0.5, 0, this.ball.pos.z + this.ball.vel.z * 0.5);
     return 'loose';
+  }
+
+  /**
+   * Close control for the human's dribbler: between touches the ball is gently drawn
+   * toward a point just ahead of his feet, so it feels attached without being glued
+   * (tackles, heavy first touches and big sprint pushes still separate it).
+   */
+  private closeControl(): void {
+    const c = this.controlled;
+    const b = this.ball;
+    if (this.autoPlay || this.owner !== c || this.heldBy || c.plan || c.isBusy() || !b.onGround) return;
+    const gap = this.ballDist(c);
+    if (gap > 1.8) return;
+    const moving = c.wantSpeed > 0.3;
+    const dx = moving ? c.touchX : Math.cos(c.facing);
+    const dz = moving ? c.touchZ : Math.sin(c.facing);
+    const lead = 0.45 + c.speed * 0.07;
+    const px = c.pos.x + dx * lead;
+    const pz = c.pos.z + dz * lead;
+    const wantVx = c.vel.x + (px - b.pos.x) * 3.5;
+    const wantVz = c.vel.z + (pz - b.pos.z) * 3.5;
+    const k = 1 - Math.exp(-DT * 5);
+    b.vel.x += (wantVx - b.vel.x) * k;
+    b.vel.z += (wantVz - b.vel.z) * k;
+    // Keep the spin consistent with rolling so the ball doesn't skid oddly.
+    b.spin.z = -b.vel.x / BALL.radius;
+    b.spin.x = b.vel.z / BALL.radius;
   }
 
   /** Steer a ball-carrier onto the ball when it isn't at his feet. */
@@ -980,14 +1009,16 @@ export class Match {
       // Push the ball so the player meets it again on a later stride: the ball must cover
       // what the player covers in T seconds while grass and air slow it down.
       const target = Math.max(ps, Math.min(p.wantSpeed, ps + 2.5) * 0.85);
-      const T = sprint ? 1.15 : target > 4 ? 0.8 : 0.6;
+      // The human's player keeps it closer: shorter touches, more of them.
+      const human = p === this.controlled && !this.autoPlay;
+      const T = human ? (sprint ? 0.75 : target > 4 ? 0.5 : 0.4) : sprint ? 1.15 : target > 4 ? 0.8 : 0.6;
       const vEst = target + 1;
       const decel = BALL.rollDecel + 0.025 * vEst * vEst;
       const touchSpeed = target + (decel * T) / 2 + 0.35;
       // Changing direction at speed makes touches less precise.
       const ballYaw = ps > 0.5 ? Math.atan2(p.vel.z, p.vel.x) : Math.atan2(dz, dx);
       const turn = Math.abs(angleDiff(ballYaw, Math.atan2(dz, dx)));
-      const sd = (0.035 + (1 - ctrl) * 0.09) * (1 + turn * (ps / 6) * 1.5) * (sprint ? 1.4 : 1);
+      const sd = (0.035 + (1 - ctrl) * 0.09) * (1 + turn * (ps / 6) * 1.5) * (sprint ? 1.4 : 1) * (human ? 0.5 : 1);
       const a = Math.atan2(dz, dx) + this.rng.gauss() * sd;
       const s = touchSpeed * (1 + this.rng.gauss() * sd * 0.6);
       b.kick(Math.cos(a) * s, 0, Math.sin(a) * s, 0, 0, 0);

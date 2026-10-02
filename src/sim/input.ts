@@ -1,10 +1,10 @@
 /** Buttons are contextual: the same physical button means different things in attack and defence. */
 export const Btn = {
-  /** Attack: Pass · Defence: Switch */
+  /** Bottom button. Attack: Pass · Defence: Tackle (double tap: slide) */
   A: 0,
-  /** Attack: Through ball · Defence: Press */
+  /** Top button. Attack: Through ball · Defence: Switch */
   B: 1,
-  /** Attack: Shoot · Defence: Tackle (double tap: slide) */
+  /** Middle button. Attack: Shoot · Defence: Press */
   C: 2,
 } as const;
 export type Btn = (typeof Btn)[keyof typeof Btn];

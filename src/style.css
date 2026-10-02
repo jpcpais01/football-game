@@ -115,29 +115,41 @@ html, body {
 }
 .btn span { pointer-events: none; }
 .btn.down { transform: scale(0.92); background: rgba(244, 239, 227, 0.32); }
+.btn small { font-size: 0.72em; font-weight: 600; letter-spacing: 0.08em; opacity: 0.85; }
+.btn span { text-align: center; line-height: 1.05; }
+
+/* Big main button: Sprint (attack) / Sprint + Press (defence). The three action buttons
+   sit around its upper-left edge: Through/Switch on top, Shoot/Press on the diagonal,
+   Pass/Tackle on the left. */
+.btn-sprint {
+  right: calc(24px + var(--safe-r)); bottom: calc(24px + var(--safe-b)); width: 108px; height: 108px; font-size: 17px;
+  background: rgba(20, 26, 22, 0.55); border-color: rgba(244, 239, 227, 0.55);
+}
+.btn-sprint.defend { background: rgba(35, 52, 94, 0.6); border-color: rgba(200, 215, 255, 0.55); }
+.btn-b { right: calc(42px + var(--safe-r)); bottom: calc(146px + var(--safe-b)); width: 70px; height: 70px; font-size: 12px; }
 .btn-c {
-  right: calc(26px + var(--safe-r)); bottom: calc(30px + var(--safe-b)); width: 92px; height: 92px; font-size: 16px;
+  right: calc(122px + var(--safe-r)); bottom: calc(112px + var(--safe-b)); width: 74px; height: 74px; font-size: 14px;
   background: rgba(200, 57, 59, 0.6); border-color: rgba(255, 220, 210, 0.6);
 }
-.btn-c.defend { background: rgba(35, 52, 94, 0.65); border-color: rgba(200, 215, 255, 0.55); }
-.btn-a { right: calc(132px + var(--safe-r)); bottom: calc(20px + var(--safe-b)); width: 72px; height: 72px; }
-.btn-b { right: calc(40px + var(--safe-r)); bottom: calc(134px + var(--safe-b)); width: 72px; height: 72px; font-size: 12px; }
-.btn-sprint { right: calc(222px + var(--safe-r)); bottom: calc(18px + var(--safe-b)); width: 64px; height: 64px; font-size: 12px; opacity: 0.9; }
+.btn-c.defend { background: rgba(20, 26, 22, 0.55); border-color: rgba(244, 239, 227, 0.4); }
+.btn-a { right: calc(148px + var(--safe-r)); bottom: calc(26px + var(--safe-b)); width: 70px; height: 70px; }
+.btn-a.defend { background: rgba(35, 52, 94, 0.6); border-color: rgba(200, 215, 255, 0.55); }
 .btn-c .power {
-  position: absolute; inset: -8px; border-radius: 50%; pointer-events: none; opacity: 0;
+  position: absolute; inset: -7px; border-radius: 50%; pointer-events: none; opacity: 0;
   background: conic-gradient(var(--accent) calc(var(--p, 0) * 360deg), rgba(255, 255, 255, 0.12) 0);
-  -webkit-mask: radial-gradient(circle, transparent 54px, #000 55px);
-  mask: radial-gradient(circle, transparent 54px, #000 55px);
+  -webkit-mask: radial-gradient(circle, transparent 43px, #000 44px);
+  mask: radial-gradient(circle, transparent 43px, #000 44px);
 }
 .btn-c.charging .power { opacity: 1; }
 
 @media (max-height: 380px) {
-  .btn-c { width: 78px; height: 78px; }
-  .btn-a, .btn-b { width: 62px; height: 62px; }
-  .btn-a { right: calc(112px + var(--safe-r)); }
-  .btn-b { bottom: calc(116px + var(--safe-b)); right: calc(34px + var(--safe-r)); }
-  .btn-sprint { right: calc(188px + var(--safe-r)); width: 56px; height: 56px; }
-  .btn-c .power { -webkit-mask: radial-gradient(circle, transparent 47px, #000 48px); mask: radial-gradient(circle, transparent 47px, #000 48px); }
+  .btn-sprint { width: 94px; height: 94px; font-size: 15px; }
+  .btn-a, .btn-b { width: 60px; height: 60px; }
+  .btn-c { width: 64px; height: 64px; }
+  .btn-b { right: calc(36px + var(--safe-r)); bottom: calc(126px + var(--safe-b)); }
+  .btn-c { right: calc(106px + var(--safe-r)); bottom: calc(96px + var(--safe-b)); }
+  .btn-a { right: calc(128px + var(--safe-r)); bottom: calc(22px + var(--safe-b)); }
+  .btn-c .power { -webkit-mask: radial-gradient(circle, transparent 38px, #000 39px); mask: radial-gradient(circle, transparent 38px, #000 39px); }
 }
 
 /* ---------------------------------------------------------------- Menus */
