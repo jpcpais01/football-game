@@ -223,9 +223,14 @@ export function heightAlong(from: V3, vel: V3, spin: V3, dist: number): number {
  * `wallDist` away) and dips under the bar, with the given pace, curl and topspin. A low,
  * fast shot is the hardest for the keeper, so we take the lowest that gets over.
  */
-export function solveFreeKick(from: V3, tx: number, tz: number, wallDist: number, wallTop: number, speed: number, curl: number, topspin: number): KickResult {
-  let r = solveShot(from, tx, 2.2, tz, speed, topspin, curl);
-  for (let ty = 1.15; ty <= 2.21; ty += 0.15) {
+/**
+ * Dead-ball shot: the lowest target height (from `minY`, the aimed height, up) that still
+ * clears the wall at `wallDist`. Aimed high, it simply goes where it was aimed.
+ */
+export function solveFreeKick(from: V3, tx: number, tz: number, wallDist: number, wallTop: number, speed: number, curl: number, topspin: number, minY = 1.15): KickResult {
+  const y0 = Math.min(2.9, Math.max(0.3, minY));
+  let r = solveShot(from, tx, Math.max(2.2, y0), tz, speed, topspin, curl);
+  for (let ty = y0; ty <= 2.26; ty += 0.1) {
     const c = solveShot(from, tx, ty, tz, speed, topspin, curl);
     if (heightAlong(from, c.vel, c.spin, wallDist) >= wallTop) {
       r = c;

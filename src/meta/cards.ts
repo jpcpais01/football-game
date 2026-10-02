@@ -206,6 +206,7 @@ const unit = (s: number) => Math.pow(clamp(s, 1, 99) / 100, 1.1);
 export interface SimPlayer {
   name: string;
   number: number;
+  foot: number;
   attrs: Attributes;
   look: { skin: number; hair: number; hairStyle: number; height: number; build: number };
 }
@@ -220,6 +221,7 @@ export function toSim(c: Card, slot: Position): SimPlayer {
   return {
     name: c.name,
     number: c.number,
+    foot: c.foot === 'L' ? -1 : 1,
     attrs: {
       pace: unit(s.pace),
       accel: unit(s.accel),

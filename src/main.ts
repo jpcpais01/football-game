@@ -2,7 +2,7 @@ import '@fontsource/barlow-condensed/latin-600.css';
 import '@fontsource/barlow-condensed/latin-800.css';
 import './style.css';
 import * as THREE from 'three';
-import { DT, GOAL_SEQ, MATCH } from './sim/constants';
+import { DT, GOAL_SEQ, MATCH, PITCH } from './sim/constants';
 import { Match } from './sim/match';
 import { createPitch } from './render/pitch';
 import { createStadium } from './render/stadium';
@@ -172,6 +172,30 @@ ui.appendChild(charge);
 const chargeFill = charge.querySelector('.fill') as HTMLElement;
 const chargeTick = charge.querySelector('.tick') as HTMLElement;
 const headPos = new THREE.Vector3();
+
+// Dead-ball aim: a target on the goal mouth, moved with the stick in the shoulder view.
+const aimMark = document.createElement('div');
+aimMark.className = 'aim-mark';
+aimMark.innerHTML = '<i></i>';
+ui.appendChild(aimMark);
+const aimPos = new THREE.Vector3();
+
+function updateAim(): void {
+  const a = playing && !paused && match.aimingShot ? match.aimPoint() : null;
+  if (!a) {
+    aimMark.classList.remove('show');
+    return;
+  }
+  aimPos.set(a.x, a.y, a.z).project(rig.camera);
+  if (aimPos.z > 1) return aimMark.classList.remove('show');
+  const x = (aimPos.x * 0.5 + 0.5) * window.innerWidth;
+  const y = (-aimPos.y * 0.5 + 0.5) * window.innerHeight;
+  aimMark.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
+  // Off target (wide or over the bar): the reticle turns red.
+  const off = Math.abs(a.z) > PITCH.goalHalfWidth - 0.1 || a.y > PITCH.goalHeight - 0.1;
+  aimMark.classList.toggle('off', off);
+  aimMark.classList.add('show');
+}
 
 function updateCharge(alpha: number): void {
   const inp = controls.input;
@@ -541,6 +565,7 @@ function frame(now: number): void {
   stadium.update(now / 1000, match.excitement, atmo, tifo);
   if (playing) hud.update(match, now / 1000);
   updateCharge(alpha);
+  updateAim();
 
   particles.setScale(graphics === 'pixel' ? pixelPass.pixelHeight : renderer.domElement.height, rig.camera.fov);
   particles.update(running ? dt : 0, now / 1000, match, rig.focusX, rig.focusZ);

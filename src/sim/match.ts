@@ -21,6 +21,9 @@ export interface SetPiece {
   wall?: { players: Player[]; slots: [number, number][] };
   /** Free kick close enough to shoot at goal. */
   direct?: boolean;
+  /** Human dead-ball shot: the aim point on the goal mouth (world z, height). */
+  aimZ?: number;
+  aimY?: number;
 }
 
 /** The last foul given (for the HUD, the referee and the commentary of the moment). */
@@ -41,6 +44,8 @@ export interface SetupPlayer {
   attrs: Attributes;
   look: { skin: number; hair: number; hairStyle: number; height: number; build: number };
   role: Role;
+  /** Preferred foot: 1 right, -1 left. */
+  foot?: number;
   /** Formation slot, team frame. */
   x: number;
   z: number;
@@ -153,6 +158,7 @@ export class Match {
           const p = new Player(this.players.length, t, i, sp.role, sp.x, sp.z, sp.attrs, sp.look);
           p.name = sp.name;
           p.number = sp.number;
+          p.foot = sp.foot === -1 ? -1 : 1;
           team.players.push(p);
           this.players.push(p);
         });
@@ -356,17 +362,24 @@ export class Match {
     this.possTeam = team;
     // Cut straight to the taker standing over the ball (like a broadcast replay cut).
     const f = this.setPieceFacing(this.setPiece);
-    const back = this.setPieceBack(this.setPiece);
-    taker.pos.set(x - f.x * back + f.z * back * 0.45, 0, z - f.z * back - f.x * back * 0.45);
+    const spot = this.setPieceSpot(this.setPiece);
+    taker.pos.set(spot.x, 0, spot.z);
     taker.prevPos.copy(taker.pos);
     taker.vel.set(0, 0, 0);
-    taker.facing = Math.atan2(f.z, f.x);
+    taker.facing = spot.runUp ? Math.atan2(z - spot.z, x - spot.x) : Math.atan2(f.z, f.x);
     taker.prevFacing = taker.facing;
     taker.action = 'none';
     taker.plan = null;
     this.ball.reset(x, z);
     this.ball.pos.y = BALL.radius;
     this.heldBy = null;
+    if (kind === 'penalty' || direct) {
+      // Where the human starts aiming: free kicks over the wall to the far post, penalties
+      // low to the keeper's right... well, the middle; the stick moves it.
+      const near = Math.sign(z) || 1;
+      this.setPiece.aimZ = kind === 'penalty' ? 0 : -near * (PITCH.goalHalfWidth - 0.7);
+      this.setPiece.aimY = kind === 'penalty' ? 0.9 : 1.9;
+    }
     if (kind === 'penalty') this.setupPenalty(this.setPiece);
     else if (direct) this.setupWall(this.setPiece);
     if (team === this.humanTeam) this.setControlled(taker);
@@ -400,7 +413,37 @@ export class Match {
 
   /** How far behind the ball the taker waits (a run-up for shots from a dead ball). */
   setPieceBack(sp: SetPiece): number {
-    return sp.kind === 'throw' ? 0.05 : sp.kind === 'penalty' ? 2.6 : sp.direct ? 3.2 : 0.45;
+    return sp.kind === 'throw' ? 0.05 : sp.kind === 'penalty' ? 3.4 : sp.direct ? 4.4 : 0.45;
+  }
+
+  /**
+   * Where the taker stands before a set piece. Shots from a dead ball get a real run-up:
+   * a few strides back and off to the side of his kicking foot (a right-footer stands to
+   * the left of the ball, around 35 degrees off the line), so he can swing through it.
+   */
+  setPieceSpot(sp: SetPiece): { x: number; z: number; runUp: boolean } {
+    const f = this.setPieceFacing(sp);
+    const back = this.setPieceBack(sp);
+    const runUp = sp.kind === 'penalty' || !!sp.direct;
+    // Right of the facing direction is (-f.z, f.x); the taker stands on his kicking foot's far side.
+    const lat = runUp ? (sp.kind === 'penalty' ? 0.45 : 0.7) * back * sp.taker.foot : 0;
+    return { x: sp.x - f.x * back + f.z * lat, z: sp.z - f.z * back - f.x * lat, runUp };
+  }
+
+  /** The human is lining up a dead-ball shot (third-person camera, aim reticle). */
+  get aimingShot(): boolean {
+    const sp = this.setPiece;
+    return (
+      !!sp && !this.autoPlay && this.phase === 'setpiece' && sp.team === this.humanTeam && sp.taker === this.controlled &&
+      !sp.taker.plan && sp.taker.action === 'none' && (sp.kind === 'penalty' || !!sp.direct) && sp.aimZ !== undefined
+    );
+  }
+
+  /** Aim point of a dead-ball shot in world coordinates. */
+  aimPoint(): { x: number; y: number; z: number } | null {
+    const sp = this.setPiece;
+    if (!sp || sp.aimZ === undefined) return null;
+    return { x: PITCH.halfL * this.teams[sp.team].dir, y: sp.aimY ?? 1, z: sp.aimZ };
   }
 
   /**
@@ -660,6 +703,12 @@ export class Match {
           const spk = this.setPiece?.kind;
           if (spk && spk !== 'freekick' && spk !== 'penalty' && plan.type === 'shot') plan.type = spk === 'corner' ? 'cross' : 'lob';
           if (this.heldBy === c && plan.type === 'shot') plan.type = 'clear';
+          if (plan.type === 'shot' && this.aimingShot) {
+            plan.aimZ = this.setPiece!.aimZ;
+            plan.aimY = this.setPiece!.aimY;
+            plan.aimed = true;
+            plan.expires = this.time + 6;
+          }
           c.plan = plan;
         }
       } else {
@@ -690,8 +739,18 @@ export class Match {
       return;
     }
 
-    // Set piece taker stays on the ball.
-    if (this.setPiece && this.setPiece.taker === c) return;
+    // Set piece taker stays on the ball. Lining up a shot: the stick moves the aim
+    // (screen-relative in the third-person view: right is the taker's right, up is higher).
+    if (this.setPiece && this.setPiece.taker === c) {
+      const sp = this.setPiece;
+      if (this.aimingShot && m > 0.12) {
+        const dir = this.teams[sp.team].dir;
+        const lim = PITCH.goalHalfWidth + 0.9;
+        sp.aimZ = clamp((sp.aimZ ?? 0) + input.moveX * 3.4 * DT * dir, -lim, lim);
+        sp.aimY = clamp((sp.aimY ?? 1) + input.moveY * 1.5 * DT, 0.2, PITCH.goalHeight + 0.5);
+      }
+      return;
+    }
 
     // Movement.
     c.sprinting = input.sprint;
@@ -1028,6 +1087,28 @@ export class Match {
 
   // ------------------------------------------------------------------ actions
 
+  /**
+   * How long a strike takes: wind-up + swing to contact, then the follow-through. A pass is
+   * a short, compact swing; a driven shot a full back-lift with the knee whipping through;
+   * a dead-ball shot the fullest of all. Throws keep their old quick timing.
+   */
+  kickTiming(plan: KickPlan): { contact: number; follow: number } {
+    const dead = this.setPiece && (this.setPiece.kind === 'penalty' || this.setPiece.direct) && plan.type === 'shot';
+    if (this.heldBy && this.heldBy.plan === plan && !(plan.type === 'lob' || plan.type === 'clear')) return { contact: 0.15, follow: 0.12 };
+    switch (plan.type) {
+      case 'shot':
+        return dead ? { contact: 0.24, follow: 0.42 } : { contact: 0.18 + 0.03 * Math.min(1, plan.power), follow: 0.34 };
+      case 'lob':
+      case 'cross':
+      case 'clear':
+        return { contact: 0.16, follow: 0.3 };
+      case 'through':
+        return plan.lofted ? { contact: 0.16, follow: 0.28 } : { contact: 0.13, follow: 0.2 };
+      default:
+        return { contact: 0.12, follow: 0.2 };
+    }
+  }
+
   /** Can the strike start now, i.e. will the ball be at the foot when the swing lands? */
   private kickable(p: Player, contactIn = 0.12, reach: number = PLAYER.reach): boolean {
     const b = this.ball;
@@ -1048,29 +1129,34 @@ export class Match {
     if (p.plan && this.time > p.plan.expires) p.plan = null;
     if (p.plan && ((this.owner && this.owner.team !== p.team) || (this.heldBy && this.heldBy.team !== p.team))) p.plan = null;
 
-    // Start a kick when the ball arrives in range.
-    const planDur = p.plan ? (p.plan.type === 'shot' ? 0.3 : p.plan.type === 'lob' || p.plan.type === 'cross' || p.plan.type === 'clear' ? 0.27 : 0.2) : 0;
+    // Start a kick when the ball arrives in range: the wind-up and swing take `contactT`,
+    // the follow-through the rest.
+    const timing = p.plan ? this.kickTiming(p.plan) : null;
     const reach = human ? HUMAN_STRIKE_REACH : PLAYER.reach;
-    if (p.plan && !p.isBusy() && (p.touchCooldown <= 0 || p.sinceTouch > 0.12) && this.kickable(p, planDur * 0.55, reach)) {
+    if (p.plan && timing && !p.isBusy() && (p.touchCooldown <= 0 || p.sinceTouch > 0.12) && this.kickable(p, timing.contact, reach)) {
       if (this.setPiece && (this.setPiece.taker !== p || this.setPiece.t < 0.7)) return;
       const plan = p.plan;
-      const dur = planDur;
+      const dur = timing.contact + timing.follow;
       // From the hands: a throw (or a throw-in), except keepers punt long balls.
       const fromHands = this.heldBy === p;
       const punt = fromHands && !this.setPiece && (plan.type === 'lob' || plan.type === 'clear');
       const kind = fromHands && !punt ? 'throw' : 'kick';
       p.throwIn = this.setPiece?.kind === 'throw';
-      // Strike with the foot on the side of the ball.
+      // Strike with the preferred foot, unless the ball is well over on the other side
+      // (then it's the weaker one). Dead balls: always the good foot.
       const side = -Math.sin(p.facing) * (this.ball.pos.x - p.pos.x) + Math.cos(p.facing) * (this.ball.pos.z - p.pos.z);
-      p.kickLeg = side >= 0 ? 1 : -1;
+      const ballSide = side >= 0 ? 1 : -1;
+      p.kickLeg = this.setPiece || Math.abs(side) < 0.32 || ballSide === p.foot ? p.foot : ballSide;
+      p.kickWeak = p.kickLeg !== p.foot;
       p.startAction(kind, dur, plan.dirX, plan.dirZ);
+      p.kickContact = kind === 'throw' ? dur * 0.55 : timing.contact;
       p.kickType = plan.type;
       p.kickPower = plan.power;
       p.kickLofted = plan.type === 'lob' || plan.type === 'cross' || plan.type === 'clear' || !!plan.lofted;
       p.kickRel = angleDiff(p.facing, Math.atan2(plan.dirZ, plan.dirX));
     }
 
-    if ((p.action === 'kick' || p.action === 'throw') && !p.actionDone && p.actionT >= p.actionDur * 0.55) {
+    if ((p.action === 'kick' || p.action === 'throw') && !p.actionDone && p.actionT >= p.kickContact) {
       p.actionDone = true;
       const plan = p.plan;
       p.plan = null;
@@ -1302,8 +1388,9 @@ export class Match {
       base = 0.035;
       const pw = plan.power;
       const side = Math.abs(plan.dirZ) > 0.3 ? Math.sign(plan.dirZ) : 0;
-      const tz = side * (PITCH.goalHalfWidth - 0.45 - (1 - Math.min(1, pw)) * 0.35);
-      const ty = 0.25 + Math.min(pw, 1) * 1.7 + Math.max(0, pw - 1) * 7;
+      // Aimed with the reticle: exactly there (plus the error model); otherwise stick side + hold.
+      const tz = plan.aimZ ?? side * (PITCH.goalHalfWidth - 0.45 - (1 - Math.min(1, pw)) * 0.35);
+      const ty = (plan.aimY ?? 0.25 + Math.min(pw, 1) * 1.7) + Math.max(0, pw - 1) * 7;
       const r = solveShot(b.pos, opp, ty, tz, 17 + Math.min(pw, 1.1) * 10, 4, 0);
       vel = r.vel;
       spin = r.spin;
@@ -1315,11 +1402,13 @@ export class Match {
       base = 0.045;
       const pw = plan.power;
       const near = Math.sign(b.pos.z) || 1;
-      const side = Math.abs(plan.dirZ) > 0.3 ? Math.sign(plan.dirZ) : -near; // default: over the wall, far post
-      const tz = side * (PITCH.goalHalfWidth - 0.55);
+      const side = plan.aimZ !== undefined ? Math.sign(plan.aimZ - b.pos.z * 0.15) || -near : Math.abs(plan.dirZ) > 0.3 ? Math.sign(plan.dirZ) : -near; // default: over the wall, far post
+      const tz = plan.aimZ ?? side * (PITCH.goalHalfWidth - 0.55);
+      // Curl: whipped away from the keeper toward the aimed side; the foot decides how it
+      // bends naturally (a right foot's instep curls it right to left, a left foot the other way).
       const curl = -side * team.dir * (18 + 10 * (1 - Math.min(1, pw)));
-      const speed = 19 + Math.min(pw, 1.1) * 8;
-      const r = solveFreeKick(b.pos, opp, tz, 9.15, 2.4, speed, curl, 9 + pw * 4);
+      const speed = (19 + Math.min(pw, 1.1) * 8) * (0.9 + 0.2 * p.attrs.power);
+      const r = solveFreeKick(b.pos, opp, tz, 9.15, 2.4, speed, curl, 9 + pw * 4, plan.aimY);
       vel = r.vel;
       // Leathered it: the extra power sends it over.
       if (pw > 1) vel.y += (pw - 1) * 9;
@@ -1445,7 +1534,8 @@ export class Match {
     const press = Math.max(0, 1.8 - this.nearestOpponentDist(p)) / 1.8;
     const relBall = Math.hypot(b.vel.x - p.vel.x, b.vel.z - p.vel.z);
     const ballPen = clamp(relBall / 12, 0, 1);
-    const sd = base * (1.3 - skill) * (1 + bodyPen * 2.2 + runPen * 0.7 + press * 0.9 + ballPen * 0.9);
+    const weak = p.kickWeak ? 1.35 : 1; // the weaker foot is less precise
+    const sd = base * (1.3 - skill) * weak * (1 + bodyPen * 2.2 + runPen * 0.7 + press * 0.9 + ballPen * 0.9);
     const yawErr = this.rng.gauss() * sd;
     const pitchErr = this.rng.gauss() * sd * (plan.type === 'shot' ? 0.6 : 0.35);
     const speedErr = 1 + this.rng.gauss() * sd * 0.8;

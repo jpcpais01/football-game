@@ -1152,18 +1152,29 @@ export class AI {
     if (sp.taker === p) {
       // Stand behind the ball facing into play (a run-up for shots from a dead ball).
       const f = m.setPieceFacing(sp);
-      const back = m.setPieceBack(sp);
-      const runUp = sp.kind === 'penalty' || sp.direct;
+      const spot = m.setPieceSpot(sp);
+      const runUp = spot.runUp;
       if (runUp && p.plan) {
-        // Approach: run up and strike.
-        this.moveTo(p, sp.x - f.x * 0.35, sp.z - f.z * 0.35, false, false);
-        p.wantSpeed = Math.min(p.wantSpeed, 4.2);
-        p.facing = Math.atan2(sp.z - p.pos.z, sp.x - p.pos.x);
+        // The run-up: a couple of short, accelerating steps, then a long last stride that
+        // plants the standing foot beside the ball (on the far side from the kicking
+        // foot, a touch behind it) so the swing comes through the ball.
+        const right = { x: -f.z, z: f.x };
+        const lat = 0.3 * p.foot;
+        const px = sp.x - f.x * 0.32 - right.x * lat;
+        const pz = sp.z - f.z * 0.32 - right.z * lat;
+        const d = dist2D(p.pos.x, p.pos.z, px, pz);
+        this.moveTo(p, px, pz, false, false);
+        const full = sp.kind === 'penalty' ? 4.6 : 5.4;
+        // Building speed over the run, easing only in the last metre to set the plant foot.
+        const gone = dist2D(p.pos.x, p.pos.z, spot.x, spot.z);
+        p.wantSpeed = Math.min(full, 1.8 + gone * 1.5, 2.6 + d * 3);
+        p.lookTarget.set(sp.x, 0, sp.z);
+        p.lookAt = d > 0.8 ? null : p.lookTarget;
         return;
       }
       // Run-ups are taken from a little to the side, like real takers.
-      const sx = sp.x - f.x * back + (runUp ? f.z * back * 0.45 : 0);
-      const sz = sp.z - f.z * back - (runUp ? f.x * back * 0.45 : 0);
+      const sx = spot.x;
+      const sz = spot.z;
       const d = dist2D(p.pos.x, p.pos.z, sx, sz);
       if (d > 0.3) {
         this.moveTo(p, sx, sz, d > 3, false);
@@ -1173,12 +1184,13 @@ export class AI {
       p.moveX = 0;
       p.moveZ = 0;
       p.wantSpeed = 0;
+      // Lined up: body square to the ball, eyes on it (a penalty taker looks at the keeper).
       p.facing = runUp ? Math.atan2(sp.z - p.pos.z, sp.x - p.pos.x) : Math.atan2(f.z, f.x);
       p.lookTarget.set(sp.x + f.x * 20, 0, sp.z + f.z * 20);
-      p.lookAt = p.lookTarget;
+      p.lookAt = runUp ? null : p.lookTarget;
       if (sp.kind === 'throw' && m.heldBy !== p) m.catchBall(p);
-      const human = p.team === m.humanTeam;
-      const wait = human ? (runUp ? 12 : 7) : runUp ? 2.6 : sp.kind === 'freekick' ? 1.8 : 1.3;
+      const human = p.team === m.humanTeam && !m.autoPlay;
+      const wait = human ? (runUp ? 20 : 7) : runUp ? 2.6 : sp.kind === 'freekick' ? 1.8 : 1.3;
       if (sp.t > wait && !p.plan) this.planSetPiece(p);
       return;
     }

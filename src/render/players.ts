@@ -773,6 +773,9 @@ export class PlayersView {
       let legOutR = 0.04;
       let legYawL = 0;
       let legYawR = 0;
+      // Extra ankle angle on top of the auto-levelled foot (- = toes pointed, instep strikes).
+      let ankleL = 0;
+      let ankleR = 0;
       const aArm = (0.1 + 0.7 * s) * moveAmt;
       let armL = -aArm * sinP;
       let armR = aArm * sinP;
@@ -884,72 +887,145 @@ export class PlayersView {
       const pr = p.actionDur > 0 ? clamp(p.actionT / p.actionDur, 0, 1) : 0;
       switch (p.action) {
         case 'kick': {
-          // Body mechanics depend on the strike: side-foot passes open the hip toward the
-          // target; driven shots lean over the ball; lofted balls and over-hit shots lean
-          // back; the follow-through goes where the ball goes.
+          // A real strike, timed to the moment the sim sends the ball away (kickContact):
+          //  1. the last stride is long: the standing leg reaches and plants beside the ball;
+          //  2. back-lift: the kicking thigh goes back with the knee folded tight (heel up),
+          //     hips turn back, the opposite arm swings out wide for balance;
+          //  3. the thigh drives forward with the knee still folded, then the shin whips
+          //     through as the thigh brakes (the knee snaps straight at contact), ankle locked;
+          //  4. follow-through along the line of the ball and across the body; big shots
+          //     carry the player off the ground in a little hop and he lands on the kicking
+          //     foot. Side-foot passes are compact, hip turned out, body over the ball.
           const type = p.kickType;
           const power = Math.min(1.15, p.kickPower);
           const shot = type === 'shot';
           const lofted = p.kickLofted && !shot;
           const ground = !shot && !lofted;
-          const back = ground ? -0.5 : shot ? -(0.7 + 0.35 * Math.min(1, power)) : -1.0;
-          const fwd = ground ? 0.75 : shot ? 1.15 + 0.35 * power : 1.45;
-          const kneeTop = ground ? 1.15 : 1.6;
-          let sw: number;
-          let kn: number;
-          if (pr < 0.4) {
-            sw = lerp(0, back, pr / 0.4);
-            kn = lerp(0.2, kneeTop, pr / 0.4);
-          } else if (pr < 0.62) {
-            const t = (pr - 0.4) / 0.22;
-            sw = lerp(back, fwd, t);
-            kn = lerp(kneeTop, 0.08, t);
-          } else {
-            const t = (pr - 0.62) / 0.38;
-            sw = lerp(fwd, 0.25, t);
-            kn = lerp(0.08, 0.3, t);
-          }
-          // Target direction in the body's frame (+ = to the player's left).
-          const tgt = clamp(-p.kickRel, -1.2, 1.2);
-          const swingPhase = smoothstep(0.35, 0.65, pr);
+          const finesse = shot && power < 0.55;
+          const tc = Math.max(0.05, p.kickContact);
+          const tf = Math.max(tc + 0.05, p.actionDur);
+          const t = p.actionT;
+          const u = clamp(t / tc, 0, 1); // wind-up and swing
+          const v = clamp((t - tc) / (tf - tc), 0, 1); // follow-through
+          const big = shot ? 0.55 + 0.45 * Math.min(1, power) : lofted ? 0.75 : 0.4;
+          const easeOut = (a: number) => 1 - (1 - a) * (1 - a);
+          const ease = (a: number) => a * a * (3 - 2 * a);
+          // Blend in from the running pose, and back out to it at the end.
+          const inK = smoothstep(0, 0.22, u);
+          const outK = smoothstep(0.7, 1, v);
           const right = p.kickLeg > 0;
-          // Side-foot: hip turns out so the inside of the foot faces the target.
-          const open = ground ? (right ? -0.6 : 0.6) : 0;
-          const across = tgt * 0.55 * swingPhase;
-          const plantKnee = shot ? 0.42 : 0.28;
-          const counterArm = shot || lofted ? 1.05 : 0.8;
-          if (right) {
-            hipR = sw;
-            kneeR = kn;
-            legYawR = open + across;
-            hipL = 0.12;
-            kneeL = plantKnee;
-            armOutL = counterArm;
-            armL = -0.45;
-            armOutR = 0.45;
-            armR = 0.35;
+
+          // ---- kicking leg
+          // A side-foot pass is a pendulum from the hip (short back-lift, knee only half
+          // bent); an instep strike folds the knee right up.
+          const backLift = ground ? -(0.12 + 0.4 * big) : -(0.2 + 0.65 * big);
+          const heel = ground ? 0.55 + 0.35 * big : 1.55 + 0.6 * big;
+          const contactHip = ground ? 0.4 : 0.32;
+          const followHip = ground ? 0.7 : lofted ? 1.55 : finesse ? 0.95 : 0.95 + 0.75 * big;
+          let kHip: number;
+          let kKnee: number;
+          if (u < 0.5) {
+            // The heel comes up first, the thigh follows it back.
+            kHip = lerp(0.12, backLift, ease(u / 0.5));
+            kKnee = lerp(0.35, heel, easeOut(Math.min(1, u / 0.32)));
+          } else if (t < tc) {
+            const a = (u - 0.5) / 0.5;
+            kHip = lerp(backLift, contactHip, ease(a));
+            // Knee folds a touch more as the thigh drives, then whips straight.
+            const fold = heel * (1 + 0.08 * smoothstep(0, 0.4, a));
+            kKnee = lerp(fold, 0.1, Math.pow(smoothstep(0.38, 1, a), 1.3));
           } else {
-            hipL = sw;
-            kneeL = kn;
-            legYawL = open + across;
-            hipR = 0.12;
-            kneeR = plantKnee;
-            armOutR = counterArm;
-            armR = -0.45;
-            armOutL = 0.45;
-            armL = 0.35;
+            const rise = easeOut(smoothstep(0, 0.42, v));
+            const fall = smoothstep(0.42, 1, v);
+            kHip = lerp(lerp(contactHip, followHip, rise), 0.18, fall);
+            kKnee = lerp(lerp(0.1, 0.22, rise), 0.42, fall);
           }
-          const wind = Math.sin(pr * Math.PI);
-          // Shoulders wind up away from the kicking leg, then unwind toward the target.
-          twist = -p.kickLeg * 0.28 * wind * (1 - swingPhase) + tgt * 0.4 * swingPhase;
-          pelvisYaw = p.kickLeg * 0.2 * wind * (1 - swingPhase) + tgt * 0.3 * swingPhase;
-          const lean = ground ? 0.08 : lofted ? -0.22 : power > 0.95 ? -0.24 : 0.16 - power * 0.06;
-          flexExtra += lean * smoothstep(0.25, 0.6, pr) * (1 - smoothstep(0.8, 1, pr));
-          sideExtra += -p.kickLeg * 0.12 * wind; // lean away from the kicking leg
-          hipY -= shot ? 0.06 : 0.04;
-          if (shot) lift = 0.05 * power * Math.max(0, Math.sin((pr - 0.6) * Math.PI * 2.5)) * (pr > 0.6 ? 1 : 0);
+          // Toes: pointed for the instep (locked through contact), set for a side-foot.
+          const lock = smoothstep(0.35, 0.6, u) * (1 - smoothstep(0.3, 0.7, v));
+          const kAnkle = (ground ? -0.12 : lofted ? -0.55 : -0.85) * lock;
+          // The leg loops slightly out on the back-lift and finishes across the body.
+          const kOut = 0.04 + 0.14 * big * Math.sin(Math.PI * Math.min(1, u / 0.85)) * (u < 1 ? 1 : 0) - (shot ? 0.24 : 0.1) * big * smoothstep(0, 0.6, v) * (1 - smoothstep(0.6, 1, v));
+          // Side-foot: hip turned out so the inside of the foot faces the target.
+          const open = ground ? (right ? -0.65 : 0.65) * (1 - smoothstep(0.4, 1, v)) : 0;
+          const tgt = clamp(-p.kickRel, -1.2, 1.2);
+          const swingPhase = smoothstep(0.5, 1, u);
+          const across = tgt * 0.45 * swingPhase * (1 - v * 0.5);
+
+          // ---- standing leg: reaches on the last stride, plants, takes the load, the body
+          // passes over it; a big strike lifts it off the ground for a moment.
+          let pHip: number;
+          let pKnee: number;
+          if (u < 0.55) {
+            const a = ease(u / 0.55);
+            pHip = lerp(0.2, 0.48, a);
+            pKnee = lerp(0.55, 0.2, a);
+          } else if (t < tc) {
+            const a = (u - 0.55) / 0.45;
+            pHip = lerp(0.48, 0.14, ease(a));
+            pKnee = lerp(0.2, shot ? 0.48 : 0.36, ease(a));
+          } else {
+            pHip = lerp(0.14, -0.38, ease(smoothstep(0, 0.85, v)));
+            pKnee = lerp(shot ? 0.48 : 0.36, 0.3, v);
+          }
+          const hop = shot && power > 0.55 ? Math.sin(Math.PI * smoothstep(0.08, 0.62, v)) * (0.05 + 0.05 * big) : 0;
+          if (hop > 0) pKnee += hop * 2.5; // tucks as he leaves the ground
+
+          const apply = (gHip: number, gKnee: number, h: number, k: number) => [lerp(gHip, h, inK * (1 - outK)), lerp(gKnee, k, inK * (1 - outK))];
+          if (right) {
+            [hipR, kneeR] = apply(hipR, kneeR, kHip, kKnee);
+            [hipL, kneeL] = apply(hipL, kneeL, pHip, pKnee);
+            ankleR = kAnkle;
+            legYawR = (open + across) * inK;
+            legOutR = lerp(legOutR, kOut, inK * (1 - outK));
+          } else {
+            [hipL, kneeL] = apply(hipL, kneeL, kHip, kKnee);
+            [hipR, kneeR] = apply(hipR, kneeR, pHip, pKnee);
+            ankleL = kAnkle;
+            legYawL = (open + across) * inK;
+            legOutL = lerp(legOutL, kOut, inK * (1 - outK));
+          }
+
+          // ---- arms: the opposite arm rises out wide on the back-lift and sweeps down
+          // and back through the strike; the kicking-side arm counters the leg.
+          const wind = smoothstep(0, 0.55, u) * (1 - smoothstep(0.1, 0.9, v));
+          const thru = smoothstep(0.6, 1, u) * (1 - outK);
+          const oppOut = lerp(0.15, (ground ? 0.75 : 1.2) * (0.7 + 0.3 * big), wind);
+          const oppSwing = lerp(0.35 * wind, -0.35, thru);
+          const sameSwing = lerp(-0.55 * wind * big, 0.55 * big, thru);
+          const keep = 1 - inK * (1 - outK);
+          if (right) {
+            armOutL = lerp(oppOut, armOutL, keep);
+            armL = lerp(oppSwing, armL, keep);
+            armOutR = lerp(0.35, armOutR, keep);
+            armR = lerp(sameSwing, armR, keep);
+            elbowL = lerp(0.45, elbowL, keep);
+          } else {
+            armOutR = lerp(oppOut, armOutR, keep);
+            armR = lerp(oppSwing, armR, keep);
+            armOutL = lerp(0.35, armOutL, keep);
+            armL = lerp(sameSwing, armL, keep);
+            elbowR = lerp(0.45, elbowR, keep);
+          }
+
+          // ---- trunk: a slight arch on the back-lift, then over the ball for a driven
+          // strike (back for a chip or a lofted ball), leaning away from the kicking leg.
+          const atContact = Math.exp(-Math.pow((u - 1 + v * 2) * 2.2, 2));
+          const overBall = ground ? 0.12 : lofted ? -0.26 : finesse ? 0.06 : power > 1 ? -0.2 : 0.22;
+          flexExtra += (-0.08 * big * smoothstep(0.1, 0.5, u) * (1 - swingPhase) + overBall * swingPhase * (1 - outK) + (shot && !finesse ? 0.12 * Math.sin(Math.PI * v) : 0)) * inK;
+          sideExtra += -p.kickLeg * (0.08 + 0.16 * big) * Math.max(atContact, wind * 0.6) * inK;
+          // Hips turn back with the leg, then through; shoulders do the opposite (the
+          // "tension arc" from the kicking hip to the opposite shoulder).
+          const turnBack = wind * (1 - swingPhase);
+          const turnThru = swingPhase * (1 - outK);
+          pelvisYaw = lerp(pelvisYaw, p.kickLeg * 0.32 * big * turnBack - p.kickLeg * 0.22 * big * turnThru + tgt * 0.3 * turnThru, inK);
+          twist = lerp(twist, -p.kickLeg * 0.32 * big * turnBack + p.kickLeg * 0.18 * big * turnThru + tgt * 0.4 * turnThru, inK);
+          pelvisRoll += -p.kickLeg * 0.06 * big * wind; // kicking hip rises with the back-lift
+          hipY -= ((shot ? 0.05 : 0.035) + 0.03 * big) * smoothstep(0.45, 0.85, u) * (1 - outK);
+          lift = hop;
+          if (lofted) leanF -= 0.06 * swingPhase * (1 - outK);
           headLook = false;
-          headPitch = 0.25; // eyes on the ball at contact
+          // Eyes on the ball through contact, then up after it.
+          headPitch = 0.38 * (1 - smoothstep(0.15, 0.6, v)) + 0.05;
           break;
         }
         case 'tackle': {
@@ -1229,7 +1305,7 @@ export class PlayersView {
         this.chain(this.j2, this.j2, 0, -THIGH, 0, knee - soft, 0, 0);
         this.put('shin', id * 2 + sd, this.j2);
         // Keep the foot roughly level with the ground.
-        const ankle = clamp(hip - knee, -1.2, 0.6) + (knee > 0.8 ? -0.35 : 0);
+        const ankle = clamp(hip - knee, -1.2, 0.6) + (knee > 0.8 ? -0.35 : 0) + (sd === 0 ? ankleL : ankleR);
         this.chain(this.j3, this.j2, 0, -SHIN, 0, ankle, 0, 0);
         this.put('boot', id * 2 + sd, this.j3);
       }
@@ -1274,7 +1350,7 @@ export class PlayersView {
     this.ring.scale.setScalar(pulse);
     this.marker.position.set(cx, 2.3 * c.look.height + Math.sin(time * 4) * 0.05, cz);
     this.marker.rotation.y = time * 1.5;
-    const show = match.phase !== 'fulltime' && !match.autoPlay;
+    const show = match.phase !== 'fulltime' && !match.autoPlay && !match.aimingShot;
     this.ring.visible = show;
     this.marker.visible = show;
   }
