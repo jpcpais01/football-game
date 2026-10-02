@@ -3,10 +3,11 @@ import type { Club } from '../meta/club';
 import { FREE_PACK_HOURS } from '../meta/club';
 import { type Card, STAT_LABEL, type StatKey, overall, sellValue, traitsOf, RARITY_LABEL } from '../meta/cards';
 import type { TeamInfo } from '../sim/teams';
-import { TEAMS } from '../sim/teams';
 import type { GameAudio } from '../ui/audio';
 import { avatarSVG, cardHTML, crestSVG, esc } from './cardView';
 import { SquadScreen } from './squad';
+import { ClubScreen } from './clubScreen';
+import { crestSVG as clubCrestSVG } from '../meta/crest';
 import { StoreScreen } from './store';
 
 export interface HomeHooks {
@@ -15,9 +16,11 @@ export interface HomeHooks {
   /** "Your banner": a photo the fans hold up in the stands. */
   bannerLabel(): string;
   onBanner(): Promise<void>;
+  /** Kit or crest changed: re-dress the players and the stadium. */
+  onIdentity(): void;
 }
 
-type ScreenName = 'home' | 'squad' | 'store';
+type ScreenName = 'home' | 'squad' | 'store' | 'club';
 
 export const fmt = (n: number) => n.toLocaleString('en-US');
 
@@ -39,6 +42,8 @@ export class HomeUI {
   private homeEl = document.createElement('div');
   private squad: SquadScreen;
   private store: StoreScreen;
+  private clubScreen: ClubScreen;
+  private identityTimer = 0;
   private current: ScreenName = 'home';
   private modal = document.createElement('div');
   private toastEl = document.createElement('div');
@@ -56,9 +61,10 @@ export class HomeUI {
     this.homeEl.className = 'screen screen-home';
     this.squad = new SquadScreen(this);
     this.store = new StoreScreen(this);
+    this.clubScreen = new ClubScreen(this);
     this.modal.className = 'modal hidden';
     this.toastEl.className = 'toast';
-    this.root.append(this.homeEl, this.squad.el, this.store.el, this.modal, this.toastEl);
+    this.root.append(this.homeEl, this.squad.el, this.store.el, this.clubScreen.el, this.modal, this.toastEl);
     parent.appendChild(this.root);
 
     // First touch anywhere unlocks audio (browsers need a gesture).
@@ -102,6 +108,8 @@ export class HomeUI {
     this.homeEl.classList.toggle('active', name === 'home');
     this.squad.el.classList.toggle('active', name === 'squad');
     this.store.el.classList.toggle('active', name === 'store');
+    this.clubScreen.el.classList.toggle('active', name === 'club');
+    if (name === 'club') this.clubScreen.render();
     if (name === 'squad') this.squad.render();
     if (name === 'store') this.store.render();
     if (name === 'home') this.renderHome();
@@ -133,7 +141,18 @@ export class HomeUI {
   }
 
   get kit() {
-    return TEAMS[0].kit;
+    return this.club.info().kit;
+  }
+
+  /** The club's crest as SVG. */
+  crest(cls = 'crest'): string {
+    return clubCrestSVG(this.club.state.crest, cls);
+  }
+
+  /** Kit / crest edits settle for a moment before the stadium is rebuilt. */
+  identityChanged(): void {
+    clearTimeout(this.identityTimer);
+    this.identityTimer = window.setTimeout(() => this.hooks.onIdentity(), 450);
   }
 
   toast(msg: string): void {
@@ -159,7 +178,7 @@ export class HomeUI {
   renderHome(): void {
     const c = this.club;
     const info = c.info();
-    const opp = TEAMS[1];
+    const opp = c.opponentInfo();
     const r = c.state.record;
     const myOvr = c.teamRating();
     const oppOvr = c.opponentLevel(this.nextSeed);
@@ -168,8 +187,8 @@ export class HomeUI {
     this.homeEl.innerHTML = `
       <header class="topbar">
         <button class="club-btn" aria-label="Club settings">
-          ${crestSVG(info.kit.shirt, info.kit.shirt2, info.short)}
-          <span><small>Your club</small><b>${esc(info.name)}</b></span>
+          ${this.crest()}
+          <span><small>Your club · edit</small><b>${esc(info.name)}</b></span>
         </button>
         <div class="record" title="Won · Drawn · Lost">
           <span><b>${r.won}</b>W</span><span><b>${r.drawn}</b>D</span><span><b>${r.lost}</b>L</span>
@@ -185,7 +204,7 @@ export class HomeUI {
           <h1 class="hero-title">Kick Off</h1>
           <div class="matchup">
             <div class="mu-team">
-              ${crestSVG(info.kit.shirt, info.kit.shirt2, info.short)}
+              ${this.crest()}
               <div><b>${esc(info.name)}</b><span>${myOvr} OVR</span></div>
             </div>
             <div class="mu-vs">VS</div>
@@ -228,7 +247,7 @@ export class HomeUI {
     q('.play-btn').addEventListener('click', () => this.hooks.onPlay(this.nextSeed));
     q('.squad-tile').addEventListener('click', () => this.go('squad'));
     q('.store-tile').addEventListener('click', () => this.go('store'));
-    q('.club-btn').addEventListener('click', () => this.clubSettings());
+    q('.club-btn').addEventListener('click', () => this.go('club'));
     q('.update').addEventListener('click', async (e) => {
       (e.currentTarget as HTMLButtonElement).textContent = 'Updating…';
       try {
@@ -241,7 +260,7 @@ export class HomeUI {
     });
   }
 
-  private clubSettings(): void {
+  clubSettings(): void {
     const box = this.openModal(
       `<button class="m-close" aria-label="Close">✕</button>
       <h3>Club</h3>
@@ -345,7 +364,7 @@ export class HomeUI {
         <div class="kicker">Full time</div>
         <h2 class="res-title">${label}</h2>
         <div class="res-score">
-          <div class="res-team">${crestSVG(home.kit.shirt, home.kit.shirt2, home.short)}<span>${esc(home.name)}</span></div>
+          <div class="res-team">${this.crest()}<span>${esc(home.name)}</span></div>
           <div class="res-num"><b>${gf}</b><em>–</em><b>${ga}</b></div>
           <div class="res-team">${crestSVG(away.kit.shirt, away.kit.shirt2, away.short)}<span>${esc(away.name)}</span></div>
         </div>

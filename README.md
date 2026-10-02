@@ -36,6 +36,12 @@ A mobile-first football game (PWA). Stylized look, realistic feel.
 - **Store:** Daily (free every 4 h), Bronze, Silver, Gold and Legend packs with rarity odds and
   guarantees. Win / draw / loss and goals earn coins; spare players can be quick-sold.
 
+- **Club studio** (tap your crest on the home screen): club name, kit designer (10 shirt
+  designs, main and secondary colour, shorts colour) and a crest maker (9 shapes, 12 field
+  divisions, 14 emblems, lettering, founding year, stars, borders, three colours). The crest
+  is flown on the fans' flags, painted on banners and held up in the tifo; the opponent
+  switches to a change kit if the colours clash.
+
 Code: `src/meta/` (cards, formations, club save, packs), `src/home/` (menus, tactics board, pack
 opening and its particle effects).
 

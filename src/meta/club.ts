@@ -1,6 +1,7 @@
 // The player's club: collection, line-up, coins. Saved on this device.
 
-import { TEAMS, type TeamInfo } from '../sim/teams';
+import { TEAMS, type Kit, type TeamInfo } from '../sim/teams';
+import { type Crest, defaultCrest } from './crest';
 import type { MatchSetup, TeamSetup } from '../sim/match';
 import { Rng, clamp } from '../sim/vec';
 import { type Card, type Position, type Rarity, generateCard, overall, ratingIn, roleOf, toSim, sellValue } from './cards';
@@ -18,6 +19,19 @@ export interface Lineup {
   custom: (FSlot | null)[];
 }
 
+/** The club's own kit: shirt design and colours. */
+export interface ClubKit {
+  pattern: number;
+  main: number;
+  secondary: number;
+  shorts: number;
+}
+
+export function defaultKit(): ClubKit {
+  const k = TEAMS[0].kit;
+  return { pattern: 0, main: k.shirt, secondary: k.shirt2, shorts: k.shorts };
+}
+
 export interface ClubState {
   v: 1;
   name: string;
@@ -26,6 +40,8 @@ export interface ClubState {
   lineup: Lineup;
   record: { played: number; won: number; drawn: number; lost: number; gf: number; ga: number };
   packsOpened: number;
+  kit: ClubKit;
+  crest: Crest;
   freePackAt: number; // ms timestamp when the free pack is next available
 }
 
@@ -61,6 +77,8 @@ export class Club {
       lineup: { formation: '433', slots: Array(11).fill(null), custom: Array(11).fill(null) },
       record: { played: 0, won: 0, drawn: 0, lost: 0, gf: 0, ga: 0 },
       packsOpened: 0,
+      kit: defaultKit(),
+      crest: defaultCrest(),
       freePackAt: 0,
     };
     this.state = s;
@@ -81,6 +99,8 @@ export class Club {
 
   /** Keep a loaded save consistent (missing cards, wrong lengths). */
   private repair(): void {
+    this.state.kit = { ...defaultKit(), ...(this.state.kit ?? {}) };
+    this.state.crest = { ...defaultCrest(), ...(this.state.crest ?? {}) };
     const l = this.state.lineup;
     l.slots = Array.from({ length: 11 }, (_, i) => l.slots?.[i] ?? null);
     l.custom = Array.from({ length: 11 }, (_, i) => l.custom?.[i] ?? null);
@@ -312,7 +332,30 @@ export class Club {
     const name = this.state.name;
     const words = name.toUpperCase().replace(/[^A-Z ]/g, '').split(/\s+/).filter(Boolean);
     const short = words.length >= 3 ? words.slice(0, 3).map((w) => w[0]).join('') : (words[0] ?? 'GNC').slice(0, 3);
-    return { ...TEAMS[0], name, short };
+    const k = this.state.kit;
+    const kit: Kit = { ...TEAMS[0].kit, shirt: k.main, shirt2: k.secondary, shorts: k.shorts, socks: k.main, pattern: k.pattern };
+    return { ...TEAMS[0], name, short, kit };
+  }
+
+  setKit(k: Partial<ClubKit>): void {
+    this.state.kit = { ...this.state.kit, ...k };
+    this.save();
+  }
+
+  setCrest(c: Partial<Crest>): void {
+    this.state.crest = { ...this.state.crest, ...c };
+    this.save();
+  }
+
+  /** The opponent's kit: their usual one, or the change kit if it would clash with ours. */
+  opponentInfo(): TeamInfo {
+    const base = TEAMS[1];
+    const ours = this.state.kit;
+    const dist = (a: number, b: number) => Math.hypot(((a >> 16) & 255) - ((b >> 16) & 255), ((a >> 8) & 255) - ((b >> 8) & 255), (a & 255) - (b & 255));
+    if (dist(ours.main, base.kit.shirt) > 120 && dist(ours.shorts, base.kit.shorts) > 60) return base;
+    const change: Kit = { ...base.kit, shirt: 0x1f6b4a, shirt2: 0xf1ebdc, shorts: 0xf1ebdc, socks: 0x1f6b4a };
+    if (dist(ours.main, change.shirt) < 120) Object.assign(change, { shirt: 0x2a2440, socks: 0x2a2440, shirt2: 0xffd447, shorts: 0x2a2440 });
+    return { ...base, kit: change };
   }
 
   teamSetup(): TeamSetup {
@@ -339,7 +382,7 @@ export class Club {
     const f = FORMATIONS[Math.floor(rng.next() * 3)];
     const rarityFor = (o: number): Rarity => (o >= 88 ? 'icon' : o >= 82 ? 'legendary' : o >= 74 ? 'epic' : o >= 64 ? 'rare' : 'common');
     return {
-      info: TEAMS[1],
+      info: this.opponentInfo(),
       players: f.slots.map((slot) => {
         const o = clamp(Math.round(level + rng.gauss() * 3), 45, 95);
         const c = generateCard(rng, rarityFor(o), slot.pos, o);
@@ -350,6 +393,15 @@ export class Club {
 
   matchSetup(seed: number): MatchSetup {
     return { teams: [this.teamSetup(), this.opponent(seed)] };
+  }
+
+  /** Walked off: booked as a 0-3 defeat, no coins. */
+  recordForfeit(): void {
+    const r = this.state.record;
+    r.played++;
+    r.lost++;
+    r.ga += 3;
+    this.save();
   }
 
   /** Book a finished match; returns the coins earned. */

@@ -365,7 +365,19 @@ function crowdMaterial(o: CrowdOpts): THREE.ShaderMaterial {
 }
 
 /** The ultras' card mosaic: their colours, the name in huge letters, stars. */
-function tifoTexture(home: number): THREE.CanvasTexture {
+/** The home club's identity for the stands: its crest (drawn async) and name. */
+export interface StadiumClub {
+  crest?: Promise<CanvasImageSource>;
+  name?: string;
+}
+
+/** Draws `img` (a 100 x 124 crest) centred at (x, y), `h` tall. */
+function drawCrest(c: CanvasRenderingContext2D, img: CanvasImageSource, x: number, y: number, h: number): void {
+  const w = h * (100 / 124);
+  c.drawImage(img, x - w / 2, y - h / 2, w, h);
+}
+
+function tifoTexture(home: number, club: StadiumClub): THREE.CanvasTexture {
   const cv = document.createElement('canvas');
   cv.width = 512;
   cv.height = 160;
@@ -399,13 +411,20 @@ function tifoTexture(home: number): THREE.CanvasTexture {
     g.textBaseline = 'middle';
     g.lineWidth = 10;
     g.strokeStyle = '#14123a';
-    g.strokeText('GAMENIGHT', 256, 84);
+    const word = crest ? (club.name ?? 'GAMENIGHT').toUpperCase() : 'GAMENIGHT';
+    g.strokeText(word, 256, 84, crest ? 300 : 480);
     g.fillStyle = '#ffd447';
-    g.fillText('GAMENIGHT', 256, 84);
+    g.fillText(word, 256, 84, crest ? 300 : 480);
+    if (crest) {
+      drawCrest(g, crest, 62, 82, 112);
+      drawCrest(g, crest, 450, 82, 112);
+    }
     tex.needsUpdate = true;
   };
+  let crest: CanvasImageSource | null = null;
   draw();
   void document.fonts?.ready.then(draw);
+  void club.crest?.then((img) => ((crest = img), draw()));
   return tex;
 }
 
@@ -674,7 +693,7 @@ function adBoards(): THREE.InstancedMesh {
  * Flags on poles, waved by fans in the stands: each swings side to side around the pole's
  * foot while the cloth ripples. Most are in the ultras' end.
  */
-function crowdFlags(path: PathPt[], home: number, away: number): THREE.InstancedMesh {
+function crowdFlags(path: PathPt[], home: number, away: number, club: StadiumClub): THREE.InstancedMesh {
   const cloth = new THREE.PlaneGeometry(2.4, 1.5, 8, 3);
   cloth.translate(1.2, 2.45, 0);
   cloth.setAttribute('aCloth', new THREE.Float32BufferAttribute(new Array(cloth.attributes.position.count).fill(1), 1));
@@ -687,21 +706,38 @@ function crowdFlags(path: PathPt[], home: number, away: number): THREE.Instanced
   const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
   const byZone = (z: number) => path.filter((p) => p.zone === z);
   const spots: { p: PathPt; o: number; c: number; c2: number; pat: number; size: number }[] = [];
-  const add = (pts: PathPt[], n: number, cols: number[][], big: number) => {
+  const add = (pts: PathPt[], n: number, cols: number[][], big: number, crestShare = 0) => {
     for (let i = 0; i < n; i++) {
       const c = cols[Math.floor(rnd() * cols.length)];
-      spots.push({ p: pts[Math.floor(rnd() * pts.length)], o: 1.5 + rnd() * 15, c: c[0], c2: c[1], pat: Math.floor(rnd() * 7), size: 0.8 + rnd() * big });
+      // Pattern 4 is the club crest (when there is one), on the club colour.
+      const crest = rnd() < crestShare;
+      spots.push({ p: pts[Math.floor(rnd() * pts.length)], o: 1.5 + rnd() * 15, c: crest ? home : c[0], c2: crest ? W : c[1], pat: crest ? 4 : Math.floor(rnd() * 7), size: 0.8 + rnd() * big });
     }
   };
   const W = 0xf3eee2;
   const N = 0x14123a;
-  add(byZone(1), 34, [[home, W], [home, N], [W, home], [0xffd447, home]], 0.7);
+  const crestShare = club.crest ? 0.35 : 0;
+  add(byZone(1), 34, [[home, W], [home, N], [W, home], [0xffd447, home]], 0.7, crestShare);
   add(byZone(2), 12, [[away, W], [W, away], [away, N]], 0.4);
-  add(byZone(0), 18, [[home, W], [W, home], [away, W]], 0.35);
+  add(byZone(0), 18, [[home, W], [W, home], [away, W]], 0.35, crestShare * 0.6);
+
+  const crestCv = document.createElement('canvas');
+  crestCv.width = 128;
+  crestCv.height = 160;
+  const crestTex = new THREE.CanvasTexture(crestCv);
+  crestTex.colorSpace = THREE.SRGBColorSpace;
+  const hasCrest = { value: 0 };
+  void club.crest?.then((img) => {
+    const g = crestCv.getContext('2d')!;
+    g.clearRect(0, 0, 128, 160);
+    g.drawImage(img, 0, 0, 128, 160);
+    crestTex.needsUpdate = true;
+    hasCrest.value = 1;
+  });
 
   const mat = new THREE.ShaderMaterial({
     side: THREE.DoubleSide,
-    uniforms: { ...U, uWind: SHARED.uWind },
+    uniforms: { ...U, uWind: SHARED.uWind, uCrest: { value: crestTex }, uHasCrest: hasCrest },
     vertexShader: /* glsl */ `
       uniform float uTime, uExcite;
       uniform vec2 uWind;
@@ -755,6 +791,8 @@ function crowdFlags(path: PathPt[], home: number, away: number): THREE.Instanced
     fragmentShader: /* glsl */ `
       uniform vec3 uLight, uFog;
       uniform float uFogNear, uFogFar, uHaze;
+      uniform sampler2D uCrest;
+      uniform float uHasCrest;
       varying vec2 vUv;
       varying vec3 vCol;
       varying vec3 vCol2;
@@ -775,6 +813,12 @@ function crowdFlags(path: PathPt[], home: number, away: number): THREE.Instanced
         else if (vPat < 5.5) b = mod(floor(u.x * 4.0) + floor(u.y * 3.0), 2.0);         // chequers
         else b = step(0.5, fract(u.y * 2.5));                                            // hoops
         vec3 c = vPat > 9.5 ? vec3(0.22) : mix(vCol, vCol2, b);
+        if (uHasCrest > 0.5 && vPat > 3.5 && vPat < 4.5) {
+          // The club crest in the middle of the cloth (cloth 2.4 x 1.5 m, crest 100 x 124).
+          vec2 cu = vec2((u.x - 0.3) / 0.4, (u.y - 0.1) / 0.8);
+          vec4 cr = (cu.x > 0.0 && cu.x < 1.0 && cu.y > 0.0 && cu.y < 1.0) ? texture2D(uCrest, cu) : vec4(0.0);
+          c = mix(vCol, cr.rgb, cr.a);
+        }
         // Stitched hem round the fly edges.
         float hem = max(step(0.96, u.x), max(step(u.y, 0.04), step(0.96, u.y)));
         c *= vPat > 9.5 ? 1.0 : 1.0 - hem * 0.18;
@@ -1043,10 +1087,16 @@ function sky(): THREE.Mesh {
  * Supporters' banners hung over the railings at the front of the lower tier, plus the
  * ultras' giant drop banner over the hospitality band behind the home goal.
  */
-function banners(path: PathPt[], home: number, away: number): THREE.Group {
+function banners(path: PathPt[], home: number, away: number, club: StadiumClub): THREE.Group {
   const g = new THREE.Group();
   const hex = (c: number) => '#' + c.toString(16).padStart(6, '0');
-  const make = (text: string, bg: string, fg: string, w: number, hgt: number, style: number) => {
+  let crest: CanvasImageSource | null = null;
+  const redraw: (() => void)[] = [];
+  void club.crest?.then((img) => {
+    crest = img;
+    for (const f of redraw) f();
+  });
+  const make = (text: string, bg: string, fg: string, w: number, hgt: number, style: number, crests = false) => {
     const cv = document.createElement('canvas');
     cv.width = 512;
     cv.height = Math.round((512 * hgt) / w / 4) * 4 || 64;
@@ -1086,7 +1136,12 @@ function banners(path: PathPt[], home: number, away: number): THREE.Group {
       c.font = `800 ${Math.round(H * 0.62)}px "Barlow Condensed", "Arial Narrow", sans-serif`;
       c.textAlign = 'center';
       c.textBaseline = 'middle';
-      const maxW = 512 - (style === 1 ? 150 : 40);
+      const withCrest = crests && crest;
+      const maxW = 512 - (style === 1 ? 150 : 40) - (withCrest ? H * 1.6 : 0);
+      if (withCrest) {
+        drawCrest(c, crest!, H * 0.62, H * 0.53, H * 0.8);
+        drawCrest(c, crest!, 512 - H * 0.62, H * 0.53, H * 0.8);
+      }
       // Hand-painted lettering: a dark outline under the paint so it reads from afar.
       c.lineJoin = 'round';
       c.lineWidth = H * 0.07;
@@ -1119,6 +1174,7 @@ function banners(path: PathPt[], home: number, away: number): THREE.Group {
     };
     draw();
     void document.fonts?.ready.then(draw);
+    if (crests) redraw.push(draw);
     const mat = windCloth(litMaterial({ roughness: 0.9 }), 0.22, 'top', w, hgt);
     mat.map = tex;
     mat.side = THREE.DoubleSide;
@@ -1127,11 +1183,12 @@ function banners(path: PathPt[], home: number, away: number): THREE.Group {
   const W = '#f3eee2';
   const N = '#14123a';
   // [text, bg, fg, width, style, zone, fraction along the zone's straight]
-  const list: [string, string, string, number, number, number, number][] = [
+  const name = (club.name ?? 'ROSSONERI').toUpperCase();
+  const list: [string, string, string, number, number, number, number, boolean?][] = [
     ['CURVA ROSSA', hex(home), W, 15, 1, 1, 0.22],
-    ['ULTRAS 1903', N, hex(home), 11, 0, 1, 0.5],
-    ['SEMPRE CON VOI', W, hex(home), 14, 2, 1, 0.8],
-    ['ROSSONERI', hex(home), W, 12, 0, 0, 0.12],
+    ['ULTRAS 1903', N, hex(home), 11, 0, 1, 0.5, true],
+    ['SEMPRE CON VOI', W, hex(home), 14, 2, 1, 0.8, true],
+    [name, hex(home), W, 13, 0, 0, 0.12, true],
     ['GAMENIGHT', N, '#ffd447', 11, 2, 0, 0.36],
     ['BIG NIGHT', W, N, 9, 1, 0, 0.6],
     ['ATLANTIC 1903', hex(away), N, 13, 0, 0, 0.86],
@@ -1139,10 +1196,10 @@ function banners(path: PathPt[], home: number, away: number): THREE.Group {
     ['AWAY DAYS', hex(away), W, 10, 2, 2, 0.72],
   ];
   const straights = [0, 1, 2].map((z) => path.filter((p) => p.zone === z && (z === 0 ? p.nz === -1 : Math.abs(p.nx) === 1)));
-  for (const [text, bg, fg, w, style, zone, f] of list) {
+  for (const [text, bg, fg, w, style, zone, f, crests] of list) {
     const pts = straights[zone];
     const p = pts[Math.min(pts.length - 1, Math.floor(f * pts.length))];
-    const m = make(text, bg, fg, w, 1.35, style);
+    const m = make(text, bg, fg, w, 1.35, style, crests);
     const v = at(p, -0.08, 0.72);
     m.position.copy(v);
     m.rotation.y = Math.atan2(-p.nx, -p.nz);
@@ -1150,7 +1207,7 @@ function banners(path: PathPt[], home: number, away: number): THREE.Group {
   }
   // The drop banner over the boxes in the home end.
   const end = straights[1][Math.floor(straights[1].length / 2)];
-  const drop = make('ONE CLUB · ONE NIGHT', hex(home), W, 34, 4.2, 2);
+  const drop = make('ONE CLUB · ONE NIGHT', hex(home), W, 34, 4.2, 2, true);
   drop.position.copy(at(end, 20.9, 15.8 - 2.1));
   drop.rotation.y = Math.atan2(-end.nx, -end.nz);
   g.add(drop);
@@ -1215,7 +1272,7 @@ function fanBanners(path: PathPt[], home: number): { group: THREE.Group; set(pho
   };
 }
 
-export function createStadium(homeColor: number, awayColor: number): Stadium {
+export function createStadium(homeColor: number, awayColor: number, club: StadiumClub = {}): Stadium {
   const group = new THREE.Group();
   group.add(sky());
 
@@ -1249,7 +1306,7 @@ export function createStadium(homeColor: number, awayColor: number): Stadium {
     home: homeColor,
     away: awayColor,
     shade: [9, 17],
-    tifo: { tex: tifoTexture(homeColor), rect: new THREE.Vector4(homeU[0] + 1, homeU[1] - 1, 0.6, lowerSlope - 0.4) },
+    tifo: { tex: tifoTexture(homeColor, club), rect: new THREE.Vector4(homeU[0] + 1, homeU[1] - 1, 0.6, lowerSlope - 0.4) },
   });
   const upperCrowd = crowdMaterial({ home: homeColor, away: awayColor, shade: [-2, 12], stripes: true });
 
@@ -1311,8 +1368,8 @@ export function createStadium(homeColor: number, awayColor: number): Stadium {
   }
 
   group.add(adBoards());
-  group.add(crowdFlags(path, homeColor, awayColor));
-  group.add(banners(path, homeColor, awayColor));
+  group.add(crowdFlags(path, homeColor, awayColor, club));
+  group.add(banners(path, homeColor, awayColor, club));
   group.add(bakeStatic(pitchside(homeColor, awayColor)));
   const shafts = lightShafts(spots);
   group.add(shafts);

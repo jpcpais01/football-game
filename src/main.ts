@@ -20,6 +20,7 @@ import { Controls } from './ui/controls';
 import { Hud } from './ui/hud';
 import { GameAudio } from './ui/audio';
 import { Club } from './meta/club';
+import { crestCanvas } from './meta/crest';
 import { HomeUI } from './home/home';
 
 const app = document.getElementById('app')!;
@@ -60,8 +61,24 @@ let match = new Match(Date.now() & 0xffff, club.matchSetup(Date.now() & 0xffff))
 match.autoPlay = true;
 
 scene.add(createPitch(renderer));
-const stadium = createStadium(match.teams[0].info.kit.shirt, match.teams[1].info.kit.shirt);
+// The stands wear the club's colours and crest; rebuilt when the kit or crest changes.
+const makeStadium = () => createStadium(club.info().kit.shirt, club.opponentInfo().kit.shirt, { crest: crestCanvas(club.state.crest, 256), name: club.info().name });
+let stadium = makeStadium();
 scene.add(stadium.group);
+let fanPhoto: HTMLCanvasElement | null = null;
+
+function rebuildStadium(): void {
+  scene.remove(stadium.group);
+  stadium.group.traverse((o) => {
+    const m = o as THREE.Mesh;
+    m.geometry?.dispose();
+    const mats = Array.isArray(m.material) ? m.material : m.material ? [m.material] : [];
+    for (const mat of mats) mat.dispose();
+  });
+  stadium = makeStadium();
+  scene.add(stadium.group);
+  if (fanPhoto) stadium.setFanBanner(fanPhoto);
+}
 const goals = createGoals();
 scene.add(goals.group);
 const officials = new Officials();
@@ -70,7 +87,7 @@ playersView.officials = officials;
 scene.add(playersView.group);
 const ballView = new BallView();
 scene.add(ballView.group);
-const particles = new Particles(match.teams[0].info.kit.shirt, match.teams[1].info.kit.shirt);
+let particles = new Particles(match.teams[0].info.kit.shirt, match.teams[1].info.kit.shirt);
 scene.add(particles.points);
 const rig = new CameraRig(window.innerWidth / window.innerHeight);
 playersView.camera = rig.camera;
@@ -128,6 +145,17 @@ const home = new HomeUI(ui, club, audio, {
     const photo = await pickFanBanner();
     if (photo) setFanBanner(photo);
   },
+  onIdentity: () => {
+    rebuildStadium();
+    scene.remove(particles.points);
+    particles = new Particles(club.info().kit.shirt, club.opponentInfo().kit.shirt);
+    scene.add(particles.points);
+    // Re-dress the attract-mode match behind the menus.
+    if (!playing) {
+      newMatch();
+      match.autoPlay = true;
+    }
+  },
 });
 home.show();
 
@@ -150,7 +178,7 @@ pauseMenu.innerHTML = `
     <h2>Paused</h2>
     <button class="resume">Resume</button>
     <button class="restart ghost">Restart match</button>
-    <button class="quit ghost">Quit to menu</button>
+    <button class="quit ghost">Forfeit match</button>
     <button class="weather ghost">Match: Evening</button>
     <button class="graphics ghost">Graphics: Pixel</button>
     <button class="camera ghost">Camera: Normal</button>
@@ -291,9 +319,18 @@ pauseMenu.querySelector('.restart')!.addEventListener('click', () => {
   newMatch(matchSeed);
   setPaused(false);
 });
-pauseMenu.querySelector('.quit')!.addEventListener('click', () => {
+// Forfeit: back to the menu mid-match, booked as a 0-3 defeat. Two taps, so it's never by accident.
+const quitBtn = pauseMenu.querySelector('.quit') as HTMLButtonElement;
+quitBtn.addEventListener('click', () => {
+  if (!quitBtn.classList.contains('armed')) {
+    quitBtn.classList.add('armed');
+    quitBtn.textContent = 'Tap again: lose 0–3';
+    return;
+  }
+  club.recordForfeit();
   setPaused(false);
   backToMenu();
+  home.toast('Match forfeited · 0–3 defeat');
 });
 const weatherBtn = pauseMenu.querySelector('.weather') as HTMLButtonElement;
 const weatherLabel = () => (weatherBtn.textContent = `Match: ${atmo.weather === 'sunny' ? 'Sunny day' : 'Evening'}`);
@@ -346,6 +383,7 @@ let hasFanBanner = false;
 const fanBtn = pauseMenu.querySelector('.fan') as HTMLButtonElement;
 function setFanBanner(photo: HTMLCanvasElement | null): void {
   hasFanBanner = photo !== null;
+  fanPhoto = photo;
   stadium.setFanBanner(photo);
   fanBtn.textContent = hasFanBanner ? 'Your banner: remove' : 'Your banner: add photo';
 }
@@ -363,6 +401,8 @@ fanBtn.addEventListener('click', async () => {
 function setPaused(p: boolean): void {
   if (!playing) return;
   paused = p;
+  quitBtn.classList.remove('armed');
+  quitBtn.textContent = 'Forfeit match';
   pauseMenu.classList.toggle('hidden', !p);
   controls.enabled = !p;
   if (p) audio.suspend();

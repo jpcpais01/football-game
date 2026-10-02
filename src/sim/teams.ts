@@ -8,7 +8,11 @@ export interface Kit {
   socks: number;
   gkShirt: number;
   gkShorts: number;
+  /** Shirt design, index into KIT_PATTERNS (0 = plain). */
+  pattern?: number;
 }
+
+export const KIT_PATTERNS = ['Plain', 'Stripes', 'Hoops', 'Pinstripes', 'Halves', 'Sash', 'Chevron', 'Quarters', 'Centre band', 'Fade'];
 
 export interface TeamInfo {
   name: string;
