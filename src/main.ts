@@ -215,8 +215,11 @@ aimMark.className = 'aim-mark';
 aimMark.innerHTML = '<i></i>';
 ui.appendChild(aimMark);
 const aimPos = new THREE.Vector3();
+/** Where the aiming reticle is on screen this frame (null when it isn't shown). */
+let aimScreen: { x: number; y: number } | null = null;
 
 function updateAim(): void {
+  aimScreen = null;
   const a = playing && !paused && match.aimingShot ? match.aimPoint() : null;
   if (!a) {
     aimMark.classList.remove('show');
@@ -226,6 +229,7 @@ function updateAim(): void {
   if (aimPos.z > 1) return aimMark.classList.remove('show');
   const x = (aimPos.x * 0.5 + 0.5) * window.innerWidth;
   const y = (-aimPos.y * 0.5 + 0.5) * window.innerHeight;
+  aimScreen = { x, y };
   aimMark.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
   // Off target (wide or over the bar): the reticle turns red.
   const off = Math.abs(a.z) > PITCH.goalHalfWidth - 0.1 || a.y > PITCH.goalHeight - 0.1;
@@ -256,11 +260,20 @@ function updateCharge(alpha: number): void {
   charge.classList.toggle('lofted', !shot && inp.swipe[btn]);
   chargeTick.style.display = shot ? '' : 'none';
   chargeTick.style.left = `${(1 / 1.15) * 100}%`;
-  const c = match.controlled;
-  headPos.set(c.prevPos.x + (c.pos.x - c.prevPos.x) * alpha, 2.45 * c.look.height, c.prevPos.z + (c.pos.z - c.prevPos.z) * alpha);
-  headPos.project(rig.camera);
-  const x = (headPos.x * 0.5 + 0.5) * window.innerWidth;
-  const y = (-headPos.y * 0.5 + 0.5) * window.innerHeight;
+  let x: number;
+  let y: number;
+  if (aimScreen) {
+    // Free kick / penalty: the bar sits right over the aiming reticle, where the eyes are.
+    x = aimScreen.x;
+    y = aimScreen.y - 32;
+  } else {
+    // Open play: above the active player's head.
+    const c = match.controlled;
+    headPos.set(c.prevPos.x + (c.pos.x - c.prevPos.x) * alpha, 2.45 * c.look.height, c.prevPos.z + (c.pos.z - c.prevPos.z) * alpha);
+    headPos.project(rig.camera);
+    x = (headPos.x * 0.5 + 0.5) * window.innerWidth;
+    y = (-headPos.y * 0.5 + 0.5) * window.innerHeight;
+  }
   charge.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
   charge.classList.add('show');
 }
@@ -647,8 +660,8 @@ function frame(now: number): void {
   const tifo = match.phase === 'kickoff' || (match.phase === 'play' && match.clock < 8) ? 1 : 0;
   stadium.update(now / 1000, match.excitement, atmo, tifo);
   if (playing) hud.update(match, now / 1000);
-  updateCharge(alpha);
   updateAim();
+  updateCharge(alpha);
 
   particles.setScale(pixelLook() ? pixelPass.pixelHeight : renderer.domElement.height, rig.camera.fov);
   particles.update(running ? dt : 0, now / 1000, match, rig.focusX, rig.focusZ);
