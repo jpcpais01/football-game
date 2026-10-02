@@ -146,8 +146,8 @@ export class Hud {
         k === 'corner' ? 'Corner'
         : k === 'throw' ? 'Throw-in'
         : k === 'goalkick' ? 'Goal kick'
-        : k === 'penalty' ? (mine ? 'Penalty · aim with the stick · hold Shoot' : 'Penalty')
-        : k === 'freekick' ? (mine && m.setPiece.direct ? 'Free kick · Shoot: over the wall · Pass / Lob: play it' : 'Free kick')
+        : k === 'penalty' ? (mine ? 'Penalty · Stick: aim · Hold Shoot' : 'Penalty')
+        : k === 'freekick' ? (mine && m.setPiece.direct ? 'Stick: aim · Hold Shoot · Pass: play it' : 'Free kick')
         : '';
     } else if (m.phase === 'kickoff' && m.setPiece && m.setPiece.team === m.humanTeam && m.setPiece.t > 1.2) {
       banner = 'Pass to kick off';

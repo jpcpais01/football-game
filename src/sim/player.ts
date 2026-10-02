@@ -34,6 +34,9 @@ export interface KickPlan {
   power: number; // 0..1: shot power, or pass weight
   /** Lofted (chipped / clipped) instead of along the ground. */
   lofted?: boolean;
+  /** Dead-ball shots aimed on the goal mouth: across (world z) and height (m). */
+  aimZ?: number;
+  aimY?: number;
   targetId: number; // receiver, -1 for none
   expires: number; // sim time
 }
@@ -70,6 +73,12 @@ export class Player {
   kickPower = 0;
   kickLofted = false;
   kickRel = 0;
+  /** Seconds from the start of the strike to the ball leaving the foot (wind-up + swing). */
+  kickContact = 0.15;
+  /** The strike is with the weaker foot. */
+  kickWeak = false;
+  /** Preferred foot: 1 = right, -1 = left. */
+  foot = 1;
   /** Throw-in (two hands) rather than a keeper's one-arm throw. */
   throwIn = false;
   /** Height the keeper caught the ball at (for the catch animation). */
@@ -165,8 +174,15 @@ export class Player {
     if (this.action !== 'none') {
       this.actionT += dt;
       const a = this.action;
-      if (a === 'kick' || a === 'header' || a === 'throw') {
-        // Strike on the run: plant foot costs some momentum.
+      if (a === 'kick' && this.actionT >= this.kickContact) {
+        // Follow-through: the body is carried on through the ball, then the player
+        // gathers himself and runs on the way he wants to go.
+        const k = clamp((this.actionT - this.kickContact) / Math.max(0.01, this.actionDur - this.kickContact), 0, 1);
+        const blend = k * k;
+        tx = this.vel.x * 0.97 * (1 - blend) + this.moveX * this.wantSpeed * blend;
+        tz = this.vel.z * 0.97 * (1 - blend) + this.moveZ * this.wantSpeed * blend;
+      } else if (a === 'kick' || a === 'header' || a === 'throw') {
+        // Strike on the run: the plant foot brakes the body.
         const keep = a === 'throw' ? 0.4 : 0.8;
         tx = this.vel.x * keep;
         tz = this.vel.z * keep;

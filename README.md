@@ -14,6 +14,9 @@ A mobile-first football game (PWA). Stylized look, realistic feel.
   - Attack: **Pass** and **Through** (hold = pass weight, slide up while holding = lofted),
     **Shoot** (hold for power), **Sprint**.
   - Defence: **Switch**, **Press** (hold), **Tackle** (double-tap to slide).
+  - Direct free kicks and penalties: the camera drops in behind the taker; the stick moves a
+    target on the goal mouth, hold Shoot for power. When he starts his run-up the camera
+    cranes back to the broadcast view.
   - Keyboard: WASD/arrows, Shift to sprint, J / K / L for the three buttons, U / O for lofted pass /
     lofted through ball.
 

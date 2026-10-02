@@ -42,6 +42,11 @@ export class CameraRig {
   private lastShot = 0;
   private cinePos = new THREE.Vector3();
   private cineLook = new THREE.Vector3();
+  /** Third-person shot behind a dead-ball taker (0 = broadcast view, 1 = behind him). */
+  private pov = 0;
+  private povPos = new THREE.Vector3();
+  private povLook = new THREE.Vector3();
+  private baseFov = 30;
   /** Base distance from the play; set by the camera setting. */
   baseDist: number = CAMERA_PRESETS.normal;
 
@@ -65,7 +70,8 @@ export class CameraRig {
   setAspect(aspect: number): void {
     this.camera.aspect = aspect;
     // Narrow screens see less of the pitch side to side; pull back a little.
-    this.camera.fov = aspect < 1.6 ? 36 : 30;
+    this.baseFov = aspect < 1.6 ? 36 : 30;
+    this.camera.fov = this.baseFov;
     this.camera.updateProjectionMatrix();
   }
 
@@ -157,9 +163,48 @@ export class CameraRig {
     if (!pixel) this.dist += ((this.distOverride || wantDist) - this.dist) * k * 0.3;
     else this.dist = this.distOverride || this.baseDist;
     this.shake *= Math.exp(-dt * 6);
+    this.updatePov(match, alpha, dt);
     this.cine += ((this.cinematic || this.crowdShot ? 1 : 0) - this.cine) * (1 - Math.exp(-dt * (this.crowdShot ? 1.9 : 1.5)));
     if (this.cine < 0.002) this.cine = this.lastShot = 0;
     this.place(time);
+  }
+
+  /**
+   * Lining up a free kick or penalty: the camera drops in behind the taker, over the
+   * shoulder away from the ball, looking down the line of the shot at the goal. The
+   * moment he sets off on his run-up it eases back up to the broadcast view.
+   */
+  private updatePov(match: Match, alpha: number, dt: number): void {
+    const want = match.aimingShot ? 1 : 0;
+    const sp = match.setPiece;
+    if (want && sp) {
+      const t = sp.taker;
+      const tx = lerp(t.prevPos.x, t.pos.x, alpha);
+      const tz = lerp(t.prevPos.z, t.pos.z, alpha);
+      const aim = match.aimPoint()!;
+      // Down the line from the taker to the goal (biased a little toward the aim).
+      const gx = aim.x;
+      const gz = aim.z * 0.35;
+      let ux = gx - tx;
+      let uz = gz - tz;
+      const n = Math.hypot(ux, uz) || 1;
+      ux /= n;
+      uz /= n;
+      const rx = -uz;
+      const rz = ux;
+      // Over the shoulder on the ball's side (a right-footer stands left of the ball, so his
+      // right shoulder): the taker sits to one side of the frame, ball and goal stay clear.
+      const side = t.foot;
+      const h = t.look.height;
+      this.povPos.set(tx - ux * 2.7 + rx * side * 1.05, 1.95 * h, tz - uz * 2.7 + rz * side * 1.05);
+      // Look between the ball and the goal mouth: ball low in the frame, goal and wall above it.
+      const k = sp.kind === 'penalty' ? 0.75 : 0.62;
+      this.povLook.set(lerp(sp.x, gx, k), 1.05, lerp(sp.z, gz, k));
+    }
+    // Quick cut in, a smooth crane back out as he runs up.
+    const rate = want ? 3.2 : 2.0;
+    this.pov += (want - this.pov) * (1 - Math.exp(-dt * rate));
+    if (this.pov < 0.002) this.pov = 0;
   }
 
   /** Move `aim` the least so that point p lies within [aim - far, aim + near] (z: + is nearer the camera). */
@@ -195,6 +240,21 @@ export class CameraRig {
     }
     cam.position.set(tx + sx, Math.sin(pitch) * this.dist + sy, tz + Math.cos(pitch) * this.dist);
     this.look.set(tx, 0, tz);
+    if (this.pov > 0) {
+      const k = this.pov * this.pov * (3 - 2 * this.pov);
+      cam.position.lerp(this.povPos, k);
+      this.look.lerp(this.povLook, k);
+      this.subPixelX *= 1 - k;
+      this.subPixelY *= 1 - k;
+      const fov = lerp(this.baseFov, 46, k);
+      if (Math.abs(cam.fov - fov) > 0.01) {
+        cam.fov = fov;
+        cam.updateProjectionMatrix();
+      }
+    } else if (cam.fov !== this.baseFov) {
+      cam.fov = this.baseFov;
+      cam.updateProjectionMatrix();
+    }
     if (this.cine > 0) {
       // A slow crane sweep from the open near side across the bowl: the far stands, the
       // ultras' end, the roof lights.
