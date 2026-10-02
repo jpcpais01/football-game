@@ -202,8 +202,8 @@ button.tile:hover .chev { transform: translateX(4px); }
   container-type: inline-size;
 }
 .pack-foil {
-  position: absolute; inset: -50%; pointer-events: none; mix-blend-mode: overlay;
-  background: repeating-linear-gradient(120deg, transparent 0 8%, rgba(255, 255, 255, 0.55) 10%, transparent 13% 22%);
+  position: absolute; inset: -50%; pointer-events: none; will-change: transform;
+  background: repeating-linear-gradient(120deg, transparent 0 8%, rgba(255, 255, 255, 0.22) 10%, transparent 13% 22%);
   animation: foil 4.5s linear infinite;
 }
 @keyframes foil { from { transform: translateX(-12%); } to { transform: translateX(12%); } }
@@ -279,23 +279,27 @@ button.tile:hover .chev { transform: translateX(4px); }
     linear-gradient(160deg, #fff0a0, #f2c23a 45%, #b5810f 80%, #7a5306);
 }
 .pcard.r-epic { --ink-c: #2a1c02; }
-.r-legendary .pc-bg {
-  background:
-    radial-gradient(ellipse at 70% 18%, rgba(255, 220, 255, 0.85), transparent 50%),
-    conic-gradient(from 200deg at 30% 80%, #2a0f55, #7a2fd0, #c27bff, #ff8ad8, #7a2fd0, #2a0f55);
-  background-size: 100% 100%, 160% 160%; animation: legend-shift 6s ease-in-out infinite alternate;
+.r-legendary .pc-bg { background: linear-gradient(160deg, #6a2bc2, #2a0f55); overflow: hidden; }
+.r-legendary .pc-bg::before {
+  content: ''; position: absolute; inset: -40%; will-change: transform; animation: card-swirl 9s linear infinite;
+  background: conic-gradient(from 200deg, #2a0f55, #7a2fd0, #c27bff, #ff8ad8, #7a2fd0, #2a0f55);
 }
+.r-legendary .pc-bg::after {
+  content: ''; position: absolute; inset: 0; background: radial-gradient(ellipse at 70% 18%, rgba(255, 220, 255, 0.8), transparent 50%);
+}
+@keyframes card-swirl { to { transform: rotate(360deg); } }
 .pcard.r-legendary, .pcard.r-icon { --ink-c: #ffffff; }
 .r-legendary .pc-top, .r-legendary .pc-bottom, .r-icon .pc-top, .r-icon .pc-bottom { text-shadow: 0 0.06em 0.2em rgba(0, 0, 0, 0.5); }
-@keyframes legend-shift { to { background-position: 0 0, 100% 100%; } }
-.r-icon .pc-bg {
-  background:
-    radial-gradient(ellipse at 50% 30%, rgba(255, 255, 255, 0.5), transparent 55%),
-    linear-gradient(115deg, #ff7ae6, #ffe27a, #7ff6ff, #9a7bff, #ff7ae6);
-  background-size: 100% 100%, 300% 300%; animation: icon-shift 4s linear infinite;
+.r-icon .pc-bg { background: #9a7bff; overflow: hidden; }
+.r-icon .pc-bg::before {
+  content: ''; position: absolute; top: 0; bottom: 0; left: 0; width: 300%; will-change: transform; animation: icon-slide 5s linear infinite;
+  background: linear-gradient(115deg, #ff7ae6, #ffe27a, #7ff6ff, #9a7bff, #ff7ae6, #ffe27a, #7ff6ff, #9a7bff, #ff7ae6);
 }
-.r-icon .pc-bg::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10, 10, 30, 0.05), rgba(10, 10, 30, 0.6)); }
-@keyframes icon-shift { to { background-position: 0 0, 300% 0; } }
+.r-icon .pc-bg::after {
+  content: ''; position: absolute; inset: 0;
+  background: radial-gradient(ellipse at 50% 30%, rgba(255, 255, 255, 0.45), transparent 55%), linear-gradient(180deg, rgba(10, 10, 30, 0.05), rgba(10, 10, 30, 0.6));
+}
+@keyframes icon-slide { to { transform: translateX(-50%); } }
 .pc-top { position: absolute; left: 0.75em; top: 0.75em; display: flex; flex-direction: column; align-items: center; z-index: 2; }
 .pc-ovr { font-size: 2.7em; font-weight: 800; line-height: 0.88; }
 .pc-pos { font-size: 1.05em; font-weight: 800; letter-spacing: 0.06em; }
@@ -316,8 +320,8 @@ button.tile:hover .chev { transform: translateX(4px); }
 .pc-stats b { font-weight: 800; margin-right: 0.2em; font-size: 1.12em; }
 .pc-rar { position: absolute; left: 0; right: 0; bottom: 0.65em; text-align: center; font-size: 0.62em; font-weight: 800; letter-spacing: 0.32em; text-transform: uppercase; opacity: 0.65; }
 .pc-shine {
-  position: absolute; inset: -20%; pointer-events: none; z-index: 3; mix-blend-mode: soft-light;
-  background: linear-gradient(110deg, transparent 38%, rgba(255, 255, 255, 0.85) 48%, transparent 58%);
+  position: absolute; inset: -20%; pointer-events: none; z-index: 3; will-change: transform;
+  background: linear-gradient(110deg, transparent 40%, rgba(255, 255, 255, 0.32) 48%, rgba(255, 255, 255, 0.5) 50%, rgba(255, 255, 255, 0.32) 52%, transparent 60%);
   transform: translateX(-70%); animation: card-shine 5s ease-in-out infinite;
 }
 .r-common .pc-shine { animation-duration: 8s; opacity: 0.6; }
@@ -526,26 +530,25 @@ button.tile:hover .chev { transform: translateX(4px); }
 
 /* ================================================================ pack opening */
 .opening {
-  position: absolute; inset: 0; z-index: 40; overflow: hidden; background: #04050a; opacity: 0; transition: opacity 0.3s, --rc 0.6s;
+  position: absolute; inset: 0; z-index: 40; overflow: hidden; background: #04050a; opacity: 0; transition: opacity 0.3s;
   touch-action: none; cursor: pointer;
 }
 .opening.in { opacity: 1; }
 .op-bg {
-  position: absolute; inset: 0; transition: --rc 0.6s;
+  position: absolute; inset: 0;
   background:
     radial-gradient(circle at 50% 55%, color-mix(in srgb, var(--rc) 30%, transparent), transparent 58%),
     radial-gradient(ellipse at 50% 120%, color-mix(in srgb, var(--rc) 18%, transparent), transparent 60%),
     linear-gradient(#04050a, #0b0d1a);
 }
 .op-rays {
-  position: absolute; left: 50%; top: 50%; width: 220vmax; height: 220vmax; margin: -110vmax 0 0 -110vmax; opacity: 0; pointer-events: none;
-  background: repeating-conic-gradient(from 0deg, color-mix(in srgb, var(--rc) 55%, transparent) 0deg 4deg, transparent 4deg 15deg);
-  -webkit-mask: radial-gradient(circle, #000 0%, transparent 42%); mask: radial-gradient(circle, #000 0%, transparent 42%);
-  animation: spin 24s linear infinite; transition: opacity 0.6s;
+  position: absolute; left: 50%; top: 50%; width: 150vmax; height: 150vmax; margin: -75vmax 0 0 -75vmax; opacity: 0; pointer-events: none;
+  will-change: transform, opacity; animation: spin 26s linear infinite; transition: opacity 0.6s;
 }
-.opening.burst .op-rays { opacity: 0.55; }
-.opening.walkout .op-rays { opacity: 0.9; animation-duration: 9s; }
-.opening[data-tier='0'].revealing .op-rays { opacity: 0.25; }
+.opening.burst .op-rays { opacity: 0.5; }
+.opening.walkout .op-rays { opacity: 0.85; animation-duration: 12s; }
+.opening[data-tier='0'].revealing .op-rays { opacity: 0.22; }
+.opening.done .op-rays { opacity: 0.35; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .op-spot {
   position: absolute; left: 50%; top: -20%; width: 70vmin; height: 140%; transform: translateX(-50%); pointer-events: none; opacity: 0.5;
@@ -554,15 +557,20 @@ button.tile:hover .chev { transform: translateX(4px); }
 .fx-canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
 
 .op-stage { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3vh; transition: opacity 0.4s; }
-.op-pack { position: relative; height: 64vh; aspect-ratio: 0.64; animation: pack-idle 3s ease-in-out infinite; transition: filter 0.3s; }
+.op-pack { position: relative; height: 64vh; aspect-ratio: 0.64; animation: pack-idle 3s ease-in-out infinite; will-change: transform; }
+.op-aura {
+  position: absolute; inset: -45% -70%; pointer-events: none; opacity: 0; transform: scale(0.7); will-change: transform, opacity;
+  background: radial-gradient(ellipse 50% 50% at 50% 50%, var(--rc), color-mix(in srgb, var(--rc) 35%, transparent) 30%, transparent 68%);
+  transition: opacity 0.3s, transform 0.4s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+.op-pack[data-charge='1'] .op-aura { opacity: 0.45; transform: scale(0.85); }
+.op-pack[data-charge='2'] .op-aura { opacity: 0.7; transform: scale(1); }
+.op-pack[data-charge='3'] .op-aura { opacity: 1; transform: scale(1.2); }
 .op-pack .pack-art.big { height: 100%; }
 .op-pack .pack-art.big .pack-count { display: none; }
-.op-pack[data-charge='1'] { filter: drop-shadow(0 0 18px var(--rc)); }
-.op-pack[data-charge='2'] { filter: drop-shadow(0 0 34px var(--rc)) brightness(1.15); }
-.op-pack[data-charge='3'] { filter: drop-shadow(0 0 60px var(--rc)) brightness(1.4); }
 .op-crack {
-  position: absolute; inset: 0; pointer-events: none; opacity: 0; mix-blend-mode: screen;
-  background: radial-gradient(ellipse 30% 45% at 50% 50%, var(--rc), transparent 70%);
+  position: absolute; inset: 0; pointer-events: none; opacity: 0;
+  background: radial-gradient(ellipse 34% 48% at 50% 50%, #fff, color-mix(in srgb, var(--rc) 60%, transparent) 40%, transparent 72%);
   transition: opacity 0.3s;
 }
 .op-pack[data-charge='2'] .op-crack { opacity: 0.45; }
@@ -576,7 +584,7 @@ button.tile:hover .chev { transform: translateX(4px); }
   40%, 60% { transform: translate(10px, -2px) rotate(4deg) scale(1.05); }
 }
 .opening.burst .op-pack { animation: pack-pop 0.6s ease-in forwards; }
-@keyframes pack-pop { 0% { transform: scale(1.05); } 30% { transform: scale(0.92); } 100% { transform: scale(2.2); opacity: 0; filter: blur(8px) brightness(3); } }
+@keyframes pack-pop { 0% { transform: scale(1.05); } 30% { transform: scale(0.92); } 100% { transform: scale(2.2); opacity: 0; } }
 .op-hint { font-size: clamp(20px, 5vh, 30px); font-weight: 800; letter-spacing: 0.3em; text-transform: uppercase; animation: hint 1.2s ease-in-out infinite; }
 @keyframes hint { 50% { opacity: 0.45; transform: scale(0.97); } }
 .opening.burst .op-hint { opacity: 0; }
@@ -584,7 +592,7 @@ button.tile:hover .chev { transform: translateX(4px); }
 
 .op-walkout { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
 .wo-item {
-  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) scale(2.4); opacity: 0; filter: blur(14px);
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) scale(2.4); opacity: 0; will-change: transform, opacity;
   font-weight: 800; line-height: 1; color: #fff; transition: none;
 }
 .wo-flag { font-size: 26vh; }
@@ -595,8 +603,8 @@ button.tile:hover .chev { transform: translateX(4px); }
 .wo-ovr { color: var(--rc); -webkit-text-stroke: 0; }
 .wo-item.show { animation: wo-in 1.15s cubic-bezier(0.2, 0.9, 0.3, 1) forwards; }
 @keyframes wo-in {
-  0% { opacity: 0; transform: translate(-50%, -50%) scale(2.4); filter: blur(14px); }
-  22% { opacity: 1; transform: translate(-50%, -50%) scale(1); filter: blur(0); }
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(2.4); }
+  22% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
   80% { opacity: 1; transform: translate(-50%, -50%) scale(0.94); }
   100% { opacity: 0; transform: translate(-50%, -50%) scale(0.88); }
 }
@@ -613,7 +621,7 @@ button.tile:hover .chev { transform: translateX(4px); }
 }
 .op-cardwrap.enter { transform: none; transition: transform 0.5s cubic-bezier(0.2, 1.25, 0.4, 1); }
 .op-cardwrap.charged .op-flip { animation: charged 0.6s ease-in-out infinite; }
-.op-cardwrap.charged .op-backf .pcard { box-shadow: 0 0 2em var(--rc), 0 0 5em color-mix(in srgb, var(--rc) 60%, transparent); }
+.op-cardwrap.charged .op-backf .pcard { box-shadow: 0 0 1.4em var(--rc), 0 0 3em color-mix(in srgb, var(--rc) 50%, transparent); }
 @keyframes charged { 0%, 100% { transform: rotate(-1deg) scale(1); } 50% { transform: rotate(1deg) scale(1.03); } }
 .op-cardwrap.landed .op-flip { animation: none; }
 .op-cardwrap.landed { animation: land 0.6s cubic-bezier(0.2, 1.4, 0.4, 1); }
@@ -812,3 +820,5 @@ button.tile:hover .chev { transform: translateX(4px); }
 .banner-preview .crest.tiny { width: 100%; height: auto; display: block; }
 .banner-words { font-size: 20px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .banner-field { max-width: none; margin: 8px 0 6px; }
+/* While a pack opens it covers everything: don't keep animating the screen underneath. */
+.shell:has(> .opening.in) > .screen.active { visibility: hidden; }

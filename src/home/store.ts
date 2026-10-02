@@ -2,7 +2,7 @@ import { type Card, RARITIES, RARITY_COLOR, RARITY_LABEL, overall, traitsOf } fr
 import { FREE_PACK_HOURS } from '../meta/club';
 import { PACKS, type PackDef, openPack } from '../meta/packs';
 import { cardBackHTML, cardHTML, esc } from './cardView';
-import { Fx } from './fx';
+import { Fx, Rays } from './fx';
 import { fmt, fmtTime, freePackIn, type HomeUI } from './home';
 
 function packArt(p: PackDef, cls = ''): string {
@@ -116,6 +116,7 @@ const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 class Opening {
   private el = document.createElement('div');
   private fx = new Fx();
+  private rays = new Rays();
   private taps = 0;
   private phase: 'tease' | 'burst' | 'reveal' | 'await' | 'summary' = 'tease';
   private hurry: (() => void) | null = null;
@@ -133,13 +134,13 @@ class Opening {
     this.best = cards[cards.length - 1];
     this.tier = RARITIES.indexOf(this.best.rarity);
     this.el.className = 'opening';
-    this.el.style.setProperty('--rc', '#ffffff');
+    this.tint('#ffffff');
     this.el.innerHTML = `
       <div class="op-bg"></div>
-      <div class="op-rays"></div>
+      <div class="op-rays-slot"></div>
       <div class="op-spot"></div>
       <div class="op-stage">
-        <div class="op-pack">${packArt(pack, 'big')}<div class="op-crack"></div></div>
+        <div class="op-pack"><div class="op-aura"></div>${packArt(pack, 'big')}<div class="op-crack"></div></div>
         <div class="op-hint">Tap to open</div>
       </div>
       <div class="op-walkout"><div class="wo-item wo-flag"></div><div class="wo-item wo-pos"></div><div class="wo-item wo-ovr"></div></div>
@@ -152,6 +153,7 @@ class Opening {
       <div class="op-summary"></div>
       <div class="op-flash"></div>`;
     this.el.querySelector('.op-bg')!.after(this.fx.canvas);
+    this.el.querySelector('.op-rays-slot')!.replaceWith(this.rays.canvas);
     ui.root.appendChild(this.el);
     ui.audio.setAmbience(0);
     requestAnimationFrame(() => this.el.classList.add('in'));
@@ -166,6 +168,12 @@ class Opening {
       this.next?.();
       if (this.phase === 'tease') this.burst();
     });
+  }
+
+  /** The scene's light colour: background glow, rays, card glow. */
+  private tint(color: string): void {
+    this.el.style.setProperty('--rc', color);
+    this.rays.set(color);
   }
 
   private q<T extends HTMLElement = HTMLElement>(s: string): T {
@@ -217,13 +225,13 @@ class Opening {
     const [x, y] = this.center('.op-pack');
     // The glow hints at what's inside: white, then (for good packs) the best colour.
     const hint = this.taps >= 2 && this.tier >= 2 ? RARITY_COLOR[this.best.rarity] : this.tier >= 1 && this.taps >= 2 ? '#e6f1ff' : '#ffffff';
-    this.el.style.setProperty('--rc', hint);
+    this.tint(hint);
     pack.classList.remove('shake');
     void pack.offsetWidth;
     pack.classList.add('shake');
     pack.dataset.charge = String(this.taps);
     this.ui.audio.packShake(this.taps);
-    this.fx.embers(x, y, hint, 10 + this.taps * 8, 220);
+    this.fx.embers(x, y, hint, 6 + this.taps * 5, 220);
     this.fx.ring(x, y, hint, 160 + this.taps * 60, 0.5);
     navigator.vibrate?.(20 + this.taps * 20);
     if (this.taps >= 3) this.burst();
@@ -234,12 +242,12 @@ class Opening {
     if (this.phase !== 'tease') return;
     this.phase = 'burst';
     const color = this.tier >= 2 ? RARITY_COLOR[this.best.rarity] : '#ffffff';
-    this.el.style.setProperty('--rc', color);
+    this.tint(color);
     const [x, y] = this.center('.op-pack');
     this.el.classList.add('burst');
     this.ui.audio.packBurst(this.tier);
     this.flash();
-    this.fx.burst(x, y, [color, '#ffffff', color], 140 + this.tier * 60, 1100 + this.tier * 150);
+    this.fx.burst(x, y, [color, '#ffffff', color], 90 + this.tier * 30, 1100 + this.tier * 150);
     this.fx.ring(x, y, color, Math.max(innerWidth, innerHeight) * 0.8, 0.9);
     navigator.vibrate?.([60, 40, 120]);
     await wait(this.skipAll ? 50 : 700);
@@ -268,7 +276,7 @@ class Opening {
     const audio = this.ui.audio;
     const kit = this.ui.kit;
     this.q('.op-progress').textContent = `${i + 1} / ${this.cards.length}`;
-    this.el.style.setProperty('--rc', tier >= 1 ? color : '#ffffff');
+    this.tint(tier >= 1 ? color : '#ffffff');
     this.el.dataset.tier = String(tier);
 
     const wrap = this.q('.op-cardwrap');
@@ -297,7 +305,7 @@ class Opening {
         this.flash(0.35);
         const [x, y] = this.center(sel);
         this.fx.ring(x, y, color, 260, 0.6);
-        this.fx.embers(x, y, color, 14, 160);
+        this.fx.embers(x, y, color, 10, 160);
         await this.beat(tier >= 3 ? 1150 : 950);
         item.classList.remove('show');
       }
@@ -319,15 +327,15 @@ class Opening {
     audio.reveal(tier);
     const [x, y] = this.center('.op-cardwrap');
     const colors = tier >= 4 ? ['#7ff6ff', '#ff7ae6', '#fff27a', '#ffffff'] : [color, '#ffffff'];
-    this.fx.burst(x, y, colors, 50 + tier * 50, 650 + tier * 200);
+    this.fx.burst(x, y, colors, 40 + tier * 30, 650 + tier * 200);
     this.fx.ring(x, y, color, 220 + tier * 120, 0.7);
     if (tier >= 2) this.flash(0.5 + tier * 0.12);
     if (tier >= 3) {
       this.el.classList.remove('quake');
       void this.el.offsetWidth;
       this.el.classList.add('quake');
-      this.fx.confetti(colors, 120 + tier * 40);
-      this.fx.fountain(x, y + 120, colors, 50 + tier * 20);
+      this.fx.confetti(colors, 80 + tier * 20);
+      this.fx.fountain(x, y + 120, colors, 30 + tier * 10);
       navigator.vibrate?.([80, 50, 160]);
     }
     const traits = traitsOf(c);
@@ -346,7 +354,7 @@ class Opening {
     this.phase = 'summary';
     this.el.classList.remove('walkout', 'revealing');
     this.el.classList.add('done');
-    this.el.style.setProperty('--rc', RARITY_COLOR[this.best.rarity]);
+    this.tint(RARITY_COLOR[this.best.rarity]);
     const kit = this.ui.kit;
     const again = this.pack.price > 0 && this.ui.club.state.coins >= this.pack.price;
     const s = this.q('.op-summary');
