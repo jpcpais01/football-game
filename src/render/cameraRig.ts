@@ -21,6 +21,10 @@ export class CameraRig {
   /** Low-res pixel height when the pixel-art look is on (0 = off): the camera then moves in
    * whole-pixel steps so the picture doesn't shimmer as it pans. */
   pixelHeight = 0;
+  /** Sub-pixel remainder of the snap (in low-res pixels): the pixel pass scrolls the
+   * upscaled image by this much, so motion is smooth while the pixel grid stays stable. */
+  subPixelX = 0;
+  subPixelY = 0;
   /** Base distance from the play; set by the camera setting. */
   baseDist: number = CAMERA_PRESETS.normal;
 
@@ -87,11 +91,17 @@ export class CameraRig {
     const sy = Math.cos(time * 37) * this.shake * 0.2;
     let tx = this.tx;
     let tz = this.tz;
+    this.subPixelX = 0;
+    this.subPixelY = 0;
     if (this.pixelHeight > 0) {
       const unit = (2 * this.dist * Math.tan((cam.fov * Math.PI) / 360)) / this.pixelHeight;
-      tx = Math.round(tx / unit) * unit;
       const unitZ = unit / Math.sin(pitch);
-      tz = Math.round(tz / unitZ) * unitZ;
+      const sxp = Math.round(tx / unit) * unit;
+      const szp = Math.round(tz / unitZ) * unitZ;
+      this.subPixelX = (tx - sxp) / unit;
+      this.subPixelY = (szp - tz) / unitZ;
+      tx = sxp;
+      tz = szp;
     }
     cam.position.set(tx + sx, Math.sin(pitch) * this.dist + sy, tz + Math.cos(pitch) * this.dist);
     this.look.set(tx, 0, tz - 3.5);

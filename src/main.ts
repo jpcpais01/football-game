@@ -481,7 +481,7 @@ function frame(now: number): void {
 
   particles.setScale(graphics === 'pixel' ? pixelPass.pixelHeight : renderer.domElement.height, rig.camera.fov);
   particles.update(running ? dt : 0, now / 1000, match, rig.focusX, rig.focusZ);
-  if (graphics === 'pixel') pixelPass.render(renderer, scene, rig.camera, SHARED.uFlood.value, atmo.weather === 'sunny' ? 0.35 : 1);
+  if (graphics === 'pixel') pixelPass.render(renderer, scene, rig.camera, SHARED.uFlood.value, atmo.weather === 'sunny' ? 0.35 : 1, rig.subPixelX, rig.subPixelY);
   else renderer.render(scene, rig.camera);
   cpuAvg += (performance.now() - t0 - cpuAvg) * 0.05;
   adaptQuality(frameMs, now);

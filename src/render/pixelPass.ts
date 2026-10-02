@@ -42,6 +42,7 @@ export class PixelPass {
         uOutline: { value: new THREE.Color(0x120f2a) },
         uNight: { value: 0 },
         uCool: { value: 1 },
+        uSub: { value: new THREE.Vector2() },
       },
       vertexShader: /* glsl */ `
         varying vec2 vUv;
@@ -51,6 +52,7 @@ export class PixelPass {
         uniform sampler2D tColor;
         uniform sampler2D tDepth;
         uniform vec2 uRes;
+        uniform vec2 uSub;
         uniform float uNear, uFar, uLevels, uNight, uCool;
         uniform vec3 uOutline;
         varying vec2 vUv;
@@ -70,8 +72,9 @@ export class PixelPass {
         }
 
         void main() {
-          // Snap to the centre of the low-res pixel.
-          vec2 px = floor(vUv * uRes) + 0.5;
+          // Snap to the centre of the low-res pixel, scrolled by the camera's sub-pixel
+          // remainder so the picture glides instead of stepping a whole pixel at a time.
+          vec2 px = floor(vUv * uRes + uSub) + 0.5;
           vec2 uv = px / uRes;
           vec3 c = texture2D(tColor, uv).rgb;
 
@@ -138,7 +141,8 @@ export class PixelPass {
     return this.target.height;
   }
 
-  render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera, night: number, cool = 1): void {
+  render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera, night: number, cool = 1, subX = 0, subY = 0): void {
+    (this.mat.uniforms.uSub.value as THREE.Vector2).set(subX, subY);
     this.mat.uniforms.uCool.value = cool;
     this.mat.uniforms.uNear.value = camera.near;
     this.mat.uniforms.uFar.value = camera.far;
