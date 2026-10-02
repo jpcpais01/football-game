@@ -412,7 +412,9 @@ export class AI {
       this.nextIntercept = m.time + 0.1;
     }
     // A keeper without the ball shouldn't stay human-controlled.
-    if (m.controlled.role === 'GK' && m.heldBy !== m.controlled && m.phase === 'play' && !(m.setPiece && m.setPiece.taker === m.controlled)) {
+    // (Unless he's playing it with his feet: a pass to him from a team-mate, or the ball at his feet.)
+    const keeperFeet = m.owner === m.controlled || (m.passTarget === m.controlled && m.lastKicker?.team === m.controlled.team);
+    if (m.controlled.role === 'GK' && m.heldBy !== m.controlled && !keeperFeet && m.phase === 'play' && !(m.setPiece && m.setPiece.taker === m.controlled)) {
       const ch = this.chaser[m.humanTeam];
       if (ch && ch.role !== 'GK') m.setControlled(ch);
     }
@@ -1423,6 +1425,13 @@ export class AI {
       return;
     }
 
+    // A team-mate's pass to him: meet it and play it with his feet, like an outfielder.
+    if (m.passTarget === k && m.lastKicker && m.lastKicker.team === k.team && !m.owner) {
+      const ip = this.intercept[k.id];
+      this.moveTo(k, ip.x, ip.z, m.ballDist(k) > 6, true);
+      return;
+    }
+
     // Shot coming?
     const threat = this.shotThreat(k);
     if (threat) return;
@@ -1455,6 +1464,8 @@ export class AI {
     const own = -team.dir;
     const b = m.ball;
     if (k.action === 'dive') return true;
+    // A back-pass to him is not a shot.
+    if (m.passTarget === k) return false;
     const toward = b.vel.x * own;
     if (toward < 6 || m.owner || m.heldBy) return false;
     // Where does the ball cross the keeper's depth?
@@ -1603,6 +1614,8 @@ export class AI {
     if (k.action === 'stumble' || k.action === 'kick' || k.action === 'throw') return false;
     if (!this.inOwnBox(k, b.pos.x, b.pos.z)) return false;
     if (m.owner && m.owner.team === k.team && m.owner !== k) return false;
+    // Ball at his feet: he's playing it as an outfielder (no picking it up mid-dribble).
+    if (m.owner === k) return false;
     if (m.lastTouch === k && m.time - m.lastKickTime < 0.6) return false;
     // Back-pass rule: no hands from a teammate's deliberate kick.
     if (m.lastKicker && m.lastKicker.team === k.team && m.lastKicker !== k && m.lastTouch === m.lastKicker) return false;
