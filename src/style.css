@@ -237,6 +237,15 @@ html, body {
   border: 1.5px solid rgba(244, 239, 227, 0.4); border-radius: 4px;
 }
 
+/* Sliding down on Sprint in defence = tackle (red arrow), further = slide (button dips more). */
+.btn-sprint.swipe-down { transform: translateY(6px) scale(0.95); background: rgba(200, 57, 59, 0.6); }
+.btn-sprint.swipe-down.slide { transform: translateY(12px) scale(0.92); }
+.btn-sprint.swipe-down::after {
+  content: ''; position: absolute; bottom: -14px; left: 50%; margin-left: -7px;
+  border: 7px solid transparent; border-top-color: #ffb3a8; border-bottom: 0;
+}
+.btn-sprint small { font-size: 10px; letter-spacing: 0.04em; }
+
 /* Sliding up on Pass / Through = lofted: the button lifts and shows an arrow. */
 .btn.swipe { transform: translateY(-6px) scale(0.95); background: rgba(80, 140, 210, 0.55); }
 .btn.swipe::after {
