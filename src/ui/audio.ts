@@ -234,4 +234,97 @@ export class GameAudio {
     src.start(t);
     src.stop(t + 7);
   }
+
+  // ---------------------------------------------------------------- menus & packs
+
+  /** Menus: the crowd sinks to a distant murmur (or silence inside a pack opening). */
+  setAmbience(level: number): void {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this.excite = -1;
+    this.crowdGain.gain.setTargetAtTime(0.1 * level, t, 0.5);
+    this.chatterGain.gain.setTargetAtTime(0.04 * level, t, 0.5);
+  }
+
+  private tone(t: number, freq: number, dur: number, type: OscillatorType, gain: number, freqEnd = freq, attack = 0.005): void {
+    const ctx = this.ctx!;
+    const o = ctx.createOscillator();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t);
+    if (freqEnd !== freq) o.frequency.exponentialRampToValueAtTime(freqEnd, t + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(gain, t + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(this.master);
+    o.start(t);
+    o.stop(t + dur + 0.05);
+  }
+
+  uiTap(): void {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this.tone(t, 1250, 0.06, 'sine', 0.12, 900);
+  }
+
+  coins(): void {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this.tone(t, 1568, 0.18, 'triangle', 0.16);
+    this.tone(t + 0.08, 2093, 0.3, 'triangle', 0.16);
+  }
+
+  /** Pack charging up: each tap a little higher and louder. */
+  packShake(level: number): void {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this.noiseBurst(t, 0.25 + level * 0.1, 'bandpass', 500 + level * 500, 1.2, 0.25 + level * 0.12, 1.1);
+    this.tone(t, 180 + level * 120, 0.5, 'sawtooth', 0.05 + level * 0.02, 360 + level * 260, 0.08);
+    this.tone(t, 520 + level * 200, 0.35, 'sine', 0.08, 900 + level * 300);
+  }
+
+  packBurst(tier: number): void {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this.tone(t, 110, 1.2, 'sine', 0.55, 38);
+    this.noiseBurst(t, 1.1, 'lowpass', 2400, 0.5, 0.6, 0.8);
+    this.noiseBurst(t + 0.02, 1.6 + tier * 0.3, 'highpass', 5000, 0.4, 0.18, 1.3);
+    const notes = [523, 659, 784, 1047, 1319, 1568];
+    for (let i = 0; i < 3 + tier; i++) this.tone(t + 0.05 + i * 0.04, notes[i % notes.length] * (i >= 6 ? 2 : 1), 1.4, 'triangle', 0.07, undefined, 0.01);
+  }
+
+  /** A card flying in. */
+  whoosh(): void {
+    if (!this.ctx) return;
+    this.noiseBurst(this.ctx.currentTime, 0.35, 'bandpass', 1800, 0.9, 0.18, 1.6);
+  }
+
+  /** Walkout beat: nation / position stingers. */
+  stinger(step: number): void {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this.tone(t, 65, 0.7, 'sine', 0.5, 45);
+    this.noiseBurst(t, 0.5, 'lowpass', 900, 0.7, 0.35, 0.7);
+    this.tone(t, [392, 494, 587][step % 3], 0.9, 'triangle', 0.1);
+  }
+
+  /** The card turns face up. Better cards get a bigger chord. */
+  reveal(tier: number): void {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const chords = [
+      [523, 659],
+      [523, 659, 784],
+      [523, 659, 784, 1047],
+      [440, 554, 659, 880, 1109, 1319],
+      [392, 494, 587, 784, 988, 1175, 1568],
+    ];
+    const ch = chords[Math.min(4, tier)];
+    ch.forEach((f, i) => this.tone(t + i * (tier >= 3 ? 0.07 : 0.04), f, 0.8 + tier * 0.5, tier >= 3 ? 'sawtooth' : 'triangle', tier >= 3 ? 0.04 : 0.09, undefined, 0.01));
+    if (tier >= 2) this.noiseBurst(t, 0.9 + tier * 0.3, 'highpass', 6000, 0.5, 0.12 + tier * 0.04, 1.2);
+    if (tier >= 3) {
+      this.tone(t, 98, 2, 'sine', 0.4, 49);
+      this.goal();
+    }
+  }
 }

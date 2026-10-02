@@ -41,6 +41,18 @@ export class Hud {
     this.captionSub = this.root.querySelector('.c-sub')!;
   }
 
+  /** New match, maybe new teams: refresh names and colours. */
+  setTeams(match: Match): void {
+    const [h, a] = match.teams;
+    const home = this.root.querySelector('.home')!;
+    const away = this.root.querySelector('.away')!;
+    home.querySelector('span')!.textContent = h.info.short;
+    (home.querySelector('i') as HTMLElement).style.background = hex(h.info.kit.shirt);
+    away.querySelector('span')!.textContent = a.info.short;
+    (away.querySelector('i') as HTMLElement).style.background = hex(a.info.kit.shirt);
+    this.last.h = this.last.a = this.last.min = -1;
+  }
+
   setVisible(v: boolean): void {
     this.root.style.display = v ? '' : 'none';
   }

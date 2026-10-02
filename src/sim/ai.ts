@@ -51,7 +51,7 @@ function traitsFor(p: Player): Traits {
   return {
     discipline: clamp([0.75, 0.55, 0.35][role] + a.defending * 0.15 + r(1) * 0.4, 0.1, 1),
     creativity: clamp([0.25, 0.55, 0.75][role] + a.passing * 0.15 + r(2) * 0.4, 0.05, 1),
-    work: clamp(0.45 + a.pace * 0.2 + r(3) * 0.5, 0.15, 1),
+    work: clamp(0.4 + a.pace * 0.15 + a.stamina * 0.15 + r(3) * 0.5, 0.15, 1),
     react: clamp(0.4 + (a.defending + a.passing) * 0.15 + r(4) * 0.4, 0.15, 1),
   };
 }
@@ -148,7 +148,7 @@ export class AI {
       v0 = 0;
     }
     const top = q.topSpeed;
-    const a = PLAYER.accel * (0.8 + 0.35 * q.attrs.accel);
+    const a = q.accelRate;
     const ta = Math.max(0, (top - v0) / a);
     const da = ((v0 + top) / 2) * ta;
     const t = d <= da ? (-v0 + Math.sqrt(v0 * v0 + 2 * a * d)) / a : ta + (d - da) / top;
@@ -348,7 +348,7 @@ export class AI {
       for (let i = 0; i < n; i++) {
         const t = i * SAMPLE_DT;
         const y = this.sy[i];
-        const maxH = p.role === 'GK' && this.inOwnBox(p, this.sx[i], this.sz[i]) ? 2.5 : PLAYER.headMax;
+        const maxH = p.role === 'GK' && this.inOwnBox(p, this.sx[i], this.sz[i]) ? 2.5 : p.headReach;
         if (y > maxH) continue;
         const d = dist2D(p.pos.x, p.pos.z, this.sx[i], this.sz[i]) - PLAYER.reach * 0.8;
         const deficit = d - Math.max(0, t - 0.2) * top;

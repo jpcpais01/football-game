@@ -26,7 +26,7 @@ export class Officials {
   private lastPhase = '';
 
   constructor() {
-    const attrs = { pace: 0.55, accel: 0.55, control: 0.5, passing: 0.5, shooting: 0.3, strength: 0.6, defending: 0.3, keeping: 0.2 };
+    const attrs = { pace: 0.55, accel: 0.55, control: 0.5, passing: 0.5, shooting: 0.3, strength: 0.6, defending: 0.3, keeping: 0.2, agility: 0.5, stamina: 0.8, jumping: 0.4, power: 0.4, height: 1.8, weight: 76 };
     const look = (skin: number, hair: number, style: number) => ({ skin, hair, hairStyle: style, height: 1.0, build: 1.0 });
     this.ref = new Player(22, 2, 0, 'MID', 0, 0, attrs, look(0xe0ac7e, 0x2e1f15, 1));
     this.lines = [

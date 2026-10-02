@@ -64,6 +64,13 @@ export function makeAttributes(role: Role, rng: Rng): Attributes {
     strength: r(0.5, 0.85),
     defending: r(0.4, 0.7),
     keeping: 0.2,
+    // Neutral values (no extra rng draws, so seeded matches stay reproducible).
+    agility: 0.6,
+    stamina: 0.55,
+    jumping: role === 'DEF' || role === 'GK' ? 0.6 : 0.5,
+    power: role === 'FWD' ? 0.6 : 0.5,
+    height: 1.8,
+    weight: 76,
   };
   if (role === 'GK') {
     base.keeping = r(0.7, 0.9);
@@ -83,5 +90,6 @@ export function makeAttributes(role: Role, rng: Rng): Attributes {
     base.accel = r(0.7, 0.95);
     base.control = r(0.7, 0.9);
   }
+  base.agility = base.accel * 0.9;
   return base;
 }
