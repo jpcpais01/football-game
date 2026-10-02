@@ -862,6 +862,15 @@ export class Match {
       vel = r.vel;
       spin = r.spin;
       strength = 0.5 + pw * 0.5;
+    } else if ((plan.type === 'lob' || plan.type === 'cross') && !fromHands && this.inCrossZone(p.team, b.pos.x, b.pos.z)) {
+      // Cross: a lofted ball from the wide areas near the byline is whipped into the box.
+      const c = this.planCross(p, plan);
+      receiver = c.receiver;
+      const r = solveLofted(b.pos, c.x, c.z, c.angle, 14, c.curl);
+      vel = r.vel;
+      spin = r.spin;
+      base = 0.04;
+      strength = 0.7;
     } else if (plan.type === 'clear') {
       const tx = b.pos.x + plan.dirX * 38;
       const tz = clamp(b.pos.z + plan.dirZ * 38, -PITCH.halfW + 3, PITCH.halfW - 3);
@@ -1163,7 +1172,7 @@ export class Match {
     let dirZ: number;
     let speed: number;
     let up: number;
-    const wantShot = (p.plan?.type === 'shot' || (p !== this.controlled && distGoal < 16)) && distGoal < 20;
+    const wantShot = (p.plan?.type === 'shot' || distGoal < (p === this.controlled ? 13 : 16)) && distGoal < 20;
     if (wantShot) {
       const tz = (this.rng.next() < 0.5 ? -1 : 1) * (PITCH.goalHalfWidth - 0.8);
       dirX = gx - b.pos.x;
@@ -1199,6 +1208,95 @@ export class Match {
     this.lastKickTime = this.time;
     this.passTarget = null;
     this.events.kicks.push(0.35);
+  }
+
+  /** Within 40 m of one of the corner flags this team attacks (and in their half). */
+  inCrossZone(team: number, x: number, z: number): boolean {
+    const dir = this.teams[team].dir;
+    if (x * dir < 12) return false;
+    const gx = PITCH.halfL * dir;
+    return Math.min(dist2D(x, z, gx, PITCH.halfW), dist2D(x, z, gx, -PITCH.halfW)) < 40;
+  }
+
+  /**
+   * Picks who the cross is for and where to put it: aimed so the ball arrives around head
+   * height as the receiver attacks it, driven for short crosses, floated for long ones, and
+   * curling away from the keeper. The stick (if pushed) steers which runner it's for.
+   */
+  planCross(p: Player, plan: KickPlan): { receiver: Player | null; x: number; z: number; angle: number; curl: number } {
+    const b = this.ball;
+    const team = this.teams[p.team];
+    const dir = team.dir;
+    const gx = PITCH.halfL * dir;
+    let best: Player | null = null;
+    let bestS = -1e9;
+    for (const q of team.players) {
+      if (q === p || q.role === 'GK') continue;
+      // Where he'll be when the ball gets there.
+      const qx = q.pos.x + q.vel.x * 0.9;
+      const qz = q.pos.z + q.vel.z * 0.9;
+      const depth = (gx - qx) * dir; // metres from the goal line
+      if (depth > 24 || depth < 1 || Math.abs(qz) > 22) continue;
+      let open = 99;
+      for (const o of this.teams[1 - p.team].players) open = Math.min(open, dist2D(o.pos.x, o.pos.z, qx, qz));
+      const toGoal = dist2D(qx, qz, gx, 0);
+      let sc = -toGoal * 0.12 + clamp(open / 3, 0, 1.2) + q.attrs.strength * 0.3 + (q.role === 'FWD' ? 0.4 : 0);
+      if (plan.aimed) {
+        const dx = qx - b.pos.x;
+        const dz = qz - b.pos.z;
+        const d = Math.max(0.1, Math.hypot(dx, dz));
+        sc += ((dx * plan.dirX + dz * plan.dirZ) / d) * 1.5;
+      }
+      if (sc > bestS) {
+        bestS = sc;
+        best = q;
+      }
+    }
+    // Aim point: the receiver's run, kept to the dangerous zone (between the six-yard line
+    // and the penalty spot, inside the posts' width plus a bit). No one there: the spot.
+    let tx: number;
+    let tz: number;
+    if (best) {
+      const flight = 1.0 + dist2D(b.pos.x, b.pos.z, best.pos.x, best.pos.z) / 30;
+      tx = best.pos.x + best.vel.x * flight * 0.8;
+      tz = best.pos.z + best.vel.z * flight * 0.8;
+    } else {
+      tx = gx - dir * 10;
+      tz = -Math.sign(b.pos.z || 1) * 2;
+    }
+    const depth = clamp((gx - tx) * dir, 4.5, 15);
+    tx = gx - dir * depth;
+    tz = clamp(tz, -10, 10);
+    // Land a couple of metres beyond him so it reaches him at head height.
+    let fx = tx - b.pos.x;
+    let fz = tz - b.pos.z;
+    const d = Math.max(1, Math.hypot(fx, fz));
+    fx /= d;
+    fz /= d;
+    const beyond = d > 22 ? 2.6 : 1.8;
+    const lx = tx + fx * beyond;
+    const lz = tz + fz * beyond;
+    const angle = clamp(12 + d * 0.45, 17, 31);
+    // Curl away from the goal (and the keeper): right of travel is (-fz, fx).
+    const curlSign = Math.sign(-fz * -dir) || 1;
+    const curl = curlSign * (10 + Math.min(10, d * 0.3));
+    if (best) {
+      // Others attack the near post, far post and the edge of the area.
+      const near = Math.sign(b.pos.z || 1);
+      const spots: [number, number][] = [
+        [gx - dir * 5.5, near * 2.5],
+        [gx - dir * 7, -near * 3.5],
+        [gx - dir * 13, 0],
+      ];
+      let k = 0;
+      for (const q of team.players) {
+        if (q === p || q === best || q.role === 'GK' || q.role === 'DEF' || k >= spots.length) continue;
+        if (dist2D(q.pos.x, q.pos.z, gx, 0) > 34) continue;
+        this.ai.setRun(q, spots[k][0], spots[k][1]);
+        k++;
+      }
+    }
+    return { receiver: best, x: lx, z: lz, angle, curl };
   }
 
   /** Keeper secures the ball in his hands. */

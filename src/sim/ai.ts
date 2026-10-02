@@ -241,6 +241,17 @@ export class AI {
       p.lookAt = p.lookTarget;
       return;
     }
+    // A cross is on: attackers fill the box, defenders drop in to mark it.
+    const crossCarrier = m.owner && m.inCrossZone(m.owner.team, m.owner.pos.x, m.owner.pos.z) ? m.owner : null;
+    const pressing = crossCarrier !== null && crossCarrier.team !== p.team && this.chaser[p.team] === p;
+    if (crossCarrier && crossCarrier !== p && !pressing && run.until <= m.time) {
+      const spot = this.boxSpot(p, crossCarrier, crossCarrier.team === p.team);
+      if (spot) {
+        this.moveTo(p, spot[0], spot[1], dist2D(p.pos.x, p.pos.z, spot[0], spot[1]) > 6, true);
+        return;
+      }
+    }
+
     if (att === p.team) {
       // Forwards (and sometimes midfielders) attack the space behind the last line.
       const carrier = m.owner ?? m.heldBy;
@@ -286,6 +297,31 @@ export class AI {
     }
     this.slot(p, this.tmp);
     this.moveTo(p, this.tmp.x, this.tmp.z, false, false);
+  }
+
+  /** Box positions while the ball is in a crossing area (null = keep normal shape). */
+  private boxSpot(p: Player, carrier: Player, attacking: boolean): [number, number] | null {
+    const m = this.m;
+    const attDir = m.teams[carrier.team].dir;
+    const gx = PITCH.halfL * attDir; // the goal being attacked
+    const near = Math.sign(carrier.pos.z || 1);
+    const jitter = Math.sin(p.id * 7.3 + m.time * 0.4) * 0.8;
+    if (attacking) {
+      switch (p.index) {
+        case 9: return [gx - attDir * 8.5, near * 1.5 + jitter];
+        case 8: case 10: return Math.sign(p.baseZ * attDir) === near ? [gx - attDir * 5.5, near * 3 + jitter] : [gx - attDir * 7, -near * 4 + jitter];
+        case 6: case 7: return [gx - attDir * 15, (p.index === 6 ? -1 : 1) * 5 + jitter];
+        default: return null;
+      }
+    }
+    // Defending the cross: centre-backs on the six-yard line, full-backs tuck in.
+    switch (p.index) {
+      case 2: return [gx - attDir * 6, -2.2 + near * 0.8];
+      case 3: return [gx - attDir * 6, 2.2 + near * 0.8];
+      case 1: case 4: return Math.sign(p.baseZ * -attDir) === near ? null : [gx - attDir * 8, -near * 5];
+      case 5: return [gx - attDir * 13, near * 1.5];
+      default: return null;
+    }
   }
 
   private isSecondPresser(p: Player): boolean {
@@ -426,6 +462,23 @@ export class AI {
         const pw = clamp(0.55 + distGoal / 40 + m.rng.gauss() * 0.12, 0.35, 1.0);
         p.plan = { type: 'shot', dirX: dir, dirZ: m.rng.next() < 0.5 ? -1 : 1, power: pw, targetId: -1, expires: m.time + 1 };
         return this.dribble(p, true);
+      }
+
+      // Cross? Wide near the byline with someone attacking the box.
+      if (m.inCrossZone(p.team, b.x, b.z) && Math.abs(b.z) > 11 && distGoal > 10) {
+        let inBox = 0;
+        for (const q of team.players) {
+          if (q === p || q.role === 'GK') continue;
+          if ((gx - q.pos.x) * dir < 18 && Math.abs(q.pos.z) < 18) inBox++;
+        }
+        const crossP = inBox >= 2 ? 0.45 : inBox === 1 ? 0.25 : 0.04;
+        if (m.rng.next() < crossP) {
+          const dx = gx - b.x;
+          const dz = -b.z;
+          const d = Math.max(0.1, Math.hypot(dx, dz));
+          p.plan = { type: 'cross', dirX: dx / d, dirZ: dz / d, aimed: false, power: 0, targetId: -1, expires: m.time + 1.2 };
+          return this.dribble(p, true);
+        }
       }
 
       // Pass?

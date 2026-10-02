@@ -213,3 +213,41 @@ it('Pass and Shoot fire reliably while dribbling at a sprint', () => {
     expect(ok).toBe(10);
   }
 });
+
+it('a lofted pass from the wing becomes a cross into the box', () => {
+  let crosses = 0;
+  let reachedBox = 0;
+  for (let trial = 0; trial < 8; trial++) {
+    const m = new Match(600 + trial);
+    const input = makeInput();
+    m.phase = 'play';
+    m.setPiece = null;
+    for (const p of m.players) { p.pos.x = p.team === 0 ? 10 : 30; p.pos.z = (p.index - 5) * 5; p.prevPos.copy(p.pos); }
+    const c = m.teams[0].players[10];
+    c.pos.set(40, 0, 28 - trial); c.prevPos.copy(c.pos);
+    m.setControlled(c);
+    m.ball.reset(40.6, 28 - trial);
+    m.owner = c;
+    // Two attackers arriving in the box.
+    const st = m.teams[0].players[9];
+    st.pos.set(42, 0, 2); st.prevPos.copy(st.pos);
+    const lw = m.teams[0].players[8];
+    lw.pos.set(40, 0, -5); lw.prevPos.copy(lw.pos);
+    let kicked = false;
+    const lines: string[] = [];
+    m.log = (s) => lines.push(s);
+    m.step(input);
+    input.events.push({ btn: 0, kind: 'down', hold: 0 }, { btn: 0, kind: 'up', hold: 0.4 });
+    let maxH = 0;
+    for (let i = 0; i < 120 * 3; i++) {
+      m.step(input);
+      m.takeEvents();
+      if (m.lastKicker === c) kicked = true;
+      if (kicked) maxH = Math.max(maxH, m.ball.pos.y);
+      if (kicked && Math.abs(m.ball.pos.z) < 12 && m.ball.pos.x > 36 && m.ball.pos.y < 2.6) { reachedBox++; break; }
+    }
+    if (lines.some((l) => l.includes(' lob ') || l.includes(' cross '))) crosses++;
+  }
+  console.log('crosses', crosses, '/ 8, reached the box', reachedBox, '/ 8');
+  expect(reachedBox).toBeGreaterThan(5);
+});
