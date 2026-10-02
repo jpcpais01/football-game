@@ -5,7 +5,7 @@ import { groundKick, predictBallAt, solveFreeKick, solveGroundPass, solveLofted,
 import { Player, type Attributes, type KickPlan, type Role } from './player';
 import { FORMATION_433, HAIR_COLORS, SKIN_TONES, TEAMS, makeAttributes, type TeamInfo } from './teams';
 import { V3, Rng, angleDiff, clamp, dist2D, smoothstep } from './vec';
-import { AI, type ThroughPlan } from './ai';
+import { AI, PASS_CONE, type ThroughPlan } from './ai';
 
 export type Phase = 'kickoff' | 'play' | 'out' | 'setpiece' | 'goal' | 'halftime' | 'fulltime';
 /** Goal celebrations, one per button: Pass, Through, Shoot, Sprint. */
@@ -1896,7 +1896,7 @@ export class Match {
           ? this.players[plan.targetId]
           : plan.aimed === false
             ? this.ai.bestReceiver(p, false)
-            : this.ai.pickReceiver(p, plan.dirX, plan.dirZ, false);
+            : this.ai.pickReceiver(p, plan.dirX, plan.dirZ, false, plan.aimed ? PASS_CONE : undefined);
       if (!receiver) {
         // Nobody there: play it into space.
         const tx = clamp(b.pos.x + plan.dirX * 15, -PITCH.halfL, PITCH.halfL);

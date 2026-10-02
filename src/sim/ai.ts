@@ -35,6 +35,9 @@ const MEET_WAIT = 4;
 const MEET_CLOSE = 0.8;
 const MEET_CONTEST = 6;
 /** How a planned through ball's score sits against an ordinary pass's. */
+/** How far (cosine) a human's aimed ball may stray from the stick: a through ball about 32°, a pass to feet about 40°. */
+const AIM_CONE = 0.85;
+export const PASS_CONE = 0.77;
 const THROUGH_BIAS = -0.3;
 
 const BOX_SPOTS: [number, number][] = [
@@ -475,8 +478,10 @@ export class AI {
               (q.role === 'FWD' ? 0.2 : 0);
             if (offsideNow) sc -= 4;
             if (aimed) {
+              // Where the stick points is where it goes: within AIM_CONE of it, or not at all.
               const align = kx * aimX + kz * aimZ;
-              sc += align * 2.2 - (align < 0.45 ? 3 : 0);
+              if (align < AIM_CONE) continue;
+              sc += align * 2.2;
               sc -= Math.abs(md - prefLead) / 7;
             }
             if (sc > bestS) {
@@ -1450,8 +1455,11 @@ export class AI {
     return best;
   }
 
-  /** Receiver for a human pass: the teammate best aligned with the stick. */
-  pickReceiver(p: Player, dirX: number, dirZ: number, through: boolean): Player | null {
+  /**
+   * Receiver for a human pass: the teammate best aligned with the stick. `cone` (cosine) is
+   * how far off the stick he may be: an aimed pass never goes the other way from the aim.
+   */
+  pickReceiver(p: Player, dirX: number, dirZ: number, through: boolean, cone = 0.35): Player | null {
     const m = this.m;
     let best: Player | null = null;
     let bestS = -1e9;
@@ -1462,7 +1470,7 @@ export class AI {
       const d = Math.hypot(dx, dz);
       if (d < 2 || d > 50) continue;
       const align = (dx * dirX + dz * dirZ) / d;
-      if (align < 0.35) continue;
+      if (align < cone) continue;
       let open = 99;
       for (const o of m.teams[1 - p.team].players) open = Math.min(open, dist2D(o.pos.x, o.pos.z, q.pos.x, q.pos.z));
       let s = align * 3 + clamp(open / 6, 0, 1) * 0.6 - d / 35;
