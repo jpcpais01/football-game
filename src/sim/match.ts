@@ -143,6 +143,8 @@ export class Match {
   time = 0;
   clock = 0; // seconds into current half (real)
   half = 1;
+  /** Added time per half, in match minutes (1–5), drawn at kick-off. */
+  readonly added: [number, number];
   phase: Phase = 'kickoff';
   phaseT = 0;
 
@@ -193,6 +195,9 @@ export class Match {
 
   constructor(seed = 20261002, setup?: MatchSetup) {
     this.rng = new Rng(seed);
+    // Its own stream, so the added time doesn't shift every draw the match makes after it.
+    const fourth = new Rng(seed ^ 0x5eed4e);
+    this.added = [1 + Math.floor(fourth.next() * 5), 1 + Math.floor(fourth.next() * 5)];
     for (let t = 0; t < 2; t++) {
       const ts = setup?.teams[t];
       const team: TeamState = { info: ts ? ts.info : TEAMS[t], dir: t === 0 ? 1 : -1, score: 0, players: [] };
@@ -655,7 +660,7 @@ export class Match {
     }
 
     // Half / full time.
-    if (this.phase === 'play' && this.clock >= MATCH.halfSeconds) {
+    if (this.phase === 'play' && this.clock >= (MATCH.halfSeconds * (45 + this.addedTime)) / 45) {
       if (this.half === 1) {
         this.phase = 'halftime';
         this.phaseT = 0;
@@ -2360,4 +2365,17 @@ export class Match {
     const m = (this.clock / MATCH.halfSeconds) * 45;
     return Math.floor(m) + (this.half === 2 ? 45 : 0);
   }
+
+  /** This half's added minutes. */
+  get addedTime(): number {
+    return this.added[this.half - 1];
+  }
+
+  /** The clock as TV shows it: 23', or 45+2' once the half runs into added time. */
+  get clockLabel(): string {
+    const end = this.half === 1 ? 45 : 90;
+    const min = this.displayMinute;
+    return min < end ? `${min}'` : `${end}+${Math.min(min - end, this.addedTime - 1) + 1}'`;
+  }
+
 }
