@@ -333,15 +333,12 @@ function crowdMaterial(o: CrowdOpts): THREE.ShaderMaterial {
         occ *= 1.0 - max(aisle, max(vom, step(0.5, letter)));
         float awayShare = mix(mix(0.22, 0.95, awayEnd), 0.02, ultra);
 
-        // Far away a fan is smaller than a pixel: only the stand's average colour shows, so
-        // skip drawing individual fans there (most of the bowl, most of the time).
-        float px = max(fwidth(g.x), fwidth(g.y));
-        float detail = 1.0 - smoothstep(0.2, 0.7, px);
+        // Every fan is drawn at every distance: the stands keep the same detail near and far.
         vec3 seatAvg = uSeat;
         vec3 avg = mix(seatAvg, mix(uA, uB, awayShare) * 0.75 + 0.06, mix(0.55, 0.8, max(ultra, awayEnd)));
-        vec3 c = avg;
-        vec3 club = mix(uA, uB, awayShare);
-        if (detail > 0.0) {
+        vec3 c;
+        vec3 club;
+        {
           // Colours: the ends are a sea of their club, the main stands a mix.
           float h = hash(cell + 7.1);
           club = mix(uA, uB, step(hash(cell * 0.37 + floor(cell.x / 14.0)), awayShare));
@@ -371,7 +368,7 @@ function crowdMaterial(o: CrowdOpts): THREE.ShaderMaterial {
           fan = mix(fan, shirt, body * occ);
           fan = mix(fan, skin, head * occ);
           fan = mix(fan, scarfCol, scarf * occ);
-          c = mix(avg, fan, detail);
+          c = fan;
         }
         c = mix(c, avg, 0.05 + 0.1 * uHaze);
         // Fixtures over the fans: white letter seats, concrete steps, dark tunnel mouths.
@@ -382,7 +379,7 @@ function crowdMaterial(o: CrowdOpts): THREE.ShaderMaterial {
 
         // Card display: every fan holds one card, together they make the picture.
         if (uTifoOn > 0.001) {
-          vec2 cardUv = mix((cell + 0.5) * seat, vUv, smoothstep(0.3, 0.9, px));
+          vec2 cardUv = (cell + 0.5) * seat;
           vec3 card = vec3(0.0);
           float on = 0.0;
           if (uHasTifo > 0.5) {
@@ -397,8 +394,8 @@ function crowdMaterial(o: CrowdOpts): THREE.ShaderMaterial {
             on = 1.0;
           }
           float gap = step(0.08, f.x) * step(f.x, 0.94) * step(0.06, f.y) * step(f.y, 0.94);
-          card *= mix(1.0, 0.86 + 0.14 * hash(cell + 4.4), 1.0 - smoothstep(0.3, 0.9, px));
-          card = mix(card * 0.55, card, max(gap, smoothstep(0.3, 0.9, px)));
+          card *= 0.86 + 0.14 * hash(cell + 4.4);
+          card = mix(card * 0.55, card, gap);
           c = mix(c, card, on * uTifoOn * step(hash(cell + 8.8), 0.985));
         }
 
@@ -408,7 +405,7 @@ function crowdMaterial(o: CrowdOpts): THREE.ShaderMaterial {
         c = pow(c, vec3(2.2)) * uLight;
         // Phone torches once it's dark.
         float tw = step(0.9965, hash(cell + floor(uTime * 3.0 + hash(cell) * 10.0)));
-        c += vec3(1.0, 0.97, 0.9) * tw * occ * uFlood * 1.6 * (1.0 - smoothstep(0.5, 1.2, px));
+        c += vec3(1.0, 0.97, 0.9) * tw * occ * uFlood * 1.6;
 
         // Atmospheric haze: the background sits back behind the play.
         float fog = smoothstep(uFogNear, uFogFar, vDist);
@@ -497,7 +494,7 @@ function ribbonMaterial(home: number): THREE.ShaderMaterial {
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = THREE.RepeatWrapping;
-  tex.anisotropy = 4;
+  tex.anisotropy = 16; // crisp at grazing angles and in the distance (clamped to the GPU's max)
   const hex = '#' + home.toString(16).padStart(6, '0');
   const draw = () => {
     const g = cv.getContext('2d')!;
@@ -666,7 +663,7 @@ function fasciaMaterial(home: number, name: string): THREE.MeshStandardMaterial 
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = THREE.RepeatWrapping;
-  tex.anisotropy = 4;
+  tex.anisotropy = 16; // crisp at grazing angles and in the distance (clamped to the GPU's max)
   // uv is in metres: one sign every 48 m along, 2.2 m tall.
   tex.repeat.set(1 / 48, 1 / 2.2);
   const c = new THREE.Color(home).multiplyScalar(0.55);
@@ -820,7 +817,7 @@ function boardTexture(): THREE.CanvasTexture {
   draw();
   void document.fonts?.ready.then(draw);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 4;
+  tex.anisotropy = 16; // crisp at grazing angles and in the distance (clamped to the GPU's max)
   return tex;
 }
 
@@ -1368,7 +1365,7 @@ function banners(path: PathPt[], home: number, away: number, club: StadiumClub):
   cv.height = AH;
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 4;
+  tex.anisotropy = 16; // crisp at grazing angles and in the distance (clamped to the GPU's max)
   const tops: number[] = [];
   rows.reduce((y, h) => (tops.push(y), y + h), 0);
   const paint = (c: CanvasRenderingContext2D, sp: Spec, H: number) => {
@@ -1491,7 +1488,7 @@ function fanBanners(path: PathPt[], home: number): { group: THREE.Group; set(pho
   cv.height = 360;
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 4;
+  tex.anisotropy = 16; // crisp at grazing angles and in the distance (clamped to the GPU's max)
   const poleMat = litMaterial({ color: 0x2a2a2e, roughness: 0.6 });
   const hold = (p: PathPt, o: number, w: number) => {
     const h = w / 2;

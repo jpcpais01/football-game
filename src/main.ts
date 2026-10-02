@@ -248,6 +248,8 @@ function updateCharge(alpha: number): void {
     else if (inp.held[0]) btn = 0;
     else if (inp.held[1]) btn = 1;
   }
+  // A player switch cancels a charge that was being held.
+  if (btn >= 0 && inp.holdTime[btn] > match.switchT + 0.05) btn = -1;
   if (btn < 0) {
     charge.classList.remove('show');
     return;

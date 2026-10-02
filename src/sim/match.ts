@@ -543,11 +543,10 @@ export class Match {
     if (this.controlled) {
       const old = this.controlled;
       old.sprinting = false;
-      // A queued command follows control (e.g. pressed Pass just before the auto-switch).
-      if (old.plan && old.team === p.team && old.action !== 'kick' && old.action !== 'throw' && !p.plan && !this.autoPlay) {
-        p.plan = old.plan;
-        old.plan = null;
-      }
+      // A switch (manual or automatic) cancels whatever the human had loaded: a queued
+      // pass or shot is dropped (unless the strike is already under way), and a button
+      // still held from before the switch does nothing when it's released.
+      if (!this.autoPlay && old.team === this.humanTeam && old.action !== 'kick' && old.action !== 'throw') old.plan = null;
     }
     this.controlled = p;
     this.switchT = 0;
@@ -700,6 +699,8 @@ export class Match {
     for (const ev of input.events) {
       if (attacking) {
         if (ev.kind !== 'up') continue;
+        // Pressed before the last player switch: cancelled by it.
+        if (ev.hold > this.switchT + 0.05) continue;
         const ax = m > 0.12 ? input.moveX / m : Math.cos(c.facing);
         const az = m > 0.12 ? -input.moveY / m : Math.sin(c.facing);
         let plan: KickPlan | null = null;
