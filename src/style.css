@@ -351,5 +351,23 @@ html, body {
   display: flex; align-items: center; gap: 10px; padding: 6px 12px; border: 2px solid rgba(244, 239, 227, 0.4); border-radius: 4px;
   font-weight: 800; font-size: 15px; letter-spacing: 0.08em; text-transform: uppercase;
 }
-.menu.pause .fine input { flex: 1; min-width: 0; accent-color: var(--accent); height: 26px; }
-.menu.pause .fine b { min-width: 4.2em; text-align: right; font-weight: 800; font-size: 15px; letter-spacing: 0.04em; color: var(--accent); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* The slider, drawn by hand so the ticks line up with the thumb on every browser. */
+.menu.pause .fine-track { position: relative; flex: 1; min-width: 0; height: 26px; }
+.menu.pause .fine input {
+  position: relative; width: 100%; height: 26px; margin: 0; background: transparent; -webkit-appearance: none; appearance: none;
+}
+.menu.pause .fine input::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: rgba(244, 239, 227, 0.28); }
+.menu.pause .fine input::-moz-range-track { height: 4px; border-radius: 2px; background: rgba(244, 239, 227, 0.28); }
+.menu.pause .fine input::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 18px; height: 18px; margin-top: -7px; border-radius: 50%; border: 0;
+  background: var(--accent); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+}
+.menu.pause .fine input::-moz-range-thumb { width: 18px; height: 18px; border-radius: 50%; border: 0; background: var(--accent); }
+/* Exact-fit marks: small ticks above and below the track at this screen's sharp values. */
+.menu.pause .fine-ticks { position: absolute; inset: 0; pointer-events: none; }
+.menu.pause .fine-ticks i {
+  position: absolute; top: 5px; bottom: 5px; width: 2px; margin-left: -1px; border-radius: 1px;
+  left: calc(9px + var(--p) * (100% - 18px)); background: rgba(244, 239, 227, 0.75);
+}
+.menu.pause .fine b.sharp { color: #6ff0a8; }
+.menu.pause .fine b { min-width: 6.4em; text-align: right; font-weight: 800; font-size: 15px; letter-spacing: 0.04em; color: var(--accent); font-variant-numeric: tabular-nums; white-space: nowrap; }

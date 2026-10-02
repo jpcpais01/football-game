@@ -229,7 +229,7 @@ pauseMenu.innerHTML = `
     <button class="camera ghost">Camera: Normal</button>
     <button class="sound ghost">Sound: on</button>
     <button class="smooth ghost">Smoothing: on</button>
-    <label class="fine wide"><span>Pixels</span><input class="fine-in" type="range" min="${PIXELS_MIN}" max="${PIXELS_MAX}" step="4"><b class="fine-val">288</b></label>
+    <label class="fine wide"><span>Pixels</span><div class="fine-track"><div class="fine-ticks"></div><input class="fine-in" type="range" min="${PIXELS_MIN}" max="${PIXELS_MAX}" step="1"></div><b class="fine-val">288</b></label>
     <button class="stats ghost wide">FPS counter: off</button>
     <button class="fan ghost wide">Your banner: add photo</button>
   </div>`;
@@ -506,11 +506,34 @@ cameraBtn.addEventListener('click', () => {
 const fineRow = pauseMenu.querySelector('.fine') as HTMLElement;
 const fineIn = pauseMenu.querySelector('.fine-in') as HTMLInputElement;
 const fineVal = pauseMenu.querySelector('.fine-val') as HTMLElement;
+const fineTicks = pauseMenu.querySelector('.fine-ticks') as HTMLElement;
+/** Art heights that divide this screen's real height exactly (every art pixel n x n device pixels). */
+let exactHeights: number[] = [];
+let ticksFor = 0;
+function updateFineTicks(): void {
+  const H = renderer.domElement.height;
+  if (H === ticksFor) return;
+  ticksFor = H;
+  exactHeights = [];
+  for (let n = 1; n <= 64; n++) if (H % n === 0 && H / n >= PIXELS_MIN && H / n <= PIXELS_MAX) exactHeights.push(H / n);
+  const span = PIXELS_MAX - PIXELS_MIN;
+  fineTicks.innerHTML = exactHeights.map((v) => `<i style="--p:${((v - PIXELS_MIN) / span).toFixed(4)}" title="${v} px · ${H / v}x"></i>`).join('');
+  showFine();
+}
+function showFine(): void {
+  const sharp = exactHeights.includes(pixelsH);
+  fineVal.textContent = sharp ? `${pixelsH} px · sharp` : `${pixelsH} px`;
+  fineVal.classList.toggle('sharp', sharp);
+}
 fineIn.value = String(pixelsH);
-fineVal.textContent = `${pixelsH} px`;
+showFine();
 fineIn.addEventListener('input', () => {
-  pixelsH = Number(fineIn.value);
-  fineVal.textContent = `${pixelsH} px`;
+  // Steps of 4, snapping onto an exact value when the thumb comes within a few pixels of it.
+  const raw = Number(fineIn.value);
+  const near = exactHeights.find((v) => Math.abs(v - raw) <= 4);
+  pixelsH = near ?? Math.min(PIXELS_MAX, Math.max(PIXELS_MIN, PIXELS_MIN + Math.round((raw - PIXELS_MIN) / 4) * 4));
+  fineIn.value = String(pixelsH);
+  showFine();
   onResize();
   try {
     localStorage.setItem('pixelH', String(pixelsH));
@@ -598,6 +621,7 @@ function onResize(): void {
   rig.setAspect(w / h);
   pixelPass.height = pixelsH;
   pixelPass.resize(renderer.domElement.width, renderer.domElement.height);
+  updateFineTicks();
   renderer.domElement.style.imageRendering = pixelLook() ? 'pixelated' : '';
   fineRow.style.display = pixelLook() ? '' : 'none';
   applyGraphics();
