@@ -28,8 +28,10 @@ export interface InputState {
   /** Live: finger currently slid up on a held button. */
   swipe: [boolean, boolean, boolean];
   events: ButtonEvent[];
+  /** Defence: finger slid on the held Sprint button (down = tackle, left = slide). Consumed by the match. */
+  tackleSwipe: 'tackle' | 'slide' | null;
 }
 
 export function makeInput(): InputState {
-  return { moveX: 0, moveY: 0, sprint: false, held: [false, false, false], holdTime: [0, 0, 0], swipe: [false, false, false], events: [] };
+  return { moveX: 0, moveY: 0, sprint: false, held: [false, false, false], holdTime: [0, 0, 0], swipe: [false, false, false], events: [], tackleSwipe: null };
 }

@@ -167,7 +167,7 @@ html, body {
   display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: min(460px, calc(100vw - 32px));
   max-height: calc(100dvh - 16px - var(--safe-t) - var(--safe-b)); overflow-y: auto; padding: 4px;
 }
-.menu.pause h2, .menu.pause .resume, .menu.pause .restart { grid-column: 1 / -1; }
+.menu.pause h2, .menu.pause .resume, .menu.pause .restart, .menu.pause .wide { grid-column: 1 / -1; }
 .menu.pause button.ghost { font-size: 15px; padding: 10px 8px; letter-spacing: 0.08em; white-space: nowrap; }
 @media (max-height: 420px) {
   .menu.pause h2 { font-size: 30px; margin: 0; }
@@ -236,6 +236,19 @@ html, body {
   font-size: 13px; letter-spacing: 0.1em; padding: 6px 12px; background: transparent; color: var(--ink);
   border: 1.5px solid rgba(244, 239, 227, 0.4); border-radius: 4px;
 }
+
+/* Sprint in defence: slide down = tackle (arrow below), slide left = slide tackle (arrow left). */
+.btn-sprint.swipe-down { transform: translateY(6px) scale(0.95); background: rgba(200, 57, 59, 0.6); }
+.btn-sprint.swipe-down::after {
+  content: ''; position: absolute; bottom: -14px; left: 50%; margin-left: -7px;
+  border: 7px solid transparent; border-top-color: #ffb3a8; border-bottom: 0;
+}
+.btn-sprint.swipe-down.slide { transform: translateX(-8px) scale(0.93); }
+.btn-sprint.swipe-down.slide::after {
+  bottom: auto; top: 50%; left: -14px; margin: -7px 0 0;
+  border: 7px solid transparent; border-right-color: #ffb3a8; border-left: 0;
+}
+.btn-sprint small { font-size: 10px; letter-spacing: 0.04em; }
 
 /* Sliding up on Pass / Through = lofted: the button lifts and shows an arrow. */
 .btn.swipe { transform: translateY(-6px) scale(0.95); background: rgba(80, 140, 210, 0.55); }

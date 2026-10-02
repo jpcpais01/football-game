@@ -12,12 +12,12 @@ import * as THREE from 'three';
 /** Direction the sunlight travels (from the sun toward the ground). Mutated by Atmosphere. */
 export const SUN_DIR = new THREE.Vector3(0.42, -0.55, -0.72).normalize();
 
-/** Floodlight pylon positions (x, z); also used for the faint floodlight shadows. */
+/** Floodlight banks at the roof corners (x, z); also used for the faint floodlight shadows. */
 export const PYLONS: [number, number][] = [
-  [-74.5, -56],
-  [74.5, -56],
-  [-74.5, 56],
-  [74.5, 56],
+  [-65.3, -45.8],
+  [65.3, -45.8],
+  [-65.3, 45.8],
+  [65.3, 45.8],
 ];
 
 export const SHARED = {
@@ -162,6 +162,10 @@ export function litMaterial(o: LitOptions = {}): THREE.MeshStandardMaterial {
         }`,
       );
   };
+  // The shader code depends on the options: key the compiled program on them, or every
+  // litMaterial would share the first one compiled (three keys on the callback's source).
+  const key = JSON.stringify([o.groundAO, o.diffuseHook, o.fragDecl, o.vertDecl, o.vertBody]);
+  mat.customProgramCacheKey = () => key;
   return mat;
 }
 

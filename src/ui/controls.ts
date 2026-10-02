@@ -8,7 +8,7 @@ import { Btn, type InputState, makeInput } from '../sim/input';
 
 const LABELS = {
   attack: ['PASS', 'THROUGH', 'SHOOT', 'SPRINT'],
-  defend: ['TACKLE', 'SWITCH', 'PRESS', 'SPRINT<br><small>+ PRESS</small>'],
+  defend: ['TACKLE', 'SWITCH', 'PRESS', 'SPRINT<br><small>▼ TACKLE · ◀ SLIDE</small>'],
 };
 
 export class Controls {
@@ -26,6 +26,10 @@ export class Controls {
   private btnDownAt: number[] = [0, 0, 0];
   private btnStartY: number[] = [0, 0, 0];
   private sprintPointer = -1;
+  private sprintStartX = 0;
+  private sprintStartY = 0;
+  /** Sprint swipe this press: 0 none, 1 tackle (slid down), 2 slide tackle (slid left). */
+  private sprintSwipe = 0;
   mode: 'attack' | 'defend' = 'attack';
   private keys = new Set<string>();
   private keySprint = false;
@@ -76,6 +80,9 @@ export class Controls {
       e.preventDefault();
       this.sprintEl.setPointerCapture?.(e.pointerId);
       this.sprintPointer = e.pointerId;
+      this.sprintStartX = e.clientX;
+      this.sprintStartY = e.clientY;
+      this.sprintSwipe = 0;
       this.sprintEl.classList.add('down');
     });
 
@@ -127,8 +134,22 @@ export class Controls {
     c.classList.toggle('charging', p > 0);
   }
 
-  /** Sliding up on Pass / Through while holding = lofted ball (FIFA-Mobile style). */
+  /**
+   * Sliding up on Pass / Through while holding = lofted ball (FIFA-Mobile style).
+   * Sliding down on Sprint in defence = tackle; sliding left = slide tackle.
+   */
   private buttonSwipe(e: PointerEvent): void {
+    if (e.pointerId === this.sprintPointer && this.mode === 'defend') {
+      const down = e.clientY - this.sprintStartY;
+      const left = this.sprintStartX - e.clientX;
+      const stage = left > 28 && left > down ? 2 : down > 28 ? 1 : 0;
+      if (stage > this.sprintSwipe) {
+        this.sprintSwipe = stage;
+        this.input.tackleSwipe = stage === 2 ? 'slide' : 'tackle';
+        this.sprintEl.classList.add('swipe-down');
+        this.sprintEl.classList.toggle('slide', stage === 2);
+      }
+    }
     for (let i = 0; i < 2; i++) {
       if (this.btnPointer[i] !== e.pointerId) continue;
       const up = this.btnStartY[i] - e.clientY > 26;
@@ -166,7 +187,7 @@ export class Controls {
       this.release(i as Btn);
     }
     this.sprintPointer = -1;
-    this.sprintEl.classList.remove('down');
+    this.sprintEl.classList.remove('down', 'swipe-down', 'slide');
     this.joyId = -1;
     this.input.moveX = 0;
     this.input.moveY = 0;
@@ -235,7 +256,7 @@ export class Controls {
     }
     if (e.pointerId === this.sprintPointer) {
       this.sprintPointer = -1;
-      this.sprintEl.classList.remove('down');
+      this.sprintEl.classList.remove('down', 'swipe-down', 'slide');
     }
   }
 
@@ -256,6 +277,11 @@ export class Controls {
       e.preventDefault();
       if (down) this.press(map[e.code]);
       else this.release(map[e.code]);
+      return;
+    }
+    // N: the keyboard version of sliding down on Sprint (tackle; Shift+N = slide).
+    if (e.code === 'KeyN') {
+      if (down && this.mode === 'defend') this.input.tackleSwipe = e.shiftKey ? 'slide' : 'tackle';
       return;
     }
     if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {

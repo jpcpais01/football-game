@@ -5,7 +5,7 @@ import { clamp, lerp } from '../sim/vec';
 
 const CAM_PITCH_DEG = 21;
 /** Pixel art looks down more steeply: a cleaner, more readable top-down-ish framing. */
-const PIXEL_PITCH_DEG = 30;
+const PIXEL_PITCH_DEG = 27;
 
 export const CAMERA_PRESETS = { close: 33, normal: 40, far: 48 } as const;
 export type CameraPreset = keyof typeof CAMERA_PRESETS;
@@ -34,6 +34,14 @@ export class CameraRig {
    * upscaled image by this much, so motion is smooth while the pixel grid stays stable. */
   subPixelX = 0;
   subPixelY = 0;
+  /** Wide establishing shot of the stadium (home screen, half time, full time). */
+  cinematic = false;
+  /** Goal crowd shot: which end's fans to show (-1 left/home, 1 right/away, 0 none). */
+  crowdShot = 0;
+  private cine = 0;
+  private lastShot = 0;
+  private cinePos = new THREE.Vector3();
+  private cineLook = new THREE.Vector3();
   /** Base distance from the play; set by the camera setting. */
   baseDist: number = CAMERA_PRESETS.normal;
 
@@ -147,6 +155,8 @@ export class CameraRig {
     if (!pixel) this.dist += ((this.distOverride || wantDist) - this.dist) * k * 0.3;
     else this.dist = this.distOverride || this.baseDist;
     this.shake *= Math.exp(-dt * 6);
+    this.cine += ((this.cinematic || this.crowdShot ? 1 : 0) - this.cine) * (1 - Math.exp(-dt * (this.crowdShot ? 3.5 : 1.5)));
+    if (this.cine < 0.002) this.cine = this.lastShot = 0;
     this.place(time);
   }
 
@@ -183,6 +193,28 @@ export class CameraRig {
     }
     cam.position.set(tx + sx, Math.sin(pitch) * this.dist + sy, tz + Math.cos(pitch) * this.dist);
     this.look.set(tx, 0, tz);
+    if (this.cine > 0) {
+      // A slow crane sweep from the open near side across the bowl: the far stands, the
+      // ultras' end, the roof lights.
+      // Keep the crowd framing while easing back out of it.
+      if (this.crowdShot) this.lastShot = this.crowdShot;
+      const e = this.crowdShot || (this.cinematic ? 0 : this.lastShot);
+      if (e) {
+        // After a goal: from the edge of the box up at the celebrating end, drifting across it.
+        const drift = Math.sin(time * 0.35) * 10;
+        this.cinePos.set(e * (PITCH.halfL - 20), 5, 14 + drift * 0.4);
+        this.cineLook.set(e * (PITCH.halfL + 22), 10, drift);
+      } else {
+        const a = Math.sin(time * 0.05) * 0.55;
+        this.cinePos.set(Math.sin(a) * 78, 17 + Math.sin(time * 0.07) * 3, 22 + Math.cos(a) * 52);
+        this.cineLook.set(-Math.sin(a) * 30, 9, -30);
+      }
+      const k = this.cine * this.cine * (3 - 2 * this.cine);
+      cam.position.lerp(this.cinePos, k);
+      this.look.lerp(this.cineLook, k);
+      this.subPixelX *= 1 - k;
+      this.subPixelY *= 1 - k;
+    }
     cam.lookAt(this.look);
   }
 }

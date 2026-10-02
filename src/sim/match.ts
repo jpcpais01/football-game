@@ -103,6 +103,8 @@ export class Match {
   controlled!: Player;
   pressHeld = false;
   private lastTackleTap = -10;
+  /** Sprint-swipe tackle: committed, waiting for the moment to strike. */
+  private lunge: { slide: boolean; until: number } | null = null;
   /** Seconds the stick has been idle (read by the AI for auto-switching). */
   noInputT = 0;
   /** Seconds since the controlled player changed (UI flash). */
@@ -496,6 +498,15 @@ export class Match {
     // Defence: the middle button presses; the big Sprint button sprints *and* presses.
     this.pressHeld = !attacking && (input.held[Btn.C] || input.sprint);
     input.events.length = 0;
+    // Sliding down on Sprint commits to a tackle; sliding left commits to a slide tackle.
+    if (input.tackleSwipe) {
+      if (!attacking) {
+        if (this.lunge && input.tackleSwipe === 'slide') this.lunge.slide = true;
+        else this.lunge = { slide: input.tackleSwipe === 'slide', until: this.time + 0.75 };
+      }
+      input.tackleSwipe = null;
+    }
+    this.updateLunge(attacking);
 
     if (this.phase === 'goal' || this.phase === 'halftime' || this.phase === 'fulltime' || this.phase === 'out') {
       c.sprinting = false;
@@ -700,6 +711,55 @@ export class Match {
     if (c.isBusy()) return;
     const tx = this.ball.pos.x - c.pos.x;
     const tz = this.ball.pos.z - c.pos.z;
+    const d = Math.max(0.01, Math.hypot(tx, tz));
+    this.startTackle(c, tx / d, tz / d, slide);
+  }
+
+  /**
+   * The sprint-swipe tackle is a commitment, not a button-mash: the defender keeps pressing
+   * and strikes at the right moment — the ball within reach and not tucked away behind the
+   * carrier's body (or he's simply right on it). If the moment doesn't come within the
+   * window he makes a last stretch when it's close, otherwise he holds his feet.
+   */
+  private updateLunge(attacking: boolean): void {
+    const L = this.lunge;
+    if (!L) return;
+    const c = this.controlled;
+    if (attacking || this.phase !== 'play') {
+      this.lunge = null;
+      return;
+    }
+    if (c.isBusy()) return;
+    const d = this.ballDist(c);
+    const b = this.ball.pos;
+    if (this.time > L.until) {
+      if (d < (L.slide ? 3.2 : 2.3) && b.y < 0.7) this.lungeAt(c, L.slide);
+      this.lunge = null;
+      return;
+    }
+    const reach = L.slide ? 2.8 : 1.5;
+    if (d > reach || b.y > 0.7) return;
+    const carrier = this.owner;
+    let open = true;
+    if (carrier && carrier.team !== c.team) {
+      // Shielded: the carrier's body is between us and the ball.
+      const cx = carrier.pos.x - c.pos.x;
+      const cz = carrier.pos.z - c.pos.z;
+      const cd = Math.hypot(cx, cz);
+      const behind = cd < d && ((cx * (b.x - c.pos.x) + cz * (b.z - c.pos.z)) / (cd * d + 1e-6)) > 0.85;
+      open = !behind || this.ballDist(carrier) > 0.5;
+    }
+    if (open || d < reach * 0.6) {
+      this.lungeAt(c, L.slide);
+      this.lunge = null;
+    }
+  }
+
+  /** Strike toward where the ball will be as the foot arrives. */
+  private lungeAt(c: Player, slide: boolean): void {
+    const lead = slide ? 0.28 : 0.15;
+    const tx = this.ball.pos.x + this.ball.vel.x * lead - c.pos.x;
+    const tz = this.ball.pos.z + this.ball.vel.z * lead - c.pos.z;
     const d = Math.max(0.01, Math.hypot(tx, tz));
     this.startTackle(c, tx / d, tz / d, slide);
   }

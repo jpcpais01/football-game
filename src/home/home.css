@@ -477,6 +477,7 @@ button.tile:hover .chev { transform: translateX(4px); }
 .btn-ghost.armed, .btn-danger.armed { background: #c8393b; border-color: #c8393b; }
 .btn-danger { width: 100%; border: 1px solid rgba(255, 90, 90, 0.4); background: rgba(200, 57, 59, 0.12); color: #ff9a8a !important; font-size: 14px; }
 .btn-danger.armed { color: #fff !important; }
+.btn-ghost.wide { width: 100%; margin-top: 12px; }
 .note { font-size: 14px; font-weight: 600; letter-spacing: 0.08em; color: var(--gold); text-transform: uppercase; }
 
 .pd { display: flex; gap: 22px; align-items: flex-start; }

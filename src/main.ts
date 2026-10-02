@@ -6,6 +6,7 @@ import { DT, MATCH } from './sim/constants';
 import { Match } from './sim/match';
 import { createPitch } from './render/pitch';
 import { createStadium } from './render/stadium';
+import { clearFanBanner, loadFanBanner, pickFanBanner } from './ui/fanBanner';
 import { createGoals } from './render/goals';
 import { PlayersView } from './render/players';
 import { BallView } from './render/ballView';
@@ -119,7 +120,14 @@ const vignette = document.createElement('div');
 vignette.className = 'vignette';
 app.insertBefore(vignette, ui);
 
-const home = new HomeUI(ui, club, audio, { onPlay: (seed) => startGame(seed) });
+const home = new HomeUI(ui, club, audio, {
+  onPlay: (seed) => startGame(seed),
+  bannerLabel: () => (hasFanBanner ? 'Change your banner' : 'Your banner: add a photo'),
+  onBanner: async () => {
+    const photo = await pickFanBanner();
+    if (photo) setFanBanner(photo);
+  },
+});
 home.show();
 
 const pauseBtn = document.createElement('button');
@@ -140,6 +148,7 @@ pauseMenu.innerHTML = `
     <button class="graphics ghost">Graphics: Pixel</button>
     <button class="camera ghost">Camera: Normal</button>
     <button class="sound ghost">Sound: on</button>
+    <button class="fan ghost wide">Your banner: add photo</button>
   </div>`;
 ui.appendChild(pauseMenu);
 
@@ -299,6 +308,25 @@ const soundBtn = pauseMenu.querySelector('.sound') as HTMLButtonElement;
 soundBtn.addEventListener('click', () => {
   audio.setMuted(!audio.muted);
   soundBtn.textContent = `Sound: ${audio.muted ? 'off' : 'on'}`;
+});
+
+// "Your banner": a photo the fans hold up in the stands (kept on this device).
+let hasFanBanner = false;
+const fanBtn = pauseMenu.querySelector('.fan') as HTMLButtonElement;
+function setFanBanner(photo: HTMLCanvasElement | null): void {
+  hasFanBanner = photo !== null;
+  stadium.setFanBanner(photo);
+  fanBtn.textContent = hasFanBanner ? 'Your banner: remove' : 'Your banner: add photo';
+}
+void loadFanBanner().then((photo) => photo && setFanBanner(photo));
+fanBtn.addEventListener('click', async () => {
+  if (hasFanBanner) {
+    clearFanBanner();
+    setFanBanner(null);
+  } else {
+    const photo = await pickFanBanner();
+    if (photo) setFanBanner(photo);
+  }
 });
 
 function setPaused(p: boolean): void {
@@ -475,6 +503,9 @@ function frame(now: number): void {
   handleEvents(now / 1000);
 
   officials.update(match, running ? dt : 0);
+  rig.cinematic = !playing || match.phase === 'halftime' || match.phase === 'fulltime';
+  // A 4-second shot of the scoring side's fans going wild after each goal.
+  rig.crowdShot = playing && match.phase === 'goal' && match.phaseT < 4 && match.scorer ? (match.scorer.team === 0 ? -1 : 1) : 0;
   rig.update(match, alpha, dt, now / 1000);
   playersView.update(match, alpha, now / 1000);
   ballView.update(match, alpha, running ? dt : 0);
@@ -484,7 +515,9 @@ function frame(now: number): void {
   atmo.set(progress);
   atmo.follow(rig.focusX, rig.focusZ);
   SHARED.uTime.value = now / 1000;
-  stadium.update(now / 1000, match.excitement, atmo);
+  // The ultras hold up their card display for each kick-off and the opening seconds of the half.
+  const tifo = match.phase === 'kickoff' || (match.phase === 'play' && match.clock < 8) ? 1 : 0;
+  stadium.update(now / 1000, match.excitement, atmo, tifo);
   if (playing) hud.update(match, now / 1000);
   updateCharge(alpha);
 

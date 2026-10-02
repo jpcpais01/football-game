@@ -12,6 +12,9 @@ import { StoreScreen } from './store';
 export interface HomeHooks {
   /** Start the demo match with this seed (the opponent shown on the home screen). */
   onPlay(seed: number): void;
+  /** "Your banner": a photo the fans hold up in the stands. */
+  bannerLabel(): string;
+  onBanner(): Promise<void>;
 }
 
 type ScreenName = 'home' | 'squad' | 'store';
@@ -246,6 +249,7 @@ export class HomeUI {
       <div class="m-row">
         <button class="btn-primary save-name">Save</button>
       </div>
+      <button class="btn-ghost fan-banner wide">${esc(this.hooks.bannerLabel())}</button>
       <div class="m-stats">
         <span>Played <b>${this.club.state.record.played}</b></span>
         <span>Goals <b>${this.club.state.record.gf}–${this.club.state.record.ga}</b></span>
@@ -258,6 +262,11 @@ export class HomeUI {
     box.querySelector('.save-name')!.addEventListener('click', () => {
       this.club.rename(input.value);
       this.closeModal();
+    });
+    box.querySelector('.fan-banner')!.addEventListener('click', async () => {
+      await this.hooks.onBanner();
+      const b = box.querySelector('.fan-banner');
+      if (b) b.textContent = this.hooks.bannerLabel();
     });
     const reset = box.querySelector('.reset') as HTMLButtonElement;
     reset.addEventListener('click', () => {
