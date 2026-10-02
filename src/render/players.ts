@@ -444,6 +444,8 @@ export class PlayersView {
   private projView = new THREE.Matrix4();
   private sphere = new THREE.Sphere();
   private visible: number[] = [];
+  /** Visible set the kit attributes are currently packed for (null = needs packing). */
+  private packedFor: number[] | null = null;
   /** Per-player attributes that only change with the kits: master copies for culling. */
   private statics: { attr: THREE.BufferAttribute; master: Float32Array; per: number }[] = [];
   private hidden = new THREE.Matrix4().makeScale(0, 0, 0);
@@ -657,8 +659,9 @@ export class PlayersView {
       const m = this.parts[name].mesh;
       if (m.instanceColor) m.instanceColor.needsUpdate = true;
     }
-    // Snapshot the kit attributes: culling packs visible players to the front every frame.
+    // Snapshot the kit attributes: culling packs visible players to the front.
     this.statics = [];
+    this.packedFor = null;
     for (const name of Object.keys(this.parts) as PartName[]) {
       const { mesh, perPlayer } = this.parts[name];
       const keep = (attr: THREE.BufferAttribute | null) => attr && this.statics.push({ attr, master: (attr.array as Float32Array).slice(), per: perPlayer });
@@ -686,7 +689,7 @@ export class PlayersView {
     for (let i = 0; i < this.list.length; i++) {
       const p = this.list[i];
       this.sphere.center.set(p.pos.x, 1, p.pos.z);
-      this.sphere.radius = 5;
+      this.sphere.radius = 7; // a margin for long evening shadows thrown into view
       if (!cam || this.frustum.intersectsSphere(this.sphere)) vis.push(p.id);
     }
     const n = vis.length;
@@ -705,12 +708,32 @@ export class PlayersView {
       if (b) pack(b, 3);
       mesh.count = n * per;
     }
-    // Kit attributes: copied from the master in the same order.
-    for (const { attr, master, per } of this.statics) {
-      const a = attr.array as Float32Array;
-      const size = attr.itemSize;
-      for (let j = 0; j < n; j++) a.set(master.subarray(vis[j] * per * size, (vis[j] + 1) * per * size), j * per * size);
-      attr.needsUpdate = true;
+    // Kit attributes: copied from the master in the same order — only when the visible set
+    // changes (they don't change otherwise, so there's nothing to upload).
+    const prev = this.packedFor;
+    let same = prev !== null && prev.length === n;
+    for (let j = 0; same && j < n; j++) same = prev![j] === vis[j];
+    if (!same) {
+      this.packedFor = vis.slice();
+      for (const { attr, master, per } of this.statics) {
+        const a = attr.array as Float32Array;
+        const size = attr.itemSize;
+        for (let j = 0; j < n; j++) a.set(master.subarray(vis[j] * per * size, (vis[j] + 1) * per * size), j * per * size);
+        attr.clearUpdateRanges();
+        attr.addUpdateRange(0, n * per * size);
+        attr.needsUpdate = true;
+      }
+    }
+    // Per-frame data: upload only the part that's drawn.
+    for (const name of Object.keys(this.parts) as PartName[]) {
+      const { mesh, perPlayer: per } = this.parts[name];
+      mesh.instanceMatrix.clearUpdateRanges();
+      mesh.instanceMatrix.addUpdateRange(0, n * per * 16);
+      const b = mesh.geometry.getAttribute('aBend') as THREE.BufferAttribute | undefined;
+      if (b) {
+        b.clearUpdateRanges();
+        b.addUpdateRange(0, n * per * 3);
+      }
     }
   }
 

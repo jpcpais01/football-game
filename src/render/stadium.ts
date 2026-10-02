@@ -193,8 +193,8 @@ function bakeStatic(src: THREE.Group): THREE.Group {
   const out = new THREE.Group();
   const live: THREE.Object3D[] = [];
   src.traverse((o) => {
-    if (!(o instanceof THREE.Mesh) || o instanceof THREE.InstancedMesh) return;
-    if (o.userData.live) return void live.push(o);
+    if (!(o instanceof THREE.Mesh)) return;
+    if (o.userData.live || o instanceof THREE.InstancedMesh) return void live.push(o);
     const g = (o.geometry as THREE.BufferGeometry).clone().applyMatrix4(o.matrixWorld);
     const flat = g.index ? g.toNonIndexed() : g;
     for (const k of Object.keys(flat.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'uv') flat.deleteAttribute(k);
@@ -949,6 +949,9 @@ function windCloth<T extends THREE.Material>(mat: T, amp: number, pin: ClothPin,
           float f = ${free};
           float wind = length(uWind);
           float seed = modelMatrix[3].x * 0.37 + modelMatrix[3].z * 0.61;
+          #ifdef USE_INSTANCING
+            seed += instanceMatrix[3].x * 0.37 + instanceMatrix[3].z * 0.61;
+          #endif
           float gust = 0.55 + 0.45 * sin(uTime * 0.53 + seed) * sin(uTime * 1.31 + seed * 1.7);
           float t = uTime * (2.0 + wind * 1.6);
           float s = ${along} * ${k};
@@ -983,17 +986,18 @@ function pitchside(home: number, away: number): THREE.Group {
   const pole = litMaterial({ color: 0xf2f0e8, roughness: 0.5 });
   const flagMat = windCloth(litMaterial({ color: 0xffd447, roughness: 0.8 }), 0.1, 'left', 0.4, 0.3);
   flagMat.side = THREE.DoubleSide;
+  // The four flags are one instanced cloth (each gets its own wind phase from its position).
+  const flags = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.4, 0.3, 6, 2), flagMat, 4);
+  let fi = 0;
   for (const sx of [-1, 1]) {
     for (const sz of [-1, 1]) {
       const p = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 1.6, 6), pole);
       p.position.set(sx * PITCH.halfL, 0.8, sz * PITCH.halfW);
       g.add(p);
-      const f = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.3, 6, 2), flagMat);
-      f.position.set(sx * PITCH.halfL + 0.2, 1.45, sz * PITCH.halfW);
-      f.userData.live = true; // cloth moves in its own space
-      g.add(f);
+      flags.setMatrixAt(fi++, new THREE.Matrix4().makeTranslation(sx * PITCH.halfL + 0.2, 1.45, sz * PITCH.halfW));
     }
   }
+  g.add(flags);
   const shell = litMaterial({ color: 0x2b3038, roughness: 0.6 });
   const roofGlass = new THREE.MeshStandardMaterial({ color: 0x9fb4c8, roughness: 0.2, metalness: 0.1, transparent: true, opacity: 0.35 });
   const bench = litMaterial({ color: 0x46505c, roughness: 0.7 });
@@ -1084,134 +1088,205 @@ function sky(): THREE.Mesh {
 
 
 /**
+ * Many top-hung banners merged into one mesh (world space). Same cloth as `windCloth`
+ * ('top'), but each vertex carries its banner's local coordinates and size (aCloth) and a
+ * wind phase (aSeed); the cloth moves along the banner's own facing (its normal).
+ */
+function batchedCloth<T extends THREE.Material>(mat: T, amp: number): T {
+  const orig = mat.onBeforeCompile.bind(mat);
+  mat.onBeforeCompile = (shader, r) => {
+    orig(shader, r);
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+        uniform float uTime;
+        uniform vec2 uWind;
+        attribute vec4 aCloth;
+        attribute float aSeed;
+        float clothZ(vec2 p) {
+          vec2 size = aCloth.zw;
+          float f = clamp((size.y * 0.5 - p.y) / size.y, 0.0, 1.0);
+          float wind = length(uWind);
+          float seed = aSeed;
+          float gust = 0.55 + 0.45 * sin(uTime * 0.53 + seed) * sin(uTime * 1.31 + seed * 1.7);
+          float t = uTime * (2.0 + wind * 1.6);
+          float s = p.x * 1.6;
+          float wave = sin(s - t + seed) * 0.62
+            + sin(s * 2.3 - t * 1.8 + p.y * 2.24 + seed * 2.0) * 0.26
+            + sin(s * 5.6 - t * 4.1 + p.y * 4.8) * 0.12 * f;
+          float belly = 0.22 * f * (0.65 + 0.35 * sin(uTime * 0.9 + seed));
+          return ${amp.toFixed(3)} * wind * gust * (pow(f, 1.4) * wave + belly);
+        }`,
+      )
+      .replace(
+        '#include <beginnormal_vertex>',
+        `#include <beginnormal_vertex>
+        vec3 clothN = normalize(normal);
+        {
+          vec3 tng = normalize(cross(vec3(0.0, 1.0, 0.0), clothN));
+          float e = 0.03;
+          float cz0 = clothZ(aCloth.xy);
+          float dzx = (clothZ(aCloth.xy + vec2(e, 0.0)) - cz0) / e;
+          float dzy = (clothZ(aCloth.xy + vec2(0.0, e)) - cz0) / e;
+          objectNormal = normalize(clothN - dzx * tng - dzy * vec3(0.0, 1.0, 0.0));
+        }`,
+      )
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed += clothN * clothZ(aCloth.xy);');
+  };
+  const key = mat.customProgramCacheKey.bind(mat);
+  mat.customProgramCacheKey = () => `${key()}|batched-cloth:${amp}`;
+  return mat;
+}
+
+/**
  * Supporters' banners hung over the railings at the front of the lower tier, plus the
  * ultras' giant drop banner over the hospitality band behind the home goal.
  */
-function banners(path: PathPt[], home: number, away: number, club: StadiumClub): THREE.Group {
-  const g = new THREE.Group();
+function banners(path: PathPt[], home: number, away: number, club: StadiumClub): THREE.Mesh {
   const hex = (c: number) => '#' + c.toString(16).padStart(6, '0');
   let crest: CanvasImageSource | null = null;
-  const redraw: (() => void)[] = [];
-  void club.crest?.then((img) => {
-    crest = img;
-    for (const f of redraw) f();
-  });
-  const make = (text: string, bg: string, fg: string, w: number, hgt: number, style: number, crests = false) => {
-    const cv = document.createElement('canvas');
-    cv.width = 512;
-    cv.height = Math.round((512 * hgt) / w / 4) * 4 || 64;
-    const H = cv.height;
-    const tex = new THREE.CanvasTexture(cv);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = 4;
-    const draw = () => {
-      const c = cv.getContext('2d')!;
-      c.fillStyle = bg;
-      c.fillRect(0, 0, 512, H);
-      c.fillStyle = fg;
-      if (style === 0) {
-        c.fillRect(0, H * 0.07, 512, H * 0.06);
-        c.fillRect(0, H * 0.87, 512, H * 0.06);
-      } else if (style === 1) {
-        // Diagonal stripes at the ends.
-        for (let x = 0; x < 70; x += 18) {
-          c.beginPath();
-          c.moveTo(x, 0);
-          c.lineTo(x + 9, 0);
-          c.lineTo(x + 9 - H * 0.4, H);
-          c.lineTo(x - H * 0.4, H);
-          c.fill();
-          c.beginPath();
-          c.moveTo(512 - x, 0);
-          c.lineTo(503 - x, 0);
-          c.lineTo(503 - x + H * 0.4, H);
-          c.lineTo(512 - x + H * 0.4, H);
-          c.fill();
-        }
-      } else {
-        c.strokeStyle = fg;
-        c.lineWidth = H * 0.06;
-        c.strokeRect(H * 0.08, H * 0.08, 512 - H * 0.16, H * 0.84);
-      }
-      c.font = `800 ${Math.round(H * 0.62)}px "Barlow Condensed", "Arial Narrow", sans-serif`;
-      c.textAlign = 'center';
-      c.textBaseline = 'middle';
-      const withCrest = crests && crest;
-      const maxW = 512 - (style === 1 ? 150 : 40) - (withCrest ? H * 1.6 : 0);
-      if (withCrest) {
-        drawCrest(c, crest!, H * 0.62, H * 0.53, H * 0.8);
-        drawCrest(c, crest!, 512 - H * 0.62, H * 0.53, H * 0.8);
-      }
-      // Hand-painted lettering: a dark outline under the paint so it reads from afar.
-      c.lineJoin = 'round';
-      c.lineWidth = H * 0.07;
-      c.strokeStyle = 'rgba(10, 10, 20, 0.55)';
-      c.strokeText(text, 256, H * 0.56, maxW);
-      c.fillText(text, 256, H * 0.56, maxW);
-      // Fabric: a fine weave and a little uneven dye.
-      let seed = text.length * 97 + H;
-      const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-      for (let i = 0; i < 900; i++) {
-        c.fillStyle = rnd() < 0.5 ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.06)';
-        c.fillRect(rnd() * 512, rnd() * H, 1 + rnd() * 3, 1);
-      }
-      const shade = c.createLinearGradient(0, 0, 512, 0);
-      shade.addColorStop(0, 'rgba(0,0,0,0.08)');
-      shade.addColorStop(0.5, 'rgba(255,255,255,0.04)');
-      shade.addColorStop(1, 'rgba(0,0,0,0.1)');
-      c.fillStyle = shade;
-      c.fillRect(0, 0, 512, H);
-      // Top hem with eyelets where it's tied to the railing.
-      c.fillStyle = 'rgba(0,0,0,0.22)';
-      c.fillRect(0, 0, 512, Math.max(3, H * 0.05));
-      for (let x = 14; x < 512; x += 62) {
-        c.beginPath();
-        c.arc(x, Math.max(3, H * 0.05) * 0.55, Math.max(1.5, H * 0.018), 0, Math.PI * 2);
-        c.fillStyle = '#c9c4b8';
-        c.fill();
-      }
-      tex.needsUpdate = true;
-    };
-    draw();
-    void document.fonts?.ready.then(draw);
-    if (crests) redraw.push(draw);
-    const mat = windCloth(litMaterial({ roughness: 0.9 }), 0.22, 'top', w, hgt);
-    mat.map = tex;
-    mat.side = THREE.DoubleSide;
-    return new THREE.Mesh(new THREE.PlaneGeometry(w, hgt, 24, 3), mat);
-  };
   const W = '#f3eee2';
   const N = '#14123a';
-  // [text, bg, fg, width, style, zone, fraction along the zone's straight]
-  const name = (club.name ?? 'ROSSONERI').toUpperCase();
-  const list: [string, string, string, number, number, number, number, boolean?][] = [
-    ['CURVA ROSSA', hex(home), W, 15, 1, 1, 0.22],
-    ['ULTRAS 1903', N, hex(home), 11, 0, 1, 0.5, true],
-    ['SEMPRE CON VOI', W, hex(home), 14, 2, 1, 0.8, true],
-    [name, hex(home), W, 13, 0, 0, 0.12, true],
-    ['GAMENIGHT', N, '#ffd447', 11, 2, 0, 0.36],
-    ['BIG NIGHT', W, N, 9, 1, 0, 0.6],
-    ['ATLANTIC 1903', hex(away), N, 13, 0, 0, 0.86],
-    ['ROVERS TILL I DIE', N, hex(away), 15, 1, 2, 0.3],
-    ['AWAY DAYS', hex(away), W, 10, 2, 2, 0.72],
-  ];
   const straights = [0, 1, 2].map((z) => path.filter((p) => p.zone === z && (z === 0 ? p.nz === -1 : Math.abs(p.nx) === 1)));
-  for (const [text, bg, fg, w, style, zone, f, crests] of list) {
+  // [text, bg, fg, width, height, style, where]
+  // `crests`: the club crest painted at both ends.
+  type Spec = { text: string; bg: string; fg: string; w: number; h: number; style: number; p: PathPt; o: number; y: number; crests?: boolean };
+  const specs: Spec[] = [];
+  const rail = (text: string, bg: string, fg: string, w: number, style: number, zone: number, f: number, crests = false) => {
     const pts = straights[zone];
-    const p = pts[Math.min(pts.length - 1, Math.floor(f * pts.length))];
-    const m = make(text, bg, fg, w, 1.35, style, crests);
-    const v = at(p, -0.08, 0.72);
-    m.position.copy(v);
-    m.rotation.y = Math.atan2(-p.nx, -p.nz);
-    g.add(m);
-  }
+    specs.push({ text, bg, fg, w, h: 1.35, style, p: pts[Math.min(pts.length - 1, Math.floor(f * pts.length))], o: -0.08, y: 0.72, crests });
+  };
+  rail('CURVA ROSSA', hex(home), W, 15, 1, 1, 0.22);
+  rail('ULTRAS 1903', N, hex(home), 11, 0, 1, 0.5, true);
+  rail('SEMPRE CON VOI', W, hex(home), 14, 2, 1, 0.8, true);
+  rail((club.name ?? 'ROSSONERI').toUpperCase(), hex(home), W, 13, 0, 0, 0.12, true);
+  rail('GAMENIGHT', N, '#ffd447', 11, 2, 0, 0.36);
+  rail('BIG NIGHT', W, N, 9, 1, 0, 0.6);
+  rail('ATLANTIC 1903', hex(away), N, 13, 0, 0, 0.86);
+  rail('ROVERS TILL I DIE', N, hex(away), 15, 1, 2, 0.3);
+  rail('AWAY DAYS', hex(away), W, 10, 2, 2, 0.72);
   // The drop banner over the boxes in the home end.
   const end = straights[1][Math.floor(straights[1].length / 2)];
-  const drop = make('ONE CLUB · ONE NIGHT', hex(home), W, 34, 4.2, 2, true);
-  drop.position.copy(at(end, 20.9, 15.8 - 2.1));
-  drop.rotation.y = Math.atan2(-end.nx, -end.nz);
-  g.add(drop);
-  return g;
+  specs.push({ text: 'ONE CLUB · ONE NIGHT', bg: hex(home), fg: W, w: 34, h: 4.2, style: 2, p: end, o: 20.9, y: 15.8 - 2.1, crests: true });
+
+  // All artwork in one atlas (rows of 512 px), so every banner is one draw together.
+  const rows = specs.map((sp) => Math.max(32, Math.round((512 * sp.h) / sp.w / 4) * 4));
+  const AH = 1024;
+  const cv = document.createElement('canvas');
+  cv.width = 512;
+  cv.height = AH;
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  const tops: number[] = [];
+  rows.reduce((y, h) => (tops.push(y), y + h), 0);
+  const paint = (c: CanvasRenderingContext2D, sp: Spec, H: number) => {
+    c.fillStyle = sp.bg;
+    c.fillRect(0, 0, 512, H);
+    c.fillStyle = sp.fg;
+    if (sp.style === 0) {
+      c.fillRect(0, H * 0.07, 512, H * 0.06);
+      c.fillRect(0, H * 0.87, 512, H * 0.06);
+    } else if (sp.style === 1) {
+      // Diagonal stripes at the ends.
+      for (let x = 0; x < 70; x += 18) {
+        c.beginPath();
+        c.moveTo(x, 0);
+        c.lineTo(x + 9, 0);
+        c.lineTo(x + 9 - H * 0.4, H);
+        c.lineTo(x - H * 0.4, H);
+        c.fill();
+        c.beginPath();
+        c.moveTo(512 - x, 0);
+        c.lineTo(503 - x, 0);
+        c.lineTo(503 - x + H * 0.4, H);
+        c.lineTo(512 - x + H * 0.4, H);
+        c.fill();
+      }
+    } else {
+      c.strokeStyle = sp.fg;
+      c.lineWidth = H * 0.06;
+      c.strokeRect(H * 0.08, H * 0.08, 512 - H * 0.16, H * 0.84);
+    }
+    c.font = `800 ${Math.round(H * 0.62)}px "Barlow Condensed", "Arial Narrow", sans-serif`;
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    const withCrest = sp.crests && crest;
+    const maxW = 512 - (sp.style === 1 ? 150 : 40) - (withCrest ? H * 1.6 : 0);
+    if (withCrest) {
+      drawCrest(c, crest!, H * 0.62, H * 0.53, H * 0.8);
+      drawCrest(c, crest!, 512 - H * 0.62, H * 0.53, H * 0.8);
+    }
+    // Hand-painted lettering: a dark outline under the paint so it reads from afar.
+    c.lineJoin = 'round';
+    c.lineWidth = H * 0.07;
+    c.strokeStyle = 'rgba(10, 10, 20, 0.55)';
+    c.strokeText(sp.text, 256, H * 0.56, maxW);
+    c.fillText(sp.text, 256, H * 0.56, maxW);
+    // Fabric: a fine weave and a little uneven dye.
+    let seed = sp.text.length * 97 + H;
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    for (let i = 0; i < 900; i++) {
+      c.fillStyle = rnd() < 0.5 ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.06)';
+      c.fillRect(rnd() * 512, rnd() * H, 1 + rnd() * 3, 1);
+    }
+    const shade = c.createLinearGradient(0, 0, 512, 0);
+    shade.addColorStop(0, 'rgba(0,0,0,0.08)');
+    shade.addColorStop(0.5, 'rgba(255,255,255,0.04)');
+    shade.addColorStop(1, 'rgba(0,0,0,0.1)');
+    c.fillStyle = shade;
+    c.fillRect(0, 0, 512, H);
+    // Top hem with eyelets where it's tied to the railing.
+    c.fillStyle = 'rgba(0,0,0,0.22)';
+    c.fillRect(0, 0, 512, Math.max(3, H * 0.05));
+    for (let x = 14; x < 512; x += 62) {
+      c.beginPath();
+      c.arc(x, Math.max(3, H * 0.05) * 0.55, Math.max(1.5, H * 0.018), 0, Math.PI * 2);
+      c.fillStyle = '#c9c4b8';
+      c.fill();
+    }
+  };
+  const draw = () => {
+    const c = cv.getContext('2d')!;
+    specs.forEach((sp, i) => {
+      c.save();
+      c.translate(0, tops[i]);
+      c.beginPath();
+      c.rect(0, 0, 512, rows[i]);
+      c.clip();
+      paint(c, sp, rows[i]);
+      c.restore();
+    });
+    tex.needsUpdate = true;
+  };
+  draw();
+  void document.fonts?.ready.then(draw);
+  void club.crest?.then((img) => ((crest = img), draw()));
+
+  // One merged mesh: each banner placed in the world, uvs into its atlas row, and its own
+  // cloth coordinates (local x/y, size) and wind phase for the shader.
+  const geos = specs.map((sp, i) => {
+    const g = new THREE.PlaneGeometry(sp.w, sp.h, 24, 3);
+    const pos = g.attributes.position;
+    const uv = g.attributes.uv;
+    const cloth = new Float32Array(pos.count * 4);
+    const seed = new Float32Array(pos.count).fill(i * 1.71);
+    const v0 = 1 - (tops[i] + rows[i]) / AH;
+    const v1 = 1 - tops[i] / AH;
+    for (let k = 0; k < pos.count; k++) {
+      cloth.set([pos.getX(k), pos.getY(k), sp.w, sp.h], k * 4);
+      uv.setY(k, v0 + uv.getY(k) * (v1 - v0));
+    }
+    g.setAttribute('aCloth', new THREE.BufferAttribute(cloth, 4));
+    g.setAttribute('aSeed', new THREE.BufferAttribute(seed, 1));
+    const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(-sp.p.nx, -sp.p.nz));
+    return g.applyMatrix4(new THREE.Matrix4().compose(at(sp.p, sp.o, sp.y), q, new THREE.Vector3(1, 1, 1)));
+  });
+  const mat = batchedCloth(litMaterial({ roughness: 0.9 }), 0.22);
+  mat.map = tex;
+  mat.side = THREE.DoubleSide;
+  return new THREE.Mesh(mergeGeometries(geos)!, mat);
 }
 
 /**
@@ -1358,14 +1433,38 @@ export function createStadium(homeColor: number, awayColor: number, club: Stadiu
   );
 
   const spots = lampSpots();
-  const glows: THREE.Sprite[] = [];
-  const glowMat = new THREE.SpriteMaterial({ map: glowTexture(), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, toneMapped: false, fog: false });
-  for (const sp of spots) {
-    const glow = new THREE.Sprite(glowMat);
-    glow.position.copy(sp);
-    glows.push(glow);
-    group.add(glow);
-  }
+  // Lamp glows: one instanced, camera-facing quad per bank (one draw for all of them).
+  const glowMat = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    toneMapped: false,
+    uniforms: { uMap: { value: glowTexture() }, uScale: { value: 16 }, uOpacity: { value: 1 } },
+    vertexShader: /* glsl */ `
+      uniform float uScale;
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        vec4 mv = viewMatrix * modelMatrix * vec4(instanceMatrix[3].xyz, 1.0);
+        mv.xy += position.xy * uScale;
+        gl_Position = projectionMatrix * mv;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform sampler2D uMap;
+      uniform float uOpacity;
+      varying vec2 vUv;
+      void main() {
+        vec4 t = texture2D(uMap, vUv);
+        gl_FragColor = vec4(t.rgb * t.a * uOpacity, 1.0);
+        #include <colorspace_fragment>
+      }
+    `,
+  });
+  const glows = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), glowMat, spots.length);
+  spots.forEach((sp, i) => glows.setMatrixAt(i, new THREE.Matrix4().makeTranslation(sp.x, sp.y, sp.z)));
+  glows.frustumCulled = false;
+  group.add(glows);
 
   group.add(adBoards());
   group.add(crowdFlags(path, homeColor, awayColor, club));
@@ -1403,8 +1502,8 @@ export function createStadium(homeColor: number, awayColor: number, club: Stadiu
       roofLight.color.setRGB(0.25 + flood * 1.4, 0.24 + flood * 1.35, 0.22 + flood * 1.2);
       // The beams are invisible until dusk: don't spend fill on them.
       shafts.visible = flood > 0.02;
-      glowMat.opacity = 0.12 + flood * 0.88;
-      for (const g of glows) g.scale.setScalar(16 + flood * 18);
+      glowMat.uniforms.uOpacity.value = 0.12 + flood * 0.88;
+      glowMat.uniforms.uScale.value = 16 + flood * 18;
     },
   };
 }
