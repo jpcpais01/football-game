@@ -564,6 +564,7 @@ export class AI {
   private think(p: Player): void {
     const m = this.m;
     p.lookAt = null;
+    p.squareUp = false;
     p.sprinting = false;
     switch (m.phase) {
       case 'goal':
@@ -592,6 +593,8 @@ export class AI {
       // metres, in moveTo): facing a ball played from behind would have him backpedalling.
       this.meetPoint(p, this.tmp);
       this.moveTo(p, this.tmp.x, this.tmp.z, true, false);
+      // As it arrives he opens his body to it, set to take it.
+      p.squareUp = m.ballDist(p) < 6;
       p.sprinting = m.ballDist(p) > 6;
       return;
     }
@@ -941,6 +944,8 @@ export class AI {
     this.containTarget(p, this.tmp);
     const d = m.ballDist(p);
     this.moveTo(p, this.tmp.x, this.tmp.z, d > 4, true);
+    // Closing in: square to him, ready to jockey.
+    p.squareUp = d < 6;
     if (d < 5) {
       p.wantSpeed = Math.min(p.wantSpeed, carrier.speed + 1.5 + d);
     }
@@ -1313,6 +1318,7 @@ export class AI {
     if (wi >= 0) {
       const [wx, wz] = sp.wall!.slots[wi];
       this.moveTo(p, wx, wz, false, true);
+      p.squareUp = true;
       return;
     }
     const spGoal = PITCH.halfL * m.teams[sp.team].dir; // goal being attacked by the restart
@@ -1496,6 +1502,8 @@ export class AI {
 
   private keeperThink(k: Player): void {
     const m = this.m;
+    // A keeper sets himself square to the ball and shuffles across.
+    k.squareUp = true;
     const team = m.teams[k.team];
     const own = -team.dir;
     const gx = own * PITCH.halfL;

@@ -773,6 +773,7 @@ export class Match {
     // Movement.
     c.sprinting = input.sprint;
     c.lookAt = null;
+    c.squareUp = false;
     if (m > 0.12) {
       const mx = input.moveX / m;
       const mz = -input.moveY / m;
@@ -809,6 +810,7 @@ export class Match {
       }
       c.lookTarget.copy(this.ball.pos);
       c.lookAt = c.lookTarget;
+      c.squareUp = true;
     }
 
     // Ball seeking: the active player always hunts the ball (meets loose balls and
@@ -875,6 +877,7 @@ export class Match {
           if (mode === 'press' && d < 6) {
             c.lookTarget.copy(this.ball.pos);
             c.lookAt = c.lookTarget;
+            c.squareUp = true;
           }
         }
       }

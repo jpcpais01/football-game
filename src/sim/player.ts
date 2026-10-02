@@ -1,5 +1,5 @@
 import { PLAYER } from './constants';
-import { V3, angleDiff, clamp } from './vec';
+import { V3, angleDiff, clamp, smoothstep } from './vec';
 
 export type Role = 'GK' | 'DEF' | 'MID' | 'FWD';
 
@@ -57,6 +57,10 @@ export class Player {
   touchZ = 0;
   /** If set, the body turns toward this point instead of the run direction (jockey, receive). */
   lookAt: V3 | null = null;
+  /** Keep the body square to `lookAt` even on the move (jockeying, keepers, the wall).
+   * Otherwise `lookAt` is where he's watching: the body follows his run and only opens
+   * toward it as he slows (the head, in the renderer, turns to the ball either way). */
+  squareUp = false;
   readonly lookTarget = new V3();
 
   // ---- state
@@ -257,7 +261,7 @@ export class Player {
     const passive = this.action === 'slide' || this.action === 'dive' || this.action === 'fall';
     if (!passive) {
       const tsp = Math.sqrt(tx * tx + tz * tz);
-      if (tsp > 0.1 && this.lookAt) {
+      if (tsp > 0.1 && this.lookAt && this.squareUp) {
         const off = Math.abs(angleDiff(this.facing, Math.atan2(tz, tx)));
         const cap = off < 1.2 ? top : off < 2.2 ? 5.6 : 4.0;
         if (tsp > cap) {
@@ -325,10 +329,18 @@ export class Player {
     // Facing.
     if (!passive && this.action !== 'tackle') {
       let want = this.facing;
+      const run = nsp > 0.6 ? Math.atan2(this.vel.z, this.vel.x) : null;
       if (this.lookAt) {
-        want = Math.atan2(this.lookAt.z - this.pos.z, this.lookAt.x - this.pos.x);
-      } else if (nsp > 0.6) {
-        want = Math.atan2(this.vel.z, this.vel.x);
+        const look = Math.atan2(this.lookAt.z - this.pos.z, this.lookAt.x - this.pos.x);
+        if (this.squareUp || run === null) want = look;
+        else {
+          // The body goes where he's running; slowing down, it opens up toward what he's
+          // watching (all the way when he's barely moving, ~30° at a sprint).
+          const open = 0.5 + 2.6 * (1 - smoothstep(1.5, 4.5, nsp));
+          want = run + clamp(angleDiff(run, look), -open, open);
+        }
+      } else if (run !== null) {
+        want = run;
       }
       const turnRate = (11 - nsp * 0.75) * (0.85 + 0.3 * this.attrs.agility);
       const d = angleDiff(this.facing, want);
