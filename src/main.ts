@@ -21,6 +21,7 @@ import { Officials } from './render/officials';
 import { SHARED } from './render/look';
 import { Controls } from './ui/controls';
 import { Hud } from './ui/hud';
+import { Minimap } from './ui/minimap';
 import { GameAudio } from './ui/audio';
 import { Club } from './meta/club';
 import { crestCanvas } from './meta/crest';
@@ -360,6 +361,8 @@ let playing = false;
 let paused = false;
 controls.setVisible(false);
 hud.setVisible(false);
+const minimap = new Minimap(ui);
+minimap.setVisible(false);
 pauseBtn.style.display = foulBtn.style.display = 'none';
 
 async function enterFullscreen(): Promise<void> {
@@ -405,6 +408,7 @@ function startGame(seed: number): void {
   onResize();
   controls.setVisible(true);
   hud.setVisible(true);
+  minimap.setVisible(true);
   pauseBtn.style.display = foulBtn.style.display = '';
 }
 
@@ -702,6 +706,7 @@ function handleEvents(now: number): void {
 function backToMenu(): void {
   playing = false;
   hud.setVisible(false);
+  minimap.setVisible(false);
   controls.setVisible(false);
   pauseBtn.style.display = foulBtn.style.display = 'none';
   match.autoPlay = true;
@@ -823,7 +828,7 @@ function frame(now: number): void {
   stadium.setNearStand(rig.groundLevel);
   stadium.update(now / 1000, match.excitement, atmo, tifo);
   turfMarks.update(match, renderer);
-  if (playing) hud.update(match, now / 1000);
+  if (playing) hud.update(match, now / 1000), minimap.update(match, now / 1000);
   updateAim();
   updateCharge(alpha);
 

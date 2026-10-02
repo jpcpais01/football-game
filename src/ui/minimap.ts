@@ -1,0 +1,107 @@
+import type { Match } from '../sim/match';
+import { PITCH } from '../sim/constants';
+
+const hex = (c: number) => '#' + c.toString(16).padStart(6, '0');
+/** Perceived brightness 0..255 (to give light kits a dark rim on the light pitch lines). */
+const lum = (c: number) => 0.299 * ((c >> 16) & 255) + 0.587 * ((c >> 8) & 255) + 0.114 * (c & 255);
+
+/**
+ * The radar at the bottom of the screen: the pitch from above, both teams as dots in their
+ * shirt colours, the ball, and the player you control ringed. The same way round as the
+ * match camera (home attacking right, the near touchline at the bottom). Drawn on a small
+ * canvas at up to 30 fps.
+ */
+export class Minimap {
+  private el = document.createElement('div');
+  private cv = document.createElement('canvas');
+  private g = this.cv.getContext('2d')!;
+  private W = 0;
+  private H = 0;
+  private dpr = Math.min(2, window.devicePixelRatio || 1);
+  private lastDraw = 0;
+
+  constructor(parent: HTMLElement) {
+    this.el.className = 'minimap';
+    this.el.appendChild(this.cv);
+    parent.appendChild(this.el);
+  }
+
+  setVisible(v: boolean): void {
+    this.el.style.display = v ? '' : 'none';
+  }
+
+  private size(): void {
+    const w = Math.round(this.el.clientWidth);
+    const h = Math.round((w * PITCH.width) / PITCH.length);
+    if (w === this.W && h === this.H) return;
+    this.W = w;
+    this.H = h;
+    this.cv.width = Math.round(w * this.dpr);
+    this.cv.height = Math.round(h * this.dpr);
+    this.cv.style.height = `${h}px`;
+  }
+
+  update(m: Match, now: number): void {
+    if (now - this.lastDraw < 1 / 30) return;
+    this.lastDraw = now;
+    this.size();
+    const { W, H, g } = this;
+    if (!W) return;
+    g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    g.clearRect(0, 0, W, H);
+    const sx = W / PITCH.length;
+    const sz = H / PITCH.width;
+    const px = (x: number) => (x + PITCH.halfL) * sx;
+    const pz = (z: number) => (z + PITCH.halfW) * sz;
+
+    // Pitch and markings.
+    g.fillStyle = 'rgba(28, 74, 40, 0.72)';
+    g.fillRect(0, 0, W, H);
+    g.strokeStyle = 'rgba(244, 239, 227, 0.55)';
+    g.lineWidth = 1;
+    g.strokeRect(0.5, 0.5, W - 1, H - 1);
+    g.beginPath();
+    g.moveTo(W / 2, 0);
+    g.lineTo(W / 2, H);
+    g.stroke();
+    g.beginPath();
+    g.arc(W / 2, H / 2, PITCH.circleRadius * sx, 0, Math.PI * 2);
+    g.stroke();
+    const boxW = PITCH.boxDepth * sx;
+    const boxH = PITCH.boxHalfWidth * 2 * sz;
+    g.strokeRect(0.5, (H - boxH) / 2, boxW, boxH);
+    g.strokeRect(W - boxW - 0.5, (H - boxH) / 2, boxW, boxH);
+
+    // Players: the opponents first, so your team draws on top.
+    const r = Math.max(2.2, W / 64);
+    for (const t of [1 - m.humanTeam, m.humanTeam]) {
+      const kit = m.teams[t].info.kit;
+      for (const p of m.teams[t].players) {
+        const c = p.role === 'GK' ? kit.gkShirt : kit.shirt;
+        g.fillStyle = hex(c);
+        g.strokeStyle = lum(c) > 150 ? 'rgba(10, 12, 20, 0.85)' : 'rgba(244, 239, 227, 0.8)';
+        g.lineWidth = 1;
+        g.beginPath();
+        g.arc(px(p.pos.x), pz(p.pos.z), r, 0, Math.PI * 2);
+        g.fill();
+        g.stroke();
+      }
+    }
+    // The player you control.
+    const c = m.controlled;
+    g.strokeStyle = '#ffd447';
+    g.lineWidth = 1.6;
+    g.beginPath();
+    g.arc(px(c.pos.x), pz(c.pos.z), r + 2.2, 0, Math.PI * 2);
+    g.stroke();
+    // Ball (a little bigger when it's in the air).
+    const b = m.ball.pos;
+    g.fillStyle = '#ffffff';
+    g.strokeStyle = 'rgba(10, 12, 20, 0.9)';
+    g.lineWidth = 1;
+    g.beginPath();
+    g.arc(px(b.x), pz(b.z), r * 0.8 + Math.min(2, b.y * 0.25), 0, Math.PI * 2);
+    g.fill();
+    g.stroke();
+  }
+}

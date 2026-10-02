@@ -823,3 +823,7 @@ button.tile:hover .chev { transform: translateX(4px); }
 .banner-field { max-width: none; margin: 8px 0 6px; }
 /* While a pack opens it covers everything: don't keep animating the screen underneath. */
 .shell:has(> .opening.in) > .screen.active { visibility: hidden; }
+.name-row { position: relative; display: flex; gap: 10px; width: 100%; max-width: 420px; margin-top: 8px; }
+.name-row .name-field { margin-top: 0; }
+.name-row .short-field { flex: 0 0 auto; width: auto; }
+.name-row .short-field input { flex: none; width: 3.4em; text-align: center; letter-spacing: 0.12em; }

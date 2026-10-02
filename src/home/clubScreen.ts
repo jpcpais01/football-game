@@ -93,7 +93,10 @@ export class ClubScreen {
           <div class="stage-glow" style="--c1:${hex(st.kit.main)};--c2:${hex(st.crest.primary)}"></div>
           <div class="stage-main">${this.tab === 'kit' ? jerseySVG(st.kit, st.crest, 'jersey big') : crestSVG(st.crest, 'crest big')}</div>
           <div class="stage-side">${this.tab === 'kit' ? crestSVG(st.crest, 'crest small') : jerseySVG(st.kit, st.crest, 'jersey small')}</div>
-          <label class="name-field"><span>Club name</span><input class="club-name" maxlength="24" value="${esc(st.name)}"></label>
+          <div class="name-row">
+            <label class="name-field"><span>Club name</span><input class="club-name" maxlength="24" value="${esc(st.name)}"></label>
+            <label class="name-field short-field" title="Scoreboard code"><span>Code</span><input class="club-short" maxlength="3" value="${esc(this.club.info().short)}" autocapitalize="characters" spellcheck="false"></label>
+          </div>
         </section>
         <section class="studio-panel">${this.tab === 'kit' ? this.kitPanel() : this.crestPanel()}</section>
       </main>`;
@@ -199,6 +202,21 @@ export class ClubScreen {
     const name = q('.club-name') as HTMLInputElement;
     name.addEventListener('change', () => this.club.rename(name.value));
     name.addEventListener('keydown', (e) => e.key === 'Enter' && name.blur());
+    name.addEventListener('change', () => {
+      // A new name with no code of its own: show the code it now gives.
+      if (!this.club.state.short) (q('.club-short') as HTMLInputElement).value = this.club.info().short;
+    });
+    const short = q('.club-short') as HTMLInputElement;
+    short.addEventListener('input', () => {
+      const v = short.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3);
+      if (short.value !== v) short.value = v;
+    });
+    short.addEventListener('change', () => {
+      this.club.setShort(short.value);
+      short.value = this.club.info().short;
+      this.ui.identityChanged();
+    });
+    short.addEventListener('keydown', (e) => e.key === 'Enter' && short.blur());
 
     const bt = q('.banner-text') as HTMLInputElement | null;
     bt?.addEventListener('input', () => {

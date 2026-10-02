@@ -35,6 +35,8 @@ export function defaultKit(): ClubKit {
 export interface ClubState {
   v: 1;
   name: string;
+  /** Three-letter code on the scoreboard (empty = from the name). */
+  short?: string;
   coins: number;
   cards: Card[];
   lineup: Lineup;
@@ -324,6 +326,12 @@ export class Club {
     return true;
   }
 
+  /** The scoreboard code: up to 3 letters / digits (empty goes back to the automatic one). */
+  setShort(code: string): void {
+    this.state.short = code.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3);
+    this.save();
+  }
+
   rename(name: string): void {
     const n = name.trim().slice(0, 24);
     if (n) this.state.name = n;
@@ -335,7 +343,8 @@ export class Club {
   info(): TeamInfo {
     const name = this.state.name;
     const words = name.toUpperCase().replace(/[^A-Z ]/g, '').split(/\s+/).filter(Boolean);
-    const short = words.length >= 3 ? words.slice(0, 3).map((w) => w[0]).join('') : (words[0] ?? 'GNC').slice(0, 3);
+    const auto = words.length >= 3 ? words.slice(0, 3).map((w) => w[0]).join('') : (words[0] ?? 'GNC').slice(0, 3);
+    const short = this.state.short || auto;
     const k = this.state.kit;
     const kit: Kit = { ...TEAMS[0].kit, shirt: k.main, shirt2: k.secondary, shorts: k.shorts, socks: k.main, pattern: k.pattern };
     return { ...TEAMS[0], name, short, kit };

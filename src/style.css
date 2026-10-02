@@ -371,3 +371,11 @@ html, body {
 }
 .menu.pause .fine b.sharp { color: #6ff0a8; }
 .menu.pause .fine b { min-width: 6.4em; text-align: right; font-weight: 800; font-size: 15px; letter-spacing: 0.04em; color: var(--accent); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Minimap: bottom centre, between the joystick and the buttons. */
+.minimap {
+  position: absolute; left: 50%; bottom: calc(10px + var(--safe-b)); transform: translateX(-50%);
+  width: clamp(120px, 21vw, 210px); pointer-events: none; border-radius: 6px; overflow: hidden;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35), 0 0 0 1.5px rgba(244, 239, 227, 0.25);
+}
+.minimap canvas { display: block; width: 100%; }
