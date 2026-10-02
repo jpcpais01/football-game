@@ -71,7 +71,7 @@ export class CameraRig {
     goalZ = clamp(goalZ, -PITCH.halfW + 6, PITCH.halfW - 6);
     const pixel = this.pixelHeight > 0;
     if (pixel) {
-      // Pixel art: a locked broadcast framing (no dolly, no zoom, no shake) so the pixel
+      // Pixel art: a locked broadcast framing (no dolly, no zoom) so the pixel
       // grid stays perfectly stable and the camera only pans left and right. The forward
       // position is chosen so the near touchline sits at the bottom of the screen.
       this.dist = this.baseDist;
@@ -82,7 +82,6 @@ export class CameraRig {
       goalZ = PITCH.halfW + 1.5 + h / Math.tan(bottom) - back + LOOK_OFFSET;
       this.tz = goalZ;
       this.vz = 0;
-      this.shake = 0;
     }
 
     // Critically damped follow.
