@@ -251,3 +251,29 @@ it('a lofted pass from the wing becomes a cross into the box', () => {
   console.log('crosses', crosses, '/ 8, reached the box', reachedBox, '/ 8');
   expect(reachedBox).toBeGreaterThan(5);
 });
+
+it('switches to a much closer teammate even while steering', () => {
+  const m = new Match(81);
+  const input = makeInput();
+  m.phase = 'play';
+  m.setPiece = null;
+  for (const p of m.players) { p.pos.x = p.team === 0 ? -45 : 45; p.pos.z = (p.index - 5) * 6; p.prevPos.copy(p.pos); }
+  const att = m.teams[1].players[9];
+  att.pos.set(0, 0, 0); att.prevPos.copy(att.pos);
+  m.ball.reset(-0.6, 0); m.owner = att;
+  const far = m.teams[0].players[6];
+  far.pos.set(-20, 0, 15); far.prevPos.copy(far.pos);
+  const near = m.teams[0].players[2];
+  near.pos.set(-4, 0, 1); near.prevPos.copy(near.pos);
+  m.setControlled(far);
+  input.moveX = 0; input.moveY = -1; // steering sideways, not at the ball
+  let switchedAt = -1;
+  for (let i = 0; i < 120 * 2; i++) {
+    m.step(input);
+    m.takeEvents();
+    if (m.controlled === near) { switchedAt = i / 120; break; }
+  }
+  console.log('switched to the closer defender after', switchedAt.toFixed(2), 's');
+  expect(switchedAt).toBeGreaterThanOrEqual(0);
+  expect(switchedAt).toBeLessThan(1);
+});

@@ -185,20 +185,41 @@ export class AI {
       const ch = this.chaser[m.humanTeam];
       if (ch && ch.role !== 'GK') m.setControlled(ch);
     }
-    // Auto-switch on defence when the controlled player is out of the play.
+    // Auto-switch on defence / loose balls to the teammate who should take the ball.
     const att = m.attackingTeam();
-    if (m.phase === 'play' && att !== m.humanTeam) {
-      const ch = this.chaser[m.humanTeam];
-      const c = m.controlled;
-      if (ch && ch !== c && ch.role !== 'GK') {
-        const ci = this.intercept[c.id];
-        const hi = this.intercept[ch.id];
-        const ct = ci.t >= 0 ? ci.t : 9;
-        const ht = hi.t >= 0 ? hi.t : 9;
-        // Switch sooner when the stick is idle (the player is waiting for the game to help).
-        const idle = m.noInputT > 0.25;
-        if (m.switchT > 0.6 && ((idle && ct > ht + 0.4 && m.ballDist(c) > 4) || (ct > ht + 0.9 && m.ballDist(c) > 7))) m.setControlled(ch);
+    const c = m.controlled;
+    if (m.phase === 'play' && att !== m.humanTeam && m.switchT > 0.45 && c.action !== 'tackle' && c.action !== 'slide') {
+      const ci = this.intercept[c.id];
+      const ct = ci.t >= 0 ? ci.t : 9;
+      const cd = m.ballDist(c);
+      // Is the stick pushing toward the ball? (Then the player clearly means to chase.)
+      let toward = 0;
+      if (m.noInputT === 0 && cd > 0.5) {
+        const bx = (m.ball.pos.x - c.pos.x) / cd;
+        const bz = (m.ball.pos.z - c.pos.z) / cd;
+        toward = c.touchX * bx + c.touchZ * bz;
       }
+      const idle = m.noInputT > 0.25;
+      const margin = idle ? 0.25 : toward > 0.6 ? 0.9 : 0.4;
+      let best: Player | null = null;
+      let bestScore = 0;
+      for (const q of m.teams[m.humanTeam].players) {
+        if (q === c || q.role === 'GK' || q.action === 'stumble') continue;
+        const qi = this.intercept[q.id];
+        const qt = qi.t >= 0 ? qi.t : 9;
+        const qd = m.ballDist(q);
+        // Clearly closer to the ball (half the distance and at least 4 m nearer)…
+        const muchCloser = qd < cd * 0.5 && cd - qd > 4;
+        // …or gets there meaningfully sooner.
+        const sooner = ct - qt > margin && cd > 2.5;
+        if (!muchCloser && !sooner) continue;
+        const score = (ct - qt) + (cd - qd) * 0.15;
+        if (score > bestScore) {
+          bestScore = score;
+          best = q;
+        }
+      }
+      if (best) m.setControlled(best);
     }
 
     if (m.owner !== this.lastOwner) {
