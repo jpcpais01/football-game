@@ -4,14 +4,22 @@ import { V3, angleDiff, clamp } from './vec';
 export type Role = 'GK' | 'DEF' | 'MID' | 'FWD';
 
 export interface Attributes {
-  pace: number; // 0..1
-  accel: number;
+  pace: number; // 0..1: top speed
+  accel: number; // first steps
+  agility: number; // turning / cutting grip
+  stamina: number; // sprint endurance
+  strength: number; // duels, shielding
+  jumping: number; // aerial reach
+  power: number; // kick power
   control: number;
   passing: number;
   shooting: number;
-  strength: number;
   defending: number;
   keeping: number;
+  /** Body: metres. */
+  height: number;
+  /** Body: kilograms. */
+  weight: number;
 }
 
 export type ActionKind = 'none' | 'kick' | 'tackle' | 'slide' | 'dive' | 'stumble' | 'header' | 'throw' | 'catch' | 'celebrate';
@@ -100,8 +108,34 @@ export class Player {
     return Math.sqrt(this.vel.x * this.vel.x + this.vel.z * this.vel.z);
   }
 
+  /** Shirt name / number (club line-ups). */
+  name = '';
+  number = 0;
+
   get topSpeed(): number {
-    return PLAYER.topSpeed * (0.86 + 0.14 * this.attrs.pace) * (0.88 + 0.12 * this.stamina);
+    // Heavier bodies carry a little less top speed.
+    const mass = clamp(1 - (this.attrs.weight - 78) * 0.0015, 0.96, 1.03);
+    return PLAYER.topSpeed * (0.86 + 0.14 * this.attrs.pace) * (0.88 + 0.12 * this.stamina) * mass;
+  }
+
+  /** Acceleration (m/s²): the accel stat, scaled by body mass. */
+  get accelRate(): number {
+    return PLAYER.accel * (0.8 + 0.35 * this.attrs.accel) * clamp(Math.pow(78 / this.attrs.weight, 0.3), 0.92, 1.08);
+  }
+
+  /** Effective strength in duels: the stat plus body weight. */
+  get duelStrength(): number {
+    return this.attrs.strength * 0.75 + clamp((this.attrs.weight - 60) / 40, 0, 1) * 0.25;
+  }
+
+  /** Aerial ability 0..1: jumping and height. */
+  get aerial(): number {
+    return this.attrs.jumping * 0.6 + clamp((this.attrs.height - 1.65) / 0.35, 0, 1) * 0.4;
+  }
+
+  /** Highest ball (m) this player can head: taller players and better jumpers reach higher. */
+  get headReach(): number {
+    return PLAYER.headMax + (this.attrs.height - 1.8) * 0.9 + (this.attrs.jumping - 0.5) * 0.5;
   }
 
   isBusy(): boolean {
@@ -187,7 +221,7 @@ export class Player {
           tz *= cap / tsp;
         }
       }
-      const accel = PLAYER.accel * (0.8 + 0.35 * this.attrs.accel);
+      const accel = this.accelRate;
       let dvx = tx - vx;
       let dvz = tz - vz;
       if (sp < 0.6) {
@@ -212,7 +246,9 @@ export class Player {
         // happen through the planted foot, so grip pulses with the stride (strongest with a
         // foot under the body), which gives cuts a natural rhythm.
         const plant = Math.cos(this.stridePhase);
-        const latMax = PLAYER.lateral * (0.85 + 0.2 * this.attrs.accel) * (0.78 + 0.44 * plant * plant) * dt;
+        // Agile, compact players cut sharper than tall, heavy ones.
+        const body = clamp(Math.pow(1.8 / this.attrs.height, 0.6), 0.92, 1.08);
+        const latMax = PLAYER.lateral * (0.8 + 0.3 * this.attrs.agility) * body * (0.78 + 0.44 * plant * plant) * dt;
         if (lat > latMax) {
           lx *= latMax / lat;
           lz *= latMax / lat;
@@ -250,7 +286,7 @@ export class Player {
       } else if (nsp > 0.6) {
         want = Math.atan2(this.vel.z, this.vel.x);
       }
-      const turnRate = 11 - nsp * 0.75;
+      const turnRate = (11 - nsp * 0.75) * (0.85 + 0.3 * this.attrs.agility);
       const d = angleDiff(this.facing, want);
       const step = turnRate * dt;
       const turn = clamp(d, -step, step);
@@ -264,7 +300,9 @@ export class Player {
     this.stridePhase += (nsp / stepLen) * Math.PI * dt;
 
     // Stamina: sprinting drains, everything else recovers.
-    if (this.sprinting && nsp > PLAYER.jogSpeed) this.stamina = Math.max(0, this.stamina - dt * 0.035);
-    else this.stamina = Math.min(1, this.stamina + dt * (nsp < 3 ? 0.03 : 0.012));
+    // The stamina stat sets both how fast sprinting drains and how fast it comes back.
+    const st = this.attrs.stamina;
+    if (this.sprinting && nsp > PLAYER.jogSpeed) this.stamina = Math.max(0, this.stamina - dt * 0.035 * (1.45 - 0.9 * st));
+    else this.stamina = Math.min(1, this.stamina + dt * (nsp < 3 ? 0.03 : 0.012) * (0.7 + 0.6 * st));
   }
 }

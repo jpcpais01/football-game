@@ -66,7 +66,7 @@ export class Hud {
     const [h, a] = m.teams;
     this.held = [h.score - (team === 0 ? 1 : 0), a.score - (team === 1 ? 1 : 0)];
     const s = m.scorer;
-    this.reveal = { at: revealAt, team, line: `${s ? '#' + (s.index + 1) + ' · ' : ''}${m.teams[team].info.name} · ${Math.min(m.displayMinute, m.half === 1 ? 45 : 90)}'` };
+    this.reveal = { at: revealAt, team, line: `${s ? (s.name ? s.name.split(' ').slice(-1)[0] : '#' + (s.index + 1)) + ' · ' : ''}${m.teams[team].info.name} · ${Math.min(m.displayMinute, m.half === 1 ? 45 : 90)}'` };
   }
 
   private showCard(m: Match, team: number, line: string, now: number): void {
@@ -83,6 +83,18 @@ export class Hud {
     void this.card.offsetWidth; // restart the animation
     this.card.classList.add('show');
     this.cardUntil = now + 3.4;
+  }
+
+  /** New match, maybe new teams: refresh names and colours. */
+  setTeams(match: Match): void {
+    const [h, a] = match.teams;
+    const home = this.root.querySelector('.home')!;
+    const away = this.root.querySelector('.away')!;
+    home.querySelector('span')!.textContent = h.info.short;
+    (home.querySelector('i') as HTMLElement).style.background = hex(h.info.kit.shirt);
+    away.querySelector('span')!.textContent = a.info.short;
+    (away.querySelector('i') as HTMLElement).style.background = hex(a.info.kit.shirt);
+    this.last.h = this.last.a = this.last.min = -1;
   }
 
   setVisible(v: boolean): void {

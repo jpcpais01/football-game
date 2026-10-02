@@ -2,7 +2,7 @@ import { Ball } from './ball';
 import { BALL, DT, GOAL_SEQ, MATCH, PITCH, PLAYER } from './constants';
 import { Btn, type InputState } from './input';
 import { solveFreeKick, solveGroundPass, solveLofted, solveShot } from './kick';
-import { Player, type KickPlan } from './player';
+import { Player, type Attributes, type KickPlan, type Role } from './player';
 import { FORMATION_433, HAIR_COLORS, SKIN_TONES, TEAMS, makeAttributes, type TeamInfo } from './teams';
 import { V3, Rng, angleDiff, clamp, dist2D, smoothstep } from './vec';
 import { AI } from './ai';
@@ -32,6 +32,28 @@ export interface Foul {
   yellow: boolean;
   penalty: boolean;
   time: number;
+}
+
+/** One player of a prepared line-up (club squads): who he is and where he plays. */
+export interface SetupPlayer {
+  name: string;
+  number: number;
+  attrs: Attributes;
+  look: { skin: number; hair: number; hairStyle: number; height: number; build: number };
+  role: Role;
+  /** Formation slot, team frame. */
+  x: number;
+  z: number;
+}
+
+export interface TeamSetup {
+  info: TeamInfo;
+  /** Eleven players in shirt-index order (0 keeper ... 9 striker; see meta/formations). */
+  players: SetupPlayer[];
+}
+
+export interface MatchSetup {
+  teams: [TeamSetup, TeamSetup];
 }
 
 export interface TeamState {
@@ -121,10 +143,22 @@ export class Match {
   /** 0..1 crowd excitement, rises with danger near goals */
   excitement = 0;
 
-  constructor(seed = 20261002) {
+  constructor(seed = 20261002, setup?: MatchSetup) {
     this.rng = new Rng(seed);
     for (let t = 0; t < 2; t++) {
-      const team: TeamState = { info: TEAMS[t], dir: t === 0 ? 1 : -1, score: 0, players: [] };
+      const ts = setup?.teams[t];
+      const team: TeamState = { info: ts ? ts.info : TEAMS[t], dir: t === 0 ? 1 : -1, score: 0, players: [] };
+      if (ts) {
+        ts.players.forEach((sp, i) => {
+          const p = new Player(this.players.length, t, i, sp.role, sp.x, sp.z, sp.attrs, sp.look);
+          p.name = sp.name;
+          p.number = sp.number;
+          team.players.push(p);
+          this.players.push(p);
+        });
+        this.teams.push(team);
+        continue;
+      }
       FORMATION_433.forEach((slot, i) => {
         const p = new Player(
           this.players.length,
@@ -142,6 +176,8 @@ export class Match {
             build: this.rng.range(0.92, 1.1),
           },
         );
+        p.attrs.height = 1.8 * p.look.height;
+        p.attrs.weight = 76 * p.look.build * p.look.height * p.look.height;
         team.players.push(p);
         this.players.push(p);
       });
@@ -939,8 +975,8 @@ export class Match {
         const nz = dz / d;
         const overlap = minD - d;
         // Stronger players move less.
-        const wa = 1 - a.attrs.strength * 0.5;
-        const wb = 1 - b.attrs.strength * 0.5;
+        const wa = 1 - a.duelStrength * 0.5;
+        const wb = 1 - b.duelStrength * 0.5;
         const sa = wa / (wa + wb);
         a.pos.x -= nx * overlap * sa;
         a.pos.z -= nz * overlap * sa;
@@ -963,9 +999,9 @@ export class Match {
 
   private bump(a: Player, b: Player, impact: number): void {
     if (a.team === b.team || a.balanceCD > 0 || b.balanceCD > 0) return;
-    // Who gives way: strength, speed into the contact and a little luck.
-    const sa = a.attrs.strength + a.speed * 0.05 + this.rng.next() * 0.35;
-    const sb = b.attrs.strength + b.speed * 0.05 + this.rng.next() * 0.35;
+    // Who gives way: strength, body weight, momentum into the contact and a little luck.
+    const sa = a.duelStrength + (a.speed * a.attrs.weight) / 1500 + this.rng.next() * 0.35;
+    const sb = b.duelStrength + (b.speed * b.attrs.weight) / 1500 + this.rng.next() * 0.35;
     const loser = sa < sb ? a : b;
     a.balanceCD = b.balanceCD = 1.2;
     if (this.rng.next() > clamp((impact - 3.2) / 3, 0.15, 0.75)) return;
@@ -1206,7 +1242,7 @@ export class Match {
       const dC = Math.hypot(toCarrX, toCarrZ);
       const shield = dC < dB && (toBallX * toCarrX + toBallZ * toCarrZ) / Math.max(0.01, dB * dC) > 0.8 ? 0.3 : 0;
       const close = this.ballDist(carrier) < 0.55 ? 0.12 : 0;
-      win = 0.32 + p.attrs.defending * 0.35 - carrier.attrs.control * 0.18 - carrier.attrs.strength * 0.08 - shield - close + (slide ? 0.12 : 0);
+      win = 0.3 + p.attrs.defending * 0.35 + p.duelStrength * 0.06 - carrier.attrs.control * 0.18 - carrier.duelStrength * 0.1 - shield - close + (slide ? 0.12 : 0);
     }
     this.events.tackle = 1;
     const won = this.rng.next() < win;
@@ -1300,7 +1336,8 @@ export class Match {
       const tz = sideSign * (PITCH.goalHalfWidth - 0.55 - (1 - Math.min(1, pw)) * 0.4);
       const finesse = pw < 0.55;
       const ty = 0.35 + Math.min(pw, 1) * 1.45 + Math.max(0, pw - 1) * 6;
-      const speed = 15 + Math.min(pw, 1.1) * 16;
+      // Shot power stat: the same swing sends the ball harder.
+      const speed = (15 + Math.min(pw, 1.1) * 16) * (0.88 + 0.24 * p.attrs.power);
       // Finesse shots curl back toward goal; driven shots get topspin.
       const curlDir = -Math.sign(tz) * team.dir;
       const curl = finesse ? curlDir * 28 * (1 - pw) : 0;
@@ -1319,8 +1356,9 @@ export class Match {
       base = 0.04;
       strength = 0.7;
     } else if (plan.type === 'clear') {
-      const tx = b.pos.x + plan.dirX * 38;
-      const tz = clamp(b.pos.z + plan.dirZ * 38, -PITCH.halfW + 3, PITCH.halfW - 3);
+      const len = 38 * (0.8 + 0.4 * p.attrs.power);
+      const tx = b.pos.x + plan.dirX * len;
+      const tz = clamp(b.pos.z + plan.dirZ * len, -PITCH.halfW + 3, PITCH.halfW - 3);
       const r = solveLofted(b.pos, tx, tz, 34, 20, 0);
       vel = r.vel;
       spin = r.spin;
@@ -1477,9 +1515,10 @@ export class Match {
       if (p.touchCooldown > 0) continue;
       if (p.action === 'stumble' || p.action === 'slide' || p.action === 'dive' || p.action === 'kick' || p.action === 'throw') continue;
       const d = this.ballDist(p);
-      const headZone = h > PLAYER.controlHeight && h < PLAYER.headMax;
+      const headMax = p.headReach;
+      const headZone = h > PLAYER.controlHeight && h < headMax;
       const reach = headZone ? 0.6 : PLAYER.reach;
-      if (d > reach || h > PLAYER.headMax) continue;
+      if (d > reach || h > headMax) continue;
       if (!this.wantsBall(p)) {
         // Body deflection for anyone in the way.
         // Jumping (a wall, a block) reaches higher.
@@ -1490,8 +1529,10 @@ export class Match {
       // Close control by the owner: opponents must tackle, not just touch.
       if (this.owner && this.owner !== p && this.owner.team !== p.team && this.ballDist(this.owner) < PLAYER.reach) continue;
       if (p.plan && h < 1.0) continue; // the plan will strike it
-      if (d < bestD) {
-        bestD = d;
+      // In the air the better jumper / taller player wins a close contest.
+      const score = headZone ? d - (p.aerial - 0.5) * 0.35 : d;
+      if (score < bestD) {
+        bestD = score;
         best = p;
       }
     }
@@ -1647,7 +1688,7 @@ export class Match {
       const tz = (this.rng.next() < 0.5 ? -1 : 1) * (PITCH.goalHalfWidth - 0.8);
       dirX = gx - b.pos.x;
       dirZ = tz - b.pos.z;
-      speed = 11 + p.attrs.shooting * 6;
+      speed = 10 + p.attrs.shooting * 5 + p.attrs.power * 3;
       up = -0.08;
     } else {
       const recv = this.ai.pickReceiver(p, p.plan ? p.plan.dirX : team.dir, p.plan ? p.plan.dirZ : 0, false);
@@ -1664,7 +1705,7 @@ export class Match {
       up = clearing ? 0.35 : 0.05;
     }
     const d = Math.max(0.01, Math.hypot(dirX, dirZ));
-    const sd = 0.08 + (1 - p.attrs.control) * 0.12;
+    const sd = 0.08 + (1 - (p.attrs.control * 0.4 + p.aerial * 0.6)) * 0.12;
     const a = Math.atan2(dirZ / d, dirX / d) + this.rng.gauss() * sd;
     b.kick(Math.cos(a) * speed, speed * up + this.rng.gauss() * 0.6, Math.sin(a) * speed, 0, 0, 0);
     b.onGround = false;

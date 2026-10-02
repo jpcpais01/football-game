@@ -19,6 +19,8 @@ import { SHARED } from './render/look';
 import { Controls } from './ui/controls';
 import { Hud } from './ui/hud';
 import { GameAudio } from './ui/audio';
+import { Club } from './meta/club';
+import { HomeUI } from './home/home';
 
 const app = document.getElementById('app')!;
 const params = new URLSearchParams(location.search);
@@ -52,7 +54,9 @@ const TOD = params.has('tod') ? Number(params.get('tod')) : -1;
 // ?showcase: frozen line-up near the camera, for judging the player models.
 const SHOWCASE = params.has('showcase');
 
-let match = new Match(Date.now() & 0xffff);
+const club = new Club();
+// The attract mode behind the menus plays our own club.
+let match = new Match(Date.now() & 0xffff, club.matchSetup(Date.now() & 0xffff));
 match.autoPlay = true;
 
 scene.add(createPitch(renderer));
@@ -117,34 +121,15 @@ const vignette = document.createElement('div');
 vignette.className = 'vignette';
 app.insertBefore(vignette, ui);
 
-const menu = document.createElement('div');
-menu.className = 'menu';
-menu.innerHTML = `
-  <div class="menu-card">
-    <div class="kicker">Season 01</div>
-    <h1>GameNight</h1>
-    <p class="sub">${match.teams[0].info.name} <span>vs</span> ${match.teams[1].info.name}</p>
-    <button class="play">Kick off</button>
-    <button class="fan ghost">Your banner</button>
-    <p class="hint">Landscape · joystick to move · Pass / Through / Shoot</p>
-  </div>`;
-ui.appendChild(menu);
-const version = document.createElement('div');
-version.className = 'version';
-version.innerHTML = `<span>v${__APP_VERSION__}</span><button class="update" aria-label="Check for update">Update ⟳</button>`;
-menu.appendChild(version);
-// Force-fetch the latest build: drop the service worker and its caches, then reload
-// (a plain reload could be answered from the precache).
-version.querySelector('.update')!.addEventListener('click', async (e) => {
-  (e.currentTarget as HTMLButtonElement).textContent = 'Updating…';
-  try {
-    const regs = (await navigator.serviceWorker?.getRegistrations()) ?? [];
-    await Promise.all(regs.map((r) => r.unregister()));
-    if ('caches' in window) await Promise.all((await caches.keys()).map((k) => caches.delete(k)));
-  } finally {
-    location.reload();
-  }
+const home = new HomeUI(ui, club, audio, {
+  onPlay: (seed) => startGame(seed),
+  bannerLabel: () => (hasFanBanner ? 'Change your banner' : 'Your banner: add a photo'),
+  onBanner: async () => {
+    const photo = await pickFanBanner();
+    if (photo) setFanBanner(photo);
+  },
 });
+home.show();
 
 const pauseBtn = document.createElement('button');
 pauseBtn.className = 'pause-btn';
@@ -165,6 +150,7 @@ pauseMenu.innerHTML = `
     <h2>Paused</h2>
     <button class="resume">Resume</button>
     <button class="restart ghost">Restart match</button>
+    <button class="quit ghost">Quit to menu</button>
     <button class="weather ghost">Match: Evening</button>
     <button class="graphics ghost">Graphics: Pixel</button>
     <button class="camera ghost">Camera: Normal</button>
@@ -251,32 +237,39 @@ async function keepAwake(): Promise<void> {
   }
 }
 
-function newMatch(): void {
-  match = new Match(Date.now() & 0xffff);
+let matchSeed = 1;
+function newMatch(seed = Date.now() & 0xffff): void {
+  matchSeed = seed;
+  match = new Match(seed, club.matchSetup(seed));
   officials.reset();
   playersView.applyColors(match);
+  hud.setTeams(match);
   acc = 0;
 }
 
-function startGame(): void {
+function startGame(seed: number): void {
   audio.unlock();
   void enterFullscreen();
   void keepAwake();
-  newMatch();
+  newMatch(seed);
   playing = true;
   paused = false;
-  menu.classList.add('hidden');
+  home.hide();
+  onResize();
   controls.setVisible(true);
   hud.setVisible(true);
   pauseBtn.style.display = foulBtn.style.display = '';
 }
 
-menu.querySelector('.play')!.addEventListener('click', startGame);
 pauseBtn.addEventListener('click', () => setPaused(true));
 pauseMenu.querySelector('.resume')!.addEventListener('click', () => setPaused(false));
 pauseMenu.querySelector('.restart')!.addEventListener('click', () => {
-  newMatch();
+  newMatch(matchSeed);
   setPaused(false);
+});
+pauseMenu.querySelector('.quit')!.addEventListener('click', () => {
+  setPaused(false);
+  backToMenu();
 });
 const weatherBtn = pauseMenu.querySelector('.weather') as HTMLButtonElement;
 const weatherLabel = () => (weatherBtn.textContent = `Match: ${atmo.weather === 'sunny' ? 'Sunny day' : 'Evening'}`);
@@ -326,19 +319,14 @@ soundBtn.addEventListener('click', () => {
 
 // "Your banner": a photo the fans hold up in the stands (kept on this device).
 let hasFanBanner = false;
-const fanBtns = [menu.querySelector('.fan') as HTMLButtonElement, pauseMenu.querySelector('.fan') as HTMLButtonElement];
-const setFanBanner = (photo: HTMLCanvasElement | null) => {
+const fanBtn = pauseMenu.querySelector('.fan') as HTMLButtonElement;
+function setFanBanner(photo: HTMLCanvasElement | null): void {
   hasFanBanner = photo !== null;
   stadium.setFanBanner(photo);
-  fanBtns[0].textContent = hasFanBanner ? 'Change your banner' : 'Your banner';
-  fanBtns[1].textContent = hasFanBanner ? 'Your banner: remove' : 'Your banner: add photo';
-};
+  fanBtn.textContent = hasFanBanner ? 'Your banner: remove' : 'Your banner: add photo';
+}
 void loadFanBanner().then((photo) => photo && setFanBanner(photo));
-fanBtns[0].addEventListener('click', async () => {
-  const photo = await pickFanBanner();
-  if (photo) setFanBanner(photo);
-});
-fanBtns[1].addEventListener('click', async () => {
+fanBtn.addEventListener('click', async () => {
   if (hasFanBanner) {
     clearFanBanner();
     setFanBanner(null);
@@ -379,7 +367,7 @@ function onResize(): void {
   pixelPass.height = Math.round(Math.min(320, Math.max(240, h * 0.72)));
   pixelPass.resize(w, h);
   applyGraphics();
-  rotate.classList.toggle('show', h > w && matchMedia('(pointer: coarse)').matches);
+  rotate.classList.toggle('show', playing && h > w && matchMedia('(pointer: coarse)').matches);
 }
 window.addEventListener('resize', onResize);
 onResize();
@@ -411,7 +399,8 @@ function handleEvents(now: number): void {
       rig.bump(0.4);
       const scorer = match.scorer;
       const team = match.teams[e.goal];
-      hud.showCaption('GOAL', `${scorer ? '#' + (scorer.index + 1) + ' · ' : ''}${team.info.name}`, 3.2, now);
+      const who = scorer ? (scorer.name ? scorer.name.split(' ').slice(-1)[0] : '#' + (scorer.index + 1)) + ' · ' : '';
+      hud.showCaption('GOAL', `${who}${team.info.name}`, 3.2, now);
       // The new score is revealed as the camera comes back from the crowd.
       hud.goal(match, e.goal, GOAL_SEQ.crowd + 0.6);
     }
@@ -423,11 +412,11 @@ function handleEvents(now: number): void {
       if (f.penalty) {
         hud.showCaption('PENALTY', match.teams[f.victim.team].info.name, 3, now);
         audio.crowdGasp();
-      } else if (f.yellow) hud.showCaption('YELLOW CARD', `#${f.offender.index + 1} · ${match.teams[f.offender.team].info.name}`, 2.6, now, 'yellow');
+      } else if (f.yellow) hud.showCaption('YELLOW CARD', `${f.offender.name ? f.offender.name.split(' ').slice(-1)[0] : '#' + (f.offender.index + 1)} · ${match.teams[f.offender.team].info.name}`, 2.6, now, 'yellow');
       else hud.showCaption('FOUL', `Free kick · ${match.teams[f.victim.team].info.name}`, 2, now, 'small');
     }
     // Booked while advantage was played: show the card now.
-    if (e.card && e.foul === 2 && f) hud.showCaption('YELLOW CARD', `#${f.offender.index + 1} · ${match.teams[f.offender.team].info.name} · advantage`, 2.6, now, 'yellow');
+    if (e.card && e.foul === 2 && f) hud.showCaption('YELLOW CARD', `${f.offender.name ? f.offender.name.split(' ').slice(-1)[0] : '#' + (f.offender.index + 1)} · ${match.teams[f.offender.team].info.name} · advantage`, 2.6, now, 'yellow');
     audio.setExcitement(match.excitement);
   }
   if (e.net > 0) goals.impact(e.netX, e.netY, e.netZ, e.net, simTime);
@@ -447,16 +436,20 @@ function handleEvents(now: number): void {
   }
 }
 
-function showEndMenu(): void {
+function backToMenu(): void {
   playing = false;
   hud.setVisible(false);
   controls.setVisible(false);
   pauseBtn.style.display = foulBtn.style.display = 'none';
+  match.autoPlay = true;
+  home.show();
+  onResize();
+}
+
+function showEndMenu(): void {
   const [h, a] = match.teams;
-  (menu.querySelector('.kicker') as HTMLElement).textContent = 'Full time';
-  (menu.querySelector('.sub') as HTMLElement).innerHTML = `${h.info.short} ${h.score} <span>–</span> ${a.score} ${a.info.short}`;
-  (menu.querySelector('.play') as HTMLElement).textContent = 'Play again';
-  menu.classList.remove('hidden');
+  backToMenu();
+  home.showResult(h.score, a.score, h.info, a.info, () => home.show());
 }
 
 function adaptQuality(frameMs: number, now: number): void {
@@ -551,7 +544,10 @@ function frame(now: number): void {
 
   particles.setScale(graphics === 'pixel' ? pixelPass.pixelHeight : renderer.domElement.height, rig.camera.fov);
   particles.update(running ? dt : 0, now / 1000, match, rig.focusX, rig.focusZ);
-  if (graphics === 'pixel') pixelPass.render(renderer, scene, rig.camera, SHARED.uFlood.value, atmo.weather === 'sunny' ? 0.35 : 1, rig.subPixelX, rig.subPixelY);
+  // A full-screen menu covers the stadium: don't spend the battery drawing it.
+  if (home.opaque) {
+    /* skip */
+  } else if (graphics === 'pixel') pixelPass.render(renderer, scene, rig.camera, SHARED.uFlood.value, atmo.weather === 'sunny' ? 0.35 : 1, rig.subPixelX, rig.subPixelY);
   else renderer.render(scene, rig.camera);
   cpuAvg += (performance.now() - t0 - cpuAvg) * 0.05;
   adaptQuality(frameMs, now);

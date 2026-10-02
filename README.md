@@ -17,6 +17,25 @@ A mobile-first football game (PWA). Stylized look, realistic feel.
   - Keyboard: WASD/arrows, Shift to sprint, J / K / L for the three buttons, U / O for lofted pass /
     lofted through ball.
 
+## Club, squad and store
+
+- **Home:** play the demo match against Atlantic Rovers (rated around your team), manage the
+  squad, open packs. Your club, coins and players are saved on the device.
+- **Players:** every card has 12 stats (pace, acceleration, agility, stamina, strength, jumping,
+  shot power, passing, finishing, dribbling, defending, goalkeeping) plus height and weight, and
+  they all drive the simulation: top speed and acceleration (heavier players accelerate slower),
+  cutting grip and turning (agility; tall players turn wider), sprint drain and recovery, shoulder
+  duels and tackles (strength plus body weight), headed-ball reach and winning aerial contests
+  (height plus jumping), shot / header / clearance speed (power). Out of position, a player keeps
+  his body but loses technique.
+- **Squad:** six formations; drag players on the board to swap them, drag onto empty grass to
+  reposition (the position label follows the zone), tap a slot then a player to substitute.
+- **Store:** Daily (free every 4 h), Bronze, Silver, Gold and Legend packs with rarity odds and
+  guarantees. Win / draw / loss and goals earn coins; spare players can be quick-sold.
+
+Code: `src/meta/` (cards, formations, club save, packs), `src/home/` (menus, tactics board, pack
+opening and its particle effects).
+
 ## Develop
 
 ```bash

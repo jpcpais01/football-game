@@ -611,7 +611,7 @@ export class PlayersView {
       attr('torso', 'aTrim', p, trim);
       // Numbers in the trim colour unless that's too close to the shirt.
       attr('torso', 'aNumCol', p, gk ? 0x1d1d1d : kit.shirt2 === kit.shirt ? 0xffffff : kit.shirt2);
-      num.setX(p.id, p.team === 2 ? -1 : gk ? 1 : p.index + 1);
+      num.setX(p.id, p.team === 2 ? -1 : p.number > 0 ? p.number : gk ? 1 : p.index + 1);
       set('upperArm', p, shirt);
       attr('upperArm', 'aTrim', p, trim);
       attr('upperArm', 'aSkin', p, gk ? shirt : p.look.skin);
