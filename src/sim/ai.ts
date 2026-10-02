@@ -156,25 +156,16 @@ export class AI {
   }
 
   /**
-   * Where to go to get to the ball. The planned through-ball run is used only while the
-   * ball can't be reached yet (a long ball still overtaking the runner); otherwise it's
-   * the ball itself, led by how it's moving: a ball coming toward him is met head-on, one
-   * running away from him is chased to the point where he can catch it.
+   * Where to go to get to the ball — one rule: the earliest point on the ball's path he can
+   * reach before it does (the intercept, predicted with the real ball physics). A ball
+   * coming at him is met on its way, one going past is cut off, one running away is caught
+   * where he can catch it. In the last stride, straight onto the ball.
    */
   meetPoint(p: Player, out: V3): V3 {
-    const m = this.m;
-    const b = m.ball;
+    const b = this.m.ball;
+    if (this.m.ballDist(p) < 1.5) return out.set(b.pos.x + b.vel.x * 0.1, 0, b.pos.z + b.vel.z * 0.1);
     const ip = this.intercept[p.id];
-    const rt = m.passTarget === p ? this.runTarget(p) : null;
-    if (rt && ip.t < 0 && dist2D(p.pos.x, p.pos.z, rt.x, rt.z) > 1) return out.set(rt.x, 0, rt.z);
-    const gap = m.ballDist(p);
-    // How fast the ball is coming at him (m/s; negative = running away).
-    const toward = gap > 0.1 ? ((p.pos.x - b.pos.x) * b.vel.x + (p.pos.z - b.pos.z) * b.vel.z) / gap : 0;
-    const coming = clamp(toward / 4, 0, 1);
-    const w = 0.1 + clamp((gap - 2) / 6, 0, 1) * 0.85 * (1 - 0.8 * coming);
-    const bx = b.pos.x + b.vel.x * 0.15;
-    const bz = b.pos.z + b.vel.z * 0.15;
-    return out.set(bx + (ip.x - bx) * w, 0, bz + (ip.z - bz) * w);
+    return out.set(ip.x, 0, ip.z);
   }
 
   /**
