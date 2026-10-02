@@ -73,17 +73,12 @@ export class CameraRig {
     goalZ = clamp(goalZ, -PITCH.halfW + 6, PITCH.halfW - 6);
     const pixel = this.pixelHeight > 0;
     if (pixel) {
-      // Pixel art: a locked broadcast framing (no dolly, no zoom) so the pixel
-      // grid stays perfectly stable and the camera only pans left and right. The forward
-      // position is chosen so the near touchline sits at the bottom of the screen.
+      // Pixel art: no dolly or zoom (the pixel grid stays stable; the snap below keeps
+      // panning smooth), and the picture is centred vertically on the active player.
       this.dist = this.baseDist;
-      const pitch = this.pitch();
-      const bottom = pitch + (this.camera.fov * Math.PI) / 360;
-      const h = Math.sin(pitch) * this.dist;
-      const back = Math.cos(pitch) * this.dist;
-      goalZ = PITCH.halfW + 1.5 + h / Math.tan(bottom) - back + LOOK_OFFSET;
-      this.tz = goalZ;
-      this.vz = 0;
+      const c = match.phase === 'goal' && match.scorer ? match.scorer : match.controlled;
+      const cz = lerp(c.prevPos.z, c.pos.z, alpha);
+      goalZ = clamp(cz, -PITCH.halfW + 6, PITCH.halfW - 6) + LOOK_OFFSET;
     }
 
     // Critically damped follow.
