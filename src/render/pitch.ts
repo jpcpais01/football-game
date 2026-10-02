@@ -101,8 +101,11 @@ export function createPitch(): THREE.Mesh {
         float wearGoal = 1.0 - smoothstep(0.0, 6.5, length((q - vec2(HL - 3.0, 0.0)) * vec2(1.0, 0.7)));
         float wearSpot = 1.0 - smoothstep(0.0, 2.0, length(q - vec2(HL - 11.0, 0.0)));
         float wearMid = (1.0 - smoothstep(0.0, 4.0, length(p))) * 0.6;
-        float wear = clamp((wearGoal + wearSpot * 0.7 + wearMid) * (0.55 + fbm(p * 0.6) * 0.9), 0.0, 1.0);
-        col = mix(col, vec3(0.55, 0.53, 0.36), wear * 0.55);
+        float wearBase = wearGoal + wearSpot * 0.7 + wearMid;
+        if (wearBase > 0.001) {
+          float wear = clamp(wearBase * (0.55 + fbm(p * 0.6) * 0.9), 0.0, 1.0);
+          col = mix(col, vec3(0.55, 0.53, 0.36), wear * 0.55);
+        }
 
         // Outside the field of play: slightly darker, unstriped.
         float outside = step(HL, abs(p.x)) + step(HW, abs(p.y));

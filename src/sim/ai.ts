@@ -225,6 +225,20 @@ export class AI {
       return;
     }
     if (att === p.team) {
+      // Forwards (and sometimes midfielders) attack the space behind the last line.
+      const carrier = m.owner ?? m.heldBy;
+      if (run.until <= m.time && carrier && carrier !== p && (p.role === 'FWD' || p.role === 'MID')) {
+        const dir = m.teams[p.team].dir;
+        const cx = carrier.pos.x * dir;
+        const line = this.offside[p.team];
+        const nearLine = p.pos.x * dir > line - 9 && p.pos.x * dir < line + 0.5;
+        const chance = (p.role === 'FWD' ? 0.006 : 0.0015) * (cx > -10 ? 1 : 0.3);
+        if (nearLine && m.rng.next() < chance) {
+          const tz = p.pos.z * 0.6 + (m.rng.next() - 0.5) * 12;
+          this.setRun(p, (line + 7 + m.rng.next() * 6) * dir, tz);
+          run.until = m.time + 2.2;
+        }
+      }
       if (run.until > m.time) {
         this.moveTo(p, run.x, run.z, true, false);
         return;

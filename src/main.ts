@@ -20,9 +20,12 @@ const params = new URLSearchParams(location.search);
 const DEBUG = params.has('debug');
 
 // ---------------------------------------------------------------- renderer
-const maxDpr = Math.min(window.devicePixelRatio || 1, 2);
+// Phones get a slightly lower resolution ceiling: the pitch shader is per-pixel work and
+// 1.6x is visually indistinguishable at arm's length. Quality adapts at runtime anyway.
+const coarse = matchMedia('(pointer: coarse)').matches;
+const maxDpr = Math.min(window.devicePixelRatio || 1, coarse ? 1.6 : 2);
 const renderer = new THREE.WebGLRenderer({
-  antialias: maxDpr < 1.75,
+  antialias: maxDpr < 1.3,
   powerPreference: 'high-performance',
   stencil: false,
 });
@@ -246,6 +249,7 @@ function handleEvents(now: number): void {
 
 function showEndMenu(): void {
   playing = false;
+  hud.setVisible(false);
   controls.setVisible(false);
   pauseBtn.style.display = 'none';
   const [h, a] = match.teams;

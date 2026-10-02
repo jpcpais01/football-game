@@ -229,6 +229,18 @@ export class Match {
     }
     this.setPiece = { kind, team, x, z, taker, t: 0 };
     this.possTeam = team;
+    // Cut straight to the taker standing over the ball (like a broadcast replay cut).
+    const inX = kind === 'throw' ? 0 : kind === 'corner' ? -Math.sign(x) * 0.6 : this.teams[team].dir;
+    const inZ = kind === 'throw' || kind === 'corner' ? -Math.sign(z) : 0;
+    const n = Math.hypot(inX, inZ) || 1;
+    const back = kind === 'throw' ? 0.05 : 0.45;
+    taker.pos.set(x - (inX / n) * back, 0, z - (inZ / n) * back);
+    taker.prevPos.copy(taker.pos);
+    taker.vel.set(0, 0, 0);
+    taker.facing = Math.atan2(inZ, inX);
+    taker.prevFacing = taker.facing;
+    taker.action = 'none';
+    taker.plan = null;
     this.ball.reset(x, z);
     this.ball.pos.y = BALL.radius;
     this.heldBy = null;

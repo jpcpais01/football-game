@@ -161,6 +161,8 @@ html, body {
   padding: 12px 34px; border: 0; border-radius: 4px; background: var(--ink); color: var(--panel-solid); cursor: pointer;
 }
 .menu button:active { transform: scale(0.97); }
+.menu button:focus { outline: none; }
+.menu button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .menu button.ghost { background: transparent; color: var(--ink); border: 2px solid rgba(244, 239, 227, 0.4); font-size: 18px; }
 .menu .hint { margin: 6px 0 0; font-size: 14px; letter-spacing: 0.08em; color: var(--ink-dim); }
 

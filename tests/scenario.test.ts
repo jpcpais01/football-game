@@ -62,3 +62,32 @@ it('shot with full power from 18m', () => {
   console.log('shot: crossed', crossed, 'maxH', maxH.toFixed(2), 'score', m.teams[0].score, 'phase', m.phase);
   expect(maxH).toBeGreaterThan(0.5);
 });
+
+it('defender can win the ball with press + tackle', () => {
+  let wins = 0;
+  for (let trial = 0; trial < 12; trial++) {
+    const m = new Match(300 + trial);
+    const input = makeInput();
+    m.phase = 'play';
+    m.setPiece = null;
+    for (const p of m.players) { p.pos.x = p.team === 0 ? -48 : 48; p.pos.z = (p.index - 5) * 5; p.prevPos.copy(p.pos); }
+    const att = m.teams[1].players[9];
+    att.pos.set(0, 0, 0); att.prevPos.copy(att.pos); att.facing = Math.PI;
+    m.ball.reset(-0.6, 0); m.owner = att;
+    const def = m.teams[0].players[2];
+    def.pos.set(-12, 0, 1); def.prevPos.copy(def.pos);
+    m.setControlled(def);
+    let tackled = false;
+    for (let i = 0; i < 120 * 6; i++) {
+      input.held[1] = true; // press
+      if (!tackled && m.ballDist(def) < 1.3 && !def.isBusy() && i % 30 === 0) input.events.push({ btn: 2, kind: 'down', hold: 0 });
+      m.step(input);
+      m.takeEvents();
+      if (m.owner && m.owner.team === 0) { tackled = true; break; }
+      if (m.owner === null && m.lastTouch === def) { tackled = true; break; }
+    }
+    if (tackled) wins++;
+  }
+  console.log('defending: won the ball in', wins, '/ 12');
+  expect(wins).toBeGreaterThan(3);
+});
