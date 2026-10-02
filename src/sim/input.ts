@@ -28,7 +28,7 @@ export interface InputState {
   /** Live: finger currently slid up on a held button. */
   swipe: [boolean, boolean, boolean];
   events: ButtonEvent[];
-  /** Defence: finger slid down on the held Sprint button (a long drag = slide). Consumed by the match. */
+  /** Defence: finger slid on the held Sprint button (down = tackle, left = slide). Consumed by the match. */
   tackleSwipe: 'tackle' | 'slide' | null;
 }
 

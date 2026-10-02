@@ -162,6 +162,10 @@ export function litMaterial(o: LitOptions = {}): THREE.MeshStandardMaterial {
         }`,
       );
   };
+  // The shader code depends on the options: key the compiled program on them, or every
+  // litMaterial would share the first one compiled (three keys on the callback's source).
+  const key = JSON.stringify([o.groundAO, o.diffuseHook, o.fragDecl, o.vertDecl, o.vertBody]);
+  mat.customProgramCacheKey = () => key;
   return mat;
 }
 

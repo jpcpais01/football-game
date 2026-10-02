@@ -462,7 +462,7 @@ export class Match {
     // Defence: the middle button presses; the big Sprint button sprints *and* presses.
     this.pressHeld = !attacking && (input.held[Btn.C] || input.sprint);
     input.events.length = 0;
-    // Sliding down on Sprint commits to a tackle; dragging further turns it into a slide.
+    // Sliding down on Sprint commits to a tackle; sliding left commits to a slide tackle.
     if (input.tackleSwipe) {
       if (!attacking) {
         if (this.lunge && input.tackleSwipe === 'slide') this.lunge.slide = true;

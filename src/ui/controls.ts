@@ -8,7 +8,7 @@ import { Btn, type InputState, makeInput } from '../sim/input';
 
 const LABELS = {
   attack: ['PASS', 'THROUGH', 'SHOOT', 'SPRINT'],
-  defend: ['TACKLE', 'SWITCH', 'PRESS', 'SPRINT<br><small>+ PRESS · ▼ TACKLE</small>'],
+  defend: ['TACKLE', 'SWITCH', 'PRESS', 'SPRINT<br><small>▼ TACKLE · ◀ SLIDE</small>'],
 };
 
 export class Controls {
@@ -26,8 +26,9 @@ export class Controls {
   private btnDownAt: number[] = [0, 0, 0];
   private btnStartY: number[] = [0, 0, 0];
   private sprintPointer = -1;
+  private sprintStartX = 0;
   private sprintStartY = 0;
-  /** Sprint swipe stage this press: 0 none, 1 tackle sent, 2 upgraded to a slide. */
+  /** Sprint swipe this press: 0 none, 1 tackle (slid down), 2 slide tackle (slid left). */
   private sprintSwipe = 0;
   mode: 'attack' | 'defend' = 'attack';
   private keys = new Set<string>();
@@ -79,6 +80,7 @@ export class Controls {
       e.preventDefault();
       this.sprintEl.setPointerCapture?.(e.pointerId);
       this.sprintPointer = e.pointerId;
+      this.sprintStartX = e.clientX;
       this.sprintStartY = e.clientY;
       this.sprintSwipe = 0;
       this.sprintEl.classList.add('down');
@@ -134,12 +136,13 @@ export class Controls {
 
   /**
    * Sliding up on Pass / Through while holding = lofted ball (FIFA-Mobile style).
-   * Sliding down on Sprint in defence = tackle; keep dragging further = slide tackle.
+   * Sliding down on Sprint in defence = tackle; sliding left = slide tackle.
    */
   private buttonSwipe(e: PointerEvent): void {
     if (e.pointerId === this.sprintPointer && this.mode === 'defend') {
       const down = e.clientY - this.sprintStartY;
-      const stage = down > 90 ? 2 : down > 28 ? 1 : 0;
+      const left = this.sprintStartX - e.clientX;
+      const stage = left > 28 && left > down ? 2 : down > 28 ? 1 : 0;
       if (stage > this.sprintSwipe) {
         this.sprintSwipe = stage;
         this.input.tackleSwipe = stage === 2 ? 'slide' : 'tackle';

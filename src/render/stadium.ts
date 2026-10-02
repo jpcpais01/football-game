@@ -642,24 +642,25 @@ function crowdFlags(path: PathPt[], home: number, away: number): THREE.Instanced
   let seed = 11;
   const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
   const byZone = (z: number) => path.filter((p) => p.zone === z);
-  const spots: { p: PathPt; o: number; c: number; c2: number; pat: number }[] = [];
-  const add = (pts: PathPt[], n: number, cols: number[][]) => {
+  const spots: { p: PathPt; o: number; c: number; c2: number; pat: number; size: number }[] = [];
+  const add = (pts: PathPt[], n: number, cols: number[][], big: number) => {
     for (let i = 0; i < n; i++) {
       const c = cols[Math.floor(rnd() * cols.length)];
-      spots.push({ p: pts[Math.floor(rnd() * pts.length)], o: 1.5 + rnd() * 15, c: c[0], c2: c[1], pat: Math.floor(rnd() * 3) });
+      spots.push({ p: pts[Math.floor(rnd() * pts.length)], o: 1.5 + rnd() * 15, c: c[0], c2: c[1], pat: Math.floor(rnd() * 7), size: 0.8 + rnd() * big });
     }
   };
   const W = 0xf3eee2;
   const N = 0x14123a;
-  add(byZone(1), 34, [[home, W], [home, N], [W, home], [0xffd447, home]]);
-  add(byZone(2), 12, [[away, W], [W, away], [away, N]]);
-  add(byZone(0), 18, [[home, W], [W, home], [away, W]]);
+  add(byZone(1), 34, [[home, W], [home, N], [W, home], [0xffd447, home]], 0.7);
+  add(byZone(2), 12, [[away, W], [W, away], [away, N]], 0.4);
+  add(byZone(0), 18, [[home, W], [W, home], [away, W]], 0.35);
 
   const mat = new THREE.ShaderMaterial({
     side: THREE.DoubleSide,
-    uniforms: { ...U },
+    uniforms: { ...U, uWind: SHARED.uWind },
     vertexShader: /* glsl */ `
       uniform float uTime, uExcite;
+      uniform vec2 uWind;
       attribute float aCloth;
       attribute vec3 aCol;
       attribute vec3 aCol2;
@@ -677,16 +678,31 @@ function crowdFlags(path: PathPt[], home: number, away: number): THREE.Instanced
         vCol2 = aCol2;
         vPat = aPat + (1.0 - aCloth) * 10.0;
         vec3 p = position;
+        // 0 at the pole, 1 at the fly end.
         float k = clamp(p.x / 2.4, 0.0, 1.0) * aCloth;
-        float w = sin(uTime * 5.0 + aPhase + p.x * 2.8) * 0.3 * k + sin(uTime * 8.1 + aPhase * 1.7 + p.x * 5.0) * 0.08 * k;
-        p.z += w;
-        p.y -= k * k * 0.3 * (0.6 + 0.4 * sin(uTime * 2.3 + aPhase));
+        float wind = length(uWind);
         // The fan swings the flag back and forth around the foot of the pole.
-        float sway = sin(uTime * (1.7 + fract(aPhase) * 0.8) + aPhase) * (0.5 + uExcite * 0.35);
-        float cs = cos(sway);
-        float sn = sin(sway);
+        float sp = 1.7 + fract(aPhase) * 0.8;
+        float A = 0.5 + uExcite * 0.35;
+        float sway = sin(uTime * sp + aPhase) * A;
+        float swayVel = cos(uTime * sp + aPhase) * A * sp;
+        // Waves run from the pole to the fly end, faster and bigger when the flag moves.
+        float t = uTime * (4.0 + wind * 1.5 + abs(swayVel) * 1.2);
+        float ph1 = p.x * 2.6 - t + aPhase;
+        float ph2 = p.x * 5.6 - t * 1.7 + p.y * 2.2 + aPhase * 1.3;
+        float ph3 = p.x * 11.0 - t * 3.1 + p.y * 5.0;
+        float amp = (0.16 + 0.1 * wind + 0.1 * abs(swayVel)) * pow(k, 1.3);
+        p.z += (sin(ph1) * 0.6 + sin(ph2) * 0.26 + sin(ph3) * 0.1 * k) * amp;
+        float slope = (cos(ph1) * 1.56 + cos(ph2) * 1.46 + cos(ph3) * 1.1 * k) * amp;
+        // Gravity: the cloth droops at the turn of each swing, flies out mid-swing.
+        p.y -= k * k * 0.38 * (1.0 - min(1.0, abs(swayVel) * 0.45 + wind * 0.25));
+        // Drag: the cloth trails behind the pole's movement.
+        float ang = sway - swayVel * 0.17 * k;
+        float cs = cos(ang);
+        float sn = sin(ang);
         p.xy = vec2(p.x * cs - p.y * sn, p.x * sn + p.y * cs);
-        vShade = 0.8 + w * 1.4;
+        // Folds facing the light are brighter, the ones turned away darker.
+        vShade = aCloth > 0.5 ? clamp(0.86 - slope * 0.32, 0.5, 1.2) : 1.0;
         vec4 mv = viewMatrix * modelMatrix * instanceMatrix * vec4(p, 1.0);
         vDist = -mv.z;
         gl_Position = projectionMatrix * mv;
@@ -702,12 +718,23 @@ function crowdFlags(path: PathPt[], home: number, away: number): THREE.Instanced
       varying float vShade;
       varying float vDist;
       void main() {
-        float b = vPat < 0.5 ? step(0.36, vUv.y) * step(vUv.y, 0.64)
-          : vPat < 1.5 ? step(0.5, vUv.x)
-          : vPat < 2.5 ? step(vUv.y, vUv.x * 0.62 + 0.19) * step(vUv.x * 0.62 - 0.19, vUv.y)
-          : 0.0;
-        vec3 c = vPat > 9.5 ? vec3(0.25) : mix(vCol, vCol2, b);
-        c *= vShade * uLight;
+        vec2 u = vUv;
+        float b = 0.0;
+        if (vPat < 0.5) b = step(0.36, u.y) * step(u.y, 0.64);                          // band
+        else if (vPat < 1.5) b = step(0.5, u.x);                                        // halves
+        else if (vPat < 2.5) b = step(abs(u.y - (u.x * 0.62 + 0.19)), 0.16);           // sash
+        else if (vPat < 3.5) b = step(0.333, u.x) * step(u.x, 0.667);                  // tricolour
+        else if (vPat < 4.5) {                                                           // crest
+          float r = length((u - 0.5) * vec2(1.6, 1.0));
+          b = step(r, 0.3) * (1.0 - step(0.2, r) * step(r, 0.24));
+        }
+        else if (vPat < 5.5) b = mod(floor(u.x * 4.0) + floor(u.y * 3.0), 2.0);         // chequers
+        else b = step(0.5, fract(u.y * 2.5));                                            // hoops
+        vec3 c = vPat > 9.5 ? vec3(0.22) : mix(vCol, vCol2, b);
+        // Stitched hem round the fly edges.
+        float hem = max(step(0.96, u.x), max(step(u.y, 0.04), step(0.96, u.y)));
+        c *= vPat > 9.5 ? 1.0 : 1.0 - hem * 0.18;
+        c *= vShade * (gl_FrontFacing ? 1.0 : 0.9) * uLight;
         c = mix(c, uFog, (0.1 + smoothstep(uFogNear, uFogFar, vDist) * 0.7) * uHaze);
         gl_FragColor = vec4(c, 1.0);
         #include <tonemapping_fragment>
@@ -732,7 +759,7 @@ function crowdFlags(path: PathPt[], home: number, away: number): THREE.Instanced
     const h = LOWER[0][1] + ((s.o - LOWER[0][0]) / (LOWER[1][0] - LOWER[0][0])) * (LOWER[1][1] - LOWER[0][1]);
     at(s.p, s.o, h + 1.1, v);
     q.setFromAxisAngle(up, Math.atan2(-s.p.nx, -s.p.nz));
-    m.compose(v, q, one);
+    m.compose(v, q, one.setScalar(s.size));
     mesh.setMatrixAt(i, m);
     col.set(c.setHex(s.c).toArray(), i * 3);
     col2.set(c.setHex(s.c2).toArray(), i * 3);
@@ -797,21 +824,67 @@ function lightShafts(spots: THREE.Vector3[]): THREE.Group {
   return g;
 }
 
-/** Cloth that ripples in the shared wind (banners, corner flags). `pin` = the fixed edge (x). */
-function windCloth<T extends THREE.Material>(mat: T, amp: number, pinX: number | null): T {
+type ClothPin = 'left' | 'top' | 'sides';
+
+/**
+ * Cloth in the shared wind, for plane geometry of size w×h (local xy, facing +z).
+ * Waves travel along the cloth away from where it's tied and grow toward the free edge;
+ * gusts come and go; a fast flutter rides on top; the cloth bellies out a little; and the
+ * normal follows the folds, so they catch the light and shade like real fabric.
+ * - left: tied to a pole on its left edge (flags),
+ * - top: hung from its top edge (banners over a railing),
+ * - sides: stretched between two poles (held-up banners).
+ */
+function windCloth<T extends THREE.Material>(mat: T, amp: number, pin: ClothPin, w: number, h: number): T {
+  const hw = (w / 2).toFixed(3);
+  const hh = (h / 2).toFixed(3);
+  const free =
+    pin === 'left' ? `clamp((p.x + ${hw}) / ${w.toFixed(3)}, 0.0, 1.0)`
+    : pin === 'top' ? `clamp((${hh} - p.y) / ${h.toFixed(3)}, 0.0, 1.0)`
+    : `clamp(1.0 - pow(abs(p.x) / ${hw}, 2.0), 0.0, 1.0)`;
+  // Waves along x: measured from the pole for flags; wavelength ~ a third of a flag, ~4 m on banners.
+  const along = pin === 'left' ? `(p.x + ${hw})` : 'p.x';
+  const k = (pin === 'left' ? 6.0 / w : 1.6).toFixed(3);
+  const billow = pin === 'sides' ? '0.55' : '0.22';
+  const eps = (Math.min(w, h) * 0.02).toFixed(4);
   const orig = mat.onBeforeCompile.bind(mat);
   mat.onBeforeCompile = (shader, r) => {
     orig(shader, r);
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nuniform float uTime;\nuniform vec2 uWind;')
       .replace(
-        '#include <begin_vertex>',
-        `#include <begin_vertex>
-        float wfree = ${pinX === null ? '1.0' : `clamp(abs(position.x - (${pinX.toFixed(3)})) / 0.4, 0.0, 1.0)`};
-        float wgust = 0.6 + 0.4 * sin(uTime * 0.7 + modelMatrix[3].x * 0.05);
-        transformed.z += (sin(position.x * 2.2 - uTime * 3.2 + modelMatrix[3].x) * 0.6 + sin(position.y * 3.0 + uTime * 2.1) * 0.4) * ${amp.toFixed(3)} * wgust * wfree * length(uWind);`,
-      );
+        '#include <common>',
+        `#include <common>
+        uniform float uTime;
+        uniform vec2 uWind;
+        float clothZ(vec2 p) {
+          float f = ${free};
+          float wind = length(uWind);
+          float seed = modelMatrix[3].x * 0.37 + modelMatrix[3].z * 0.61;
+          float gust = 0.55 + 0.45 * sin(uTime * 0.53 + seed) * sin(uTime * 1.31 + seed * 1.7);
+          float t = uTime * (2.0 + wind * 1.6);
+          float s = ${along} * ${k};
+          float wave = sin(s - t + seed) * 0.62
+            + sin(s * 2.3 - t * 1.8 + p.y * ${k} * 1.4 + seed * 2.0) * 0.26
+            + sin(s * 5.6 - t * 4.1 + p.y * ${k} * 3.0) * 0.12 * f;
+          float belly = ${billow} * f * (0.65 + 0.35 * sin(uTime * 0.9 + seed));
+          return ${amp.toFixed(3)} * wind * gust * (pow(f, 1.4) * wave + belly);
+        }`,
+      )
+      .replace(
+        '#include <beginnormal_vertex>',
+        `#include <beginnormal_vertex>
+        {
+          float cz0 = clothZ(position.xy);
+          float czx = clothZ(position.xy + vec2(${eps}, 0.0));
+          float czy = clothZ(position.xy + vec2(0.0, ${eps}));
+          objectNormal = normalize(vec3(-(czx - cz0) / ${eps}, -(czy - cz0) / ${eps}, 1.0));
+        }`,
+      )
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed.z += clothZ(position.xy);');
   };
+  // Each cloth variant compiles to different code: give it its own program cache key.
+  const key = mat.customProgramCacheKey.bind(mat);
+  mat.customProgramCacheKey = () => `${key()}|cloth:${pin}:${amp}:${w}:${h}`;
   return mat;
 }
 
@@ -819,7 +892,7 @@ function windCloth<T extends THREE.Material>(mat: T, amp: number, pinX: number |
 function pitchside(home: number, away: number): THREE.Group {
   const g = new THREE.Group();
   const pole = litMaterial({ color: 0xf2f0e8, roughness: 0.5 });
-  const flagMat = windCloth(litMaterial({ color: 0xffd447, roughness: 0.8 }), 0.09, -0.2);
+  const flagMat = windCloth(litMaterial({ color: 0xffd447, roughness: 0.8 }), 0.1, 'left', 0.4, 0.3);
   flagMat.side = THREE.DoubleSide;
   for (const sx of [-1, 1]) {
     for (const sz of [-1, 1]) {
@@ -985,15 +1058,43 @@ function banners(path: PathPt[], home: number, away: number): THREE.Group {
         c.lineWidth = H * 0.06;
         c.strokeRect(H * 0.08, H * 0.08, 512 - H * 0.16, H * 0.84);
       }
-      c.font = `800 ${Math.round(H * 0.66)}px "Barlow Condensed", "Arial Narrow", sans-serif`;
+      c.font = `800 ${Math.round(H * 0.62)}px "Barlow Condensed", "Arial Narrow", sans-serif`;
       c.textAlign = 'center';
       c.textBaseline = 'middle';
-      c.fillText(text, 256, H * 0.54, 512 - (style === 1 ? 150 : 40));
+      const maxW = 512 - (style === 1 ? 150 : 40);
+      // Hand-painted lettering: a dark outline under the paint so it reads from afar.
+      c.lineJoin = 'round';
+      c.lineWidth = H * 0.07;
+      c.strokeStyle = 'rgba(10, 10, 20, 0.55)';
+      c.strokeText(text, 256, H * 0.56, maxW);
+      c.fillText(text, 256, H * 0.56, maxW);
+      // Fabric: a fine weave and a little uneven dye.
+      let seed = text.length * 97 + H;
+      const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+      for (let i = 0; i < 900; i++) {
+        c.fillStyle = rnd() < 0.5 ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.06)';
+        c.fillRect(rnd() * 512, rnd() * H, 1 + rnd() * 3, 1);
+      }
+      const shade = c.createLinearGradient(0, 0, 512, 0);
+      shade.addColorStop(0, 'rgba(0,0,0,0.08)');
+      shade.addColorStop(0.5, 'rgba(255,255,255,0.04)');
+      shade.addColorStop(1, 'rgba(0,0,0,0.1)');
+      c.fillStyle = shade;
+      c.fillRect(0, 0, 512, H);
+      // Top hem with eyelets where it's tied to the railing.
+      c.fillStyle = 'rgba(0,0,0,0.22)';
+      c.fillRect(0, 0, 512, Math.max(3, H * 0.05));
+      for (let x = 14; x < 512; x += 62) {
+        c.beginPath();
+        c.arc(x, Math.max(3, H * 0.05) * 0.55, Math.max(1.5, H * 0.018), 0, Math.PI * 2);
+        c.fillStyle = '#c9c4b8';
+        c.fill();
+      }
       tex.needsUpdate = true;
     };
     draw();
     void document.fonts?.ready.then(draw);
-    const mat = windCloth(litMaterial({ roughness: 0.9 }), 0.1, null);
+    const mat = windCloth(litMaterial({ roughness: 0.9 }), 0.22, 'top', w, hgt);
     mat.map = tex;
     mat.side = THREE.DoubleSide;
     return new THREE.Mesh(new THREE.PlaneGeometry(w, hgt, 24, 3), mat);
@@ -1044,15 +1145,15 @@ function fanBanners(path: PathPt[], home: number): { group: THREE.Group; set(pho
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
-  const mat = windCloth(litMaterial({ roughness: 0.85 }), 0.07, null);
-  mat.map = tex;
-  mat.side = THREE.DoubleSide;
   const poleMat = litMaterial({ color: 0x2a2a2e, roughness: 0.6 });
   const hold = (p: PathPt, o: number, w: number) => {
     const h = w / 2;
     const tierH = LOWER[0][1] + ((o - LOWER[0][0]) / (LOWER[1][0] - LOWER[0][0])) * (LOWER[1][1] - LOWER[0][1]);
     const g = new THREE.Group();
-    const cloth = new THREE.Mesh(new THREE.PlaneGeometry(w, h, 20, 10), mat);
+    const mat = windCloth(litMaterial({ roughness: 0.85 }), 0.16, 'sides', w, h);
+    mat.map = tex;
+    mat.side = THREE.DoubleSide;
+    const cloth = new THREE.Mesh(new THREE.PlaneGeometry(w, h, 24, 12), mat);
     cloth.position.y = 1.6 + h / 2;
     g.add(cloth);
     for (const sx of [-1, 1]) {
