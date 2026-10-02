@@ -13,6 +13,7 @@ import { CAMERA_PRESETS, CameraRig, type CameraPreset } from './render/cameraRig
 import { Atmosphere } from './render/atmosphere';
 import { PixelPass } from './render/pixelPass';
 import { Particles } from './render/particles';
+import { Officials } from './render/officials';
 import { SHARED } from './render/look';
 import { Controls } from './ui/controls';
 import { Hud } from './ui/hud';
@@ -58,7 +59,9 @@ const stadium = createStadium(match.teams[0].info.kit.shirt, match.teams[1].info
 scene.add(stadium.group);
 const goals = createGoals();
 scene.add(goals.group);
-const playersView = new PlayersView(match);
+const officials = new Officials();
+const playersView = new PlayersView(match, officials.all);
+playersView.officials = officials;
 scene.add(playersView.group);
 const ballView = new BallView();
 scene.add(ballView.group);
@@ -228,6 +231,7 @@ async function keepAwake(): Promise<void> {
 
 function newMatch(): void {
   match = new Match(Date.now() & 0xffff);
+  officials.reset();
   playersView.applyColors(match);
   acc = 0;
 }
@@ -466,6 +470,7 @@ function frame(now: number): void {
   const alpha = acc / DT;
   handleEvents(now / 1000);
 
+  officials.update(match, running ? dt : 0);
   rig.update(match, alpha, dt, now / 1000);
   playersView.update(match, alpha, now / 1000);
   ballView.update(match, alpha, running ? dt : 0);

@@ -5,6 +5,7 @@ import type { Player } from '../sim/player';
 import { clamp, lerp, smoothstep } from '../sim/vec';
 import { PYLONS, blobMaterial, litMaterial } from './look';
 import { divePose, type DivePose } from '../sim/keeperPose';
+import type { Officials } from './officials';
 
 /**
  * Players: shaped, kitted figures (collars, trim, numbers, faces, hair) built from a few
@@ -27,7 +28,8 @@ type PartName =
   | 'shortsLeg'
   | 'thigh'
   | 'shin'
-  | 'boot';
+  | 'boot'
+  | 'flag';
 
 interface Part {
   mesh: THREE.InstancedMesh;
@@ -217,7 +219,20 @@ function buildGeometries(): Record<PartName, THREE.BufferGeometry> {
   boot.rotateX(Math.PI / 2);
   boot.scale(0.92, 0.72, 1);
   boot.translate(0, -0.035, 0.05);
-  return { torso, pelvis, neck, head, hairShort, hairCurly, hairBun, upperArm, forearm, hand, shortsLeg, thigh, shin, boot };
+  // Assistant referee's flag: a short stick held in the fist, with a checked cloth.
+  const flag = (() => {
+    const stick = new THREE.CylinderGeometry(0.008, 0.008, 0.55, 5);
+    stick.translate(0, -0.2, 0.0);
+    const cloth = new THREE.PlaneGeometry(0.3, 0.22, 1, 1);
+    cloth.translate(0, -0.35, 0.15);
+    cloth.rotateY(Math.PI / 2);
+    const a = stick.toNonIndexed();
+    const b = cloth.toNonIndexed();
+    a.setAttribute('aCloth', new THREE.Float32BufferAttribute(new Float32Array(a.getAttribute('position').count), 1));
+    b.setAttribute('aCloth', new THREE.Float32BufferAttribute(new Float32Array(b.getAttribute('position').count).fill(1), 1));
+    return mergeGeometries([a, b])!;
+  })();
+  return { torso, pelvis, neck, head, hairShort, hairCurly, hairBun, upperArm, forearm, hand, shortsLeg, thigh, shin, boot, flag };
 }
 
 /**
@@ -322,12 +337,12 @@ function torsoMaterial(numbers: THREE.Texture): THREE.MeshStandardMaterial {
       c = mix(c, vTrim, crest);
       // Number on the back (u = 0.5).
       vec2 nb = vec2((u - 0.5) * 6.2, (v - 0.33) / 0.24);
-      float tens = floor(vNum / 10.0);
+      float tens = floor(max(vNum, 0.0) / 10.0);
       float ones = vNum - tens * 10.0;
       float num = tens > 0.0
         ? max(digit(vec2(nb.x * 1.6 + 1.0, nb.y), tens), digit(vec2(nb.x * 1.6, nb.y), ones))
         : digit(vec2(nb.x * 1.6 + 0.5, nb.y), ones);
-      c = mix(c, vNumCol, num);
+      c = mix(c, vNumCol, num * step(0.0, vNum));
       // Soft fabric folds near the waist and under the arms.
       float fold = 0.04 * sin(u * 60.0 + v * 9.0) * (1.0 - smoothstep(0.0, 0.25, v));
       c *= 1.0 - fold - 0.06 * (1.0 - smoothstep(0.0, 0.08, v));
@@ -422,15 +437,24 @@ export class PlayersView {
   private yAxis = new THREE.Vector3(0, 1, 0);
   private pose: DivePose = { roll: 0, lift: 0 };
   // Body-physics springs per player (spine flex / side bend) and head yaw.
-  private sF = new Float32Array(22);
-  private spF = new Float32Array(22);
-  private sS = new Float32Array(22);
-  private spS = new Float32Array(22);
-  private headYaw = new Float32Array(22);
+  private sF: Float32Array;
+  private spF: Float32Array;
+  private sS: Float32Array;
+  private spS: Float32Array;
+  private headYaw: Float32Array;
+  /** Everyone drawn: the 22 players plus the match officials. */
+  private list: Player[];
+  officials: Officials | null = null;
   private lastTime = 0;
 
-  constructor(match: Match) {
-    this.n = match.players.length;
+  constructor(match: Match, extra: Player[] = []) {
+    this.list = [...match.players, ...extra];
+    this.n = this.list.length;
+    this.sF = new Float32Array(this.n);
+    this.spF = new Float32Array(this.n);
+    this.sS = new Float32Array(this.n);
+    this.spS = new Float32Array(this.n);
+    this.headYaw = new Float32Array(this.n);
     const geos = buildGeometries();
     const per: Record<PartName, number> = {
       torso: 1,
@@ -447,6 +471,7 @@ export class PlayersView {
       thigh: 2,
       shin: 2,
       boot: 2,
+      flag: 1,
     };
     const skin = litMaterial({ groundAO: true, roughness: 0.62 });
     const hair = litMaterial({ groundAO: true, roughness: 0.9 });
@@ -466,7 +491,19 @@ export class PlayersView {
       thigh: withBend(litMaterial({ groundAO: true, roughness: 0.62 }), 'thigh'),
       shin: trimmedMaterial('diffuseColor.rgb = mix(diffuseColor.rgb, vTrim, band(vUv2.y, 0.07, 0.11) + band(vUv2.y, 0.14, 0.17));'),
       boot: trimmedMaterial('diffuseColor.rgb = mix(diffuseColor.rgb, vTrim, 1.0 - smoothstep(0.018, 0.03, vWorldPos.y));', 0.5),
+      flag: litMaterial({
+        roughness: 0.8,
+        vertDecl: 'attribute float aCloth; varying float vCloth;',
+        vertBody: 'vCloth = aCloth;',
+        fragDecl: 'varying float vCloth;',
+        diffuseHook: `{
+          vec2 g = floor(vUv2 * vec2(4.0, 3.0));
+          vec3 cloth = mod(g.x + g.y, 2.0) < 1.0 ? vec3(1.0, 0.75, 0.05) : vec3(0.85, 0.08, 0.06);
+          diffuseColor.rgb = mix(vec3(0.08), cloth, vCloth);
+        }`,
+      }),
     };
+    mats.flag.side = THREE.DoubleSide;
     // Open tubes (shorts legs) are seen from inside at some angles.
     mats.shortsLeg.side = THREE.DoubleSide;
     for (const name of Object.keys(geos) as PartName[]) {
@@ -548,8 +585,9 @@ export class PlayersView {
       [0x6a3fd1, 0xe9f23a], // purple / volt
     ];
     const num = this.parts.torso.mesh.geometry.getAttribute('aNum') as THREE.InstancedBufferAttribute;
-    for (const p of match.players) {
-      const kit = match.teams[p.team].info.kit;
+    const REF_KIT = { shirt: 0x17181b, shirt2: 0xf2c94c, shorts: 0x17181b, socks: 0x17181b, gkShirt: 0x17181b, gkShorts: 0x17181b };
+    for (const p of this.list) {
+      const kit = p.team === 2 ? REF_KIT : match.teams[p.team].info.kit;
       const gk = p.role === 'GK';
       const shirt = gk ? kit.gkShirt : kit.shirt;
       const trim = gk ? kit.gkShorts : kit.shirt2;
@@ -558,7 +596,7 @@ export class PlayersView {
       attr('torso', 'aTrim', p, trim);
       // Numbers in the trim colour unless that's too close to the shirt.
       attr('torso', 'aNumCol', p, gk ? 0x1d1d1d : kit.shirt2 === kit.shirt ? 0xffffff : kit.shirt2);
-      num.setX(p.id, gk ? 1 : p.index + 1);
+      num.setX(p.id, p.team === 2 ? -1 : gk ? 1 : p.index + 1);
       set('upperArm', p, shirt);
       attr('upperArm', 'aTrim', p, trim);
       attr('upperArm', 'aSkin', p, gk ? shirt : p.look.skin);
@@ -611,7 +649,8 @@ export class PlayersView {
     const ball = match.ball;
     const bend = this.parts.torso.mesh.geometry.getAttribute('aBend') as THREE.InstancedBufferAttribute;
     const kneeBend = this.parts.thigh.mesh.geometry.getAttribute('aBend') as THREE.InstancedBufferAttribute;
-    for (const p of match.players) {
+    const off = this.officials;
+    for (const p of this.list) {
       const x = lerp(p.prevPos.x, p.pos.x, alpha);
       const z = lerp(p.prevPos.z, p.pos.z, alpha);
       let df = p.facing - p.prevFacing;
@@ -979,6 +1018,23 @@ export class PlayersView {
         armOutL = armOutR = 0.3 + 0.2 * Math.sin(time * 9 + p.id);
       }
 
+      // Officials' signals: the referee points for a restart, linesmen raise the flag.
+      if (p.team === 2 && off) {
+        if (p === off.ref && off.refPoint > 0) {
+          const k = smoothstep(0, 0.25, off.refPoint) * smoothstep(2.2, 1.9, off.refPoint);
+          armR = lerp(armR, -1.45, k);
+          armOutR = lerp(armOutR, 0.15, k);
+          elbowR = lerp(elbowR, 0.05, k);
+        }
+        const li = off.lines.indexOf(p);
+        if (li >= 0) {
+          const up = smoothstep(0, 0.2, off.flagUp[li]) * smoothstep(2.0, 1.8, off.flagUp[li]);
+          armR = lerp(armR * 0.5, -2.95, up);
+          armOutR = lerp(0.12, 0.08, up);
+          elbowR = lerp(0.35, 0.05, up);
+        }
+      }
+
       // ---------------- body physics: a springy spine driven by the movement
       // The upper body carries inertia: it pitches with acceleration and braking, swings
       // past and settles (underdamped spring), and bends a little out of turns. The head
@@ -1057,6 +1113,10 @@ export class PlayersView {
         this.chain(this.j3, this.j2, 0, -0.245, 0, 0.1, 0, sideSign * -0.08);
         const g = p.role === 'GK' ? 1.25 : 1;
         this.put('hand', id * 2 + sd, this.j3, g, g, g);
+        if (sd === 1) {
+          if (off && off.lines.includes(p)) this.chain(this.sm, this.j3, 0, -0.08, 0.02, 0, 0, 0), this.parts.flag.mesh.setMatrixAt(id, this.sm);
+          else this.parts.flag.mesh.setMatrixAt(id, this.hidden);
+        }
       }
 
       // Legs: the thigh curves into a soft knee (shader bend), the shin takes the rest.
