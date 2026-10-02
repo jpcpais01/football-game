@@ -8,6 +8,19 @@ import { V3, Rng, angleDiff, clamp, dist2D, smoothstep } from './vec';
 import { AI } from './ai';
 
 export type Phase = 'kickoff' | 'play' | 'out' | 'setpiece' | 'goal' | 'halftime' | 'fulltime';
+/** Goal celebrations, one per button: Pass, Through, Shoot, Sprint. */
+export type CelebrationKind = 'slide' | 'plane' | 'siu' | 'flip';
+export const CELEBRATIONS: CelebrationKind[] = ['slide', 'plane', 'siu', 'flip'];
+export interface Celebration {
+  kind: CelebrationKind;
+  /** phaseT when the move starts. */
+  at: number;
+  /** Toward the camera (the centre spot), fixed when it was picked. */
+  dx: number;
+  dz: number;
+  /** The side the aeroplane banks to (+1 = left). */
+  turn: number;
+}
 export type SetPieceKind = 'kickoff' | 'throw' | 'corner' | 'goalkick' | 'freekick' | 'penalty';
 
 export interface SetPiece {
@@ -146,6 +159,9 @@ export class Match {
   private pendingRestart: { kind: SetPieceKind; team: number; x: number; z: number } | null = null;
   kickoffTeam = 0;
   scorer: Player | null = null;
+  /** The scorer's celebration, once picked (by the buttons, or by the AI for its goals). */
+  celebration: Celebration | null = null;
+  private sprintWas = false;
   /** Yellow cards per player id. */
   readonly cards: number[] = new Array(22).fill(0);
   lastFoul: Foul | null = null;
@@ -732,12 +748,42 @@ export class Match {
     this.excitement += (target - this.excitement) * (1 - Math.exp(-DT * 1.5));
   }
 
+  // ------------------------------------------------------------------ celebrations
+
+  /** After your goal, until a little after the camera comes round: the buttons pick the celebration. */
+  get celebrationOpen(): boolean {
+    return (
+      this.phase === 'goal' && !this.autoPlay && !this.celebration && !!this.scorer &&
+      this.scorer.team === this.humanTeam && this.phaseT < GOAL_SEQ.front + 1.4
+    );
+  }
+
+  private pickCelebration(kind: CelebrationKind, at: number): void {
+    const s = this.scorer!;
+    const d = Math.hypot(s.pos.x, s.pos.z) || 1;
+    this.celebration = { kind, at, dx: -s.pos.x / d, dz: -s.pos.z / d, turn: s.pos.z * s.pos.x >= 0 ? 1 : -1 };
+  }
+
   // ------------------------------------------------------------------ human control
 
   private applyHumanInput(input: InputState): void {
     const c = this.controlled;
     if (this.autoPlay) {
       input.events.length = 0;
+      return;
+    }
+    // After a goal the four buttons are celebrations (Sprint counts on the press, not a hold
+    // carried over from the attack).
+    const sprintDown = input.sprint && !this.sprintWas;
+    this.sprintWas = input.sprint;
+    if (this.phase === 'goal') {
+      if (this.celebrationOpen && this.phaseT > 0.25) {
+        let pick: CelebrationKind | null = sprintDown ? 'flip' : null;
+        for (const ev of input.events) if (ev.kind === 'down') pick = CELEBRATIONS[ev.btn];
+        if (pick) this.pickCelebration(pick, Math.max(this.phaseT, GOAL_SEQ.front - 0.3));
+      }
+      input.events.length = 0;
+      c.sprinting = false;
       return;
     }
     const attacking = this.humanAttacking();
@@ -804,7 +850,7 @@ export class Match {
     }
     this.updateLunge(attacking);
 
-    if (this.phase === 'goal' || this.phase === 'halftime' || this.phase === 'fulltime' || this.phase === 'out') {
+    if (this.phase === 'halftime' || this.phase === 'fulltime' || this.phase === 'out') {
       c.sprinting = false;
       if (this.phase === 'out') c.wantSpeed = Math.max(0, c.wantSpeed - DT * 6);
       return;
@@ -2258,6 +2304,12 @@ export class Match {
       this.passTarget = null;
       this.events.goal = scoringTeam;
       this.events.whistle = 1;
+      this.celebration = null;
+      // The computer's scorers pick their own (most of the time; the rest do the classic).
+      if (scoringTeam !== this.humanTeam || this.autoPlay) {
+        const h = (this.teams[0].score * 7 + this.teams[1].score * 13 + this.scorer.id * 5) % 6;
+        if (h < 4) this.pickCelebration(CELEBRATIONS[h], GOAL_SEQ.front - 0.3);
+      }
       return;
     }
     if (Math.abs(p.z) > PITCH.halfW + BALL.radius) {

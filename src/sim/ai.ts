@@ -1474,6 +1474,13 @@ export class AI {
     const d = Math.hypot(s.pos.x, s.pos.z) || 1;
     const fx = -s.pos.x / d;
     const fz = -s.pos.z / d;
+    const cel = m.celebration;
+    if (p === s && cel && m.phaseT >= cel.at) {
+      this.celebrationMove(p, m.phaseT - cel.at);
+      return;
+    }
+    // Team-mates give a flip or a leap room before they pile in.
+    const room = cel && (cel.kind === 'flip' || cel.kind === 'siu') && m.phaseT < cel.at + 2.2 ? 1.6 : 0;
     if (p === s) {
       if (front) {
         p.moveX = p.moveZ = 0;
@@ -1490,7 +1497,7 @@ export class AI {
     } else if (p.team === s.team && p.role !== 'GK') {
       // Chase him down, then fan out behind him: alternate sides, staggered.
       const k = (p.index % 2 ? 1 : -1) * (1.3 + (p.index % 4) * 0.45);
-      const ahead = front ? -1.1 - (p.index % 3) * 0.5 : 1.5;
+      const ahead = front ? -1.1 - (p.index % 3) * 0.5 - room : 1.5 + room;
       this.moveTo(p, s.pos.x + fx * ahead - fz * k, s.pos.z + fz * ahead + fx * k, front, false);
       if (front && Math.hypot(p.pos.x - s.pos.x, p.pos.z - s.pos.z) < 3.5) {
         p.lookTarget.copy(s.pos);
@@ -1498,6 +1505,60 @@ export class AI {
       }
     } else {
       p.wantSpeed = Math.max(0, p.wantSpeed - DT * 4);
+    }
+  }
+
+  /**
+   * The scorer's chosen celebration, `u` seconds in. The sim moves him; the renderer poses him
+   * from the same clock (players.ts). All of them end facing the camera, which stands between
+   * him and the centre spot.
+   */
+  private celebrationMove(p: Player, u: number): void {
+    const cel = this.m.celebration!;
+    const toCam = Math.atan2(cel.dz, cel.dx);
+    const face = (a: number) => {
+      p.lookTarget.set(p.pos.x + Math.cos(a) * 30, 0, p.pos.z + Math.sin(a) * 30);
+      p.lookAt = p.lookTarget;
+      p.squareUp = true;
+    };
+    const run = (a: number, speed: number) => {
+      p.moveX = Math.cos(a);
+      p.moveZ = Math.sin(a);
+      p.wantSpeed = speed;
+    };
+    p.sprinting = false;
+    p.lookAt = null;
+    p.squareUp = false;
+    switch (cel.kind) {
+      case 'slide':
+        // Charge at the camera, drop onto both knees and skid toward it.
+        p.sprinting = u < 0.75;
+        run(toCam, u < 0.75 ? 7.8 : Math.max(0, 7.4 - 4.6 * (u - 0.75)));
+        if (u > 0.5) face(toCam);
+        break;
+      case 'plane': {
+        // Arms out, banking round a wide loop; it comes out of the turn gliding at the camera.
+        const w = 1.3;
+        const left = 3.0 - Math.min(u, 3.0);
+        run(toCam - cel.turn * w * left, u < 3.0 ? 6 : Math.max(0, 6 - 7 * (u - 3.0)));
+        if (u > 3.0) face(toCam);
+        break;
+      }
+      case 'siu':
+        // Away from the camera a few strides, a leap with a half turn in the air, and the
+        // landing, feet planted wide, facing it.
+        if (u < 0.45) run(toCam + Math.PI, 4.5);
+        else {
+          run(toCam, 0);
+          if (Math.abs(angleDiff(p.facing, toCam)) > 0.3) p.facing = p.prevFacing = toCam;
+          face(toCam);
+        }
+        break;
+      case 'flip':
+        // Pull up, turn to the camera, a standing backflip.
+        run(toCam, 0);
+        face(toCam);
+        break;
     }
   }
 
