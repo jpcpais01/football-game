@@ -6,7 +6,8 @@
 }
 
 .shell {
-  --glass: rgba(12, 16, 28, 0.72);
+  /* Opaque-ish glass, no backdrop blur: blurring a live 3D canvas costs a re-blur every frame. */
+  --glass: rgba(12, 16, 28, 0.84);
   --glass-2: rgba(22, 28, 46, 0.82);
   --line: rgba(255, 255, 255, 0.1);
   --line-2: rgba(255, 255, 255, 0.18);
@@ -95,7 +96,7 @@
 }
 .tile {
   position: relative; overflow: hidden; border-radius: 18px; border: 1px solid var(--line);
-  background: var(--glass); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  background: var(--glass);
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.06);
   text-align: left; padding: 14px 16px; transition: transform 0.18s ease, border-color 0.18s, box-shadow 0.18s;
 }
@@ -448,7 +449,7 @@ button.tile:hover .chev { transform: translateX(4px); }
 /* ---------------------------------------------------------------- modal */
 .modal {
   position: absolute; inset: 0; z-index: 60; display: grid; place-items: center; padding: 10px;
-  background: rgba(4, 6, 12, 0.66); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); animation: shell-in 0.2s ease;
+  background: rgba(4, 6, 12, 0.8); animation: shell-in 0.2s ease;
 }
 .modal.hidden { display: none; }
 .m-box {

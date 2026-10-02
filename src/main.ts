@@ -39,10 +39,14 @@ const DEBUG = params.has('debug');
 // 1.6x is visually indistinguishable at arm's length. Quality adapts at runtime anyway.
 const coarse = matchMedia('(pointer: coarse)').matches;
 const maxDpr = Math.min(window.devicePixelRatio || 1, coarse ? 1.6 : 2);
+const startsHD = params.get('gfx') === 'hd';
 const renderer = new THREE.WebGLRenderer({
-  antialias: maxDpr < 1.3,
+  antialias: startsHD && maxDpr < 1.3,
   powerPreference: 'high-performance',
   stencil: false,
+  // The pixel look renders the world into its own target (with depth); the screen canvas
+  // only receives the final blit, so it needs no depth buffer (memory and bandwidth).
+  depth: startsHD,
 });
 let dpr = maxDpr;
 renderer.setPixelRatio(dpr);
@@ -56,7 +60,11 @@ renderer.shadowMap.type = THREE.PCFShadowMap; // (PCFSoft is gone in r18x; this 
 app.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-const atmo = new Atmosphere(scene, { shadowSize: coarse ? 1024 : 2048 });
+// Shadow texels well under an art pixel are wasted: 512 covers the 80 m around the camera
+// at ~16 cm (an art pixel is ~25 cm there). Redrawn every other frame (see frame()).
+const atmo = new Atmosphere(scene, { shadowSize: startsHD ? (coarse ? 1024 : 2048) : 512 });
+renderer.shadowMap.autoUpdate = false;
+let shadowTick = 0;
 // ?tod=0..1 pins the time of day (for looking at the evening without playing a match).
 const TOD = params.has('tod') ? Number(params.get('tod')) : -1;
 // ?showcase: frozen line-up near the camera, for judging the player models.
@@ -574,6 +582,12 @@ let acc = 0;
 let last = performance.now();
 let simTime = 0;
 let frameAvg = 16.7;
+/** Frame pacing: the display's refresh interval, and the interval we actually draw at. */
+let rafAvg = 16.7;
+let lastRaf = performance.now();
+let targetMs = 16.7;
+/** Seconds the frame time has stayed comfortably inside the budget (for supersampling). */
+let headroom = 0;
 let perfCheckAt = performance.now() + 3000;
 let fpsFrames = 0;
 let fpsT = performance.now();
@@ -654,9 +668,13 @@ function adaptQuality(frameMs: number, now: number): void {
   frameAvg += (frameMs - frameAvg) * 0.05;
   if (now < perfCheckAt) return;
   if (pixelLook()) {
-    // Pixel look: the resolution is the art; struggling devices drop the supersampling.
-    if (frameAvg > 19.5 && pixelPass.ss > 1) pixelPass.setSupersample(1), (perfCheckAt = now + 4000);
-    else if (frameAvg < 12 && pixelPass.ss < 2) pixelPass.setSupersample(2), (perfCheckAt = now + 8000);
+    // Pixel look: the resolution is the art. Supersampling is the one knob: it comes on
+    // after ~6 s of frames comfortably on time, and goes off as soon as frames run late.
+    if (!playing || paused) return void (perfCheckAt = now + 1000);
+    const late = frameAvg > targetMs * 1.18;
+    headroom = frameAvg < targetMs * 1.06 ? headroom + 1 : 0;
+    if (late && pixelPass.ss > 1) pixelPass.setSupersample(1), (headroom = 0), (perfCheckAt = now + 5000);
+    else if (headroom >= 6 && pixelPass.ss < 2) pixelPass.setSupersample(2), (headroom = 0), (perfCheckAt = now + 4000);
     else perfCheckAt = now + 1000;
     return;
   }
@@ -699,11 +717,24 @@ function showcase(dt: number): void {
 let cpuAvg = 0;
 function frame(now: number): void {
   if (!booted) {
-    // The first frame has been drawn by the time the next one starts: lift the curtain.
+    // Compile every shader while the boot screen is still up (no hitch the first time
+    // something appears), then lift the curtain once the first frame has been drawn.
     booted = true;
-    requestAnimationFrame(() => boot.__bootDone?.());
+    renderer.setRenderTarget(pixelLook() ? pixelPass.target : null);
+    const compiled = renderer.compileAsync(scene, rig.camera).catch(() => undefined);
+    renderer.setRenderTarget(null);
+    const timeout = new Promise((r) => setTimeout(r, 4000));
+    void Promise.race([compiled, timeout]).then(() => requestAnimationFrame(() => boot.__bootDone?.()));
   }
   requestAnimationFrame(frame);
+  // Frame pacing. A football game needs 60 fps, not 90 or 120: on high-refresh screens
+  // every other refresh is skipped (half the GPU, CPU, heat and battery). Behind the menus
+  // the stadium is ambience (30 fps); the pause screen barely moves (15 fps).
+  rafAvg += (Math.min(50, now - lastRaf) - rafAvg) * 0.1;
+  lastRaf = now;
+  const menus = !playing;
+  targetMs = paused ? 1000 / 15 : menus ? 1000 / 30 : Math.max(1000 / 60, rafAvg);
+  if (now - last < targetMs - rafAvg * 0.5) return;
   const t0 = performance.now();
   const frameMs = now - last;
   const dt = Math.min(0.1, frameMs / 1000);
@@ -761,8 +792,13 @@ function frame(now: number): void {
   // A full-screen menu covers the stadium: don't spend the battery drawing it.
   if (home.opaque) {
     /* skip */
-  } else if (pixelLook()) pixelPass.render(renderer, scene, rig.camera, SHARED.uFlood.value, atmo.weather === 'sunny' ? 0.35 : 1, rig.subPixelX, rig.subPixelY);
-  else renderer.render(scene, rig.camera);
+  } else if (pixelLook()) {
+    if ((shadowTick++ & 1) === 0) renderer.shadowMap.needsUpdate = true;
+    pixelPass.render(renderer, scene, rig.camera, SHARED.uFlood.value, atmo.weather === 'sunny' ? 0.35 : 1, rig.subPixelX, rig.subPixelY);
+  } else {
+    renderer.shadowMap.needsUpdate = true;
+    renderer.render(scene, rig.camera);
+  }
   cpuAvg += (performance.now() - t0 - cpuAvg) * 0.05;
   adaptQuality(frameMs, now);
 

@@ -35,7 +35,7 @@ export class PixelPass {
   /** Wanted art height in pixels (the real one is the nearest whole-number fit). */
   height = 288;
   /** Supersampling of the world render (2 = 2x2 samples per art pixel, 1 = off). */
-  ss = 2;
+  ss = matchMedia('(pointer: coarse)').matches ? 1 : 2;
   private artW = 4;
   private artH = 4;
   private devW = 4;
@@ -157,15 +157,9 @@ export class PixelPass {
           float z = texture2D(tDepth, uv).x * 2.0 - 1.0;
           return (2.0 * uNear * uFar) / (uFar + uNear - z * (uFar - uNear));
         }
-        float bayer4(vec2 p) {
-          vec2 q = mod(floor(p), 4.0);
-          int i = int(q.x + q.y * 4.0);
-          float m[16];
-          m[0]=0.0; m[1]=8.0; m[2]=2.0; m[3]=10.0; m[4]=12.0; m[5]=4.0; m[6]=14.0; m[7]=6.0;
-          m[8]=3.0; m[9]=11.0; m[10]=1.0; m[11]=9.0; m[12]=15.0; m[13]=7.0; m[14]=13.0; m[15]=5.0;
-          for (int k = 0; k < 16; k++) if (k == i) return m[k] / 16.0;
-          return 0.0;
-        }
+        // 4x4 ordered-dither threshold, computed (no table lookup loop).
+        float bayer2(vec2 a) { a = floor(a); return fract(dot(a, vec2(0.5, a.y * 0.75))); }
+        float bayer4(vec2 p) { return bayer2(0.5 * p) * 0.25 + bayer2(p); }
 
         void main() {
           // Rendered at the low resolution: this fragment is exactly one art pixel.
