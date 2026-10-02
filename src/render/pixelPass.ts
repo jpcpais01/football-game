@@ -206,14 +206,15 @@ export class PixelPass {
           vec2 offs[8];
           offs[0] = vec2(1.0, 0.0); offs[1] = vec2(-1.0, 0.0); offs[2] = vec2(0.0, 1.0); offs[3] = vec2(0.0, -1.0);
           offs[4] = vec2(2.0, 0.0); offs[5] = vec2(-2.0, 0.0); offs[6] = vec2(0.0, 2.0); offs[7] = vec2(0.0, -2.0);
+          // The first four taps are the 1-pixel neighbours: summed for the clarity pass too.
+          vec3 nb = vec3(0.0);
           for (int k = 0; k < TAPS; k++) {
             vec3 sc = texture2D(tColor, uv + offs[k] * e).rgb;
+            if (k < 4) nb += sc;
             bloom += max(sc - vec3(0.75), 0.0);
           }
           c += bloom / float(TAPS) * 0.8;
-
-          vec3 nb = (texture2D(tColor, uv + vec2(e.x, 0.0)).rgb + texture2D(tColor, uv - vec2(e.x, 0.0)).rgb +
-                     texture2D(tColor, uv + vec2(0.0, e.y)).rgb + texture2D(tColor, uv - vec2(0.0, e.y)).rgb) * 0.25;
+          nb *= 0.25;
           if (uPalOn > 0.5) {
             // Palette: smooth flat areas before the snap (sub-pixel grass grain and crowd
             // detail would otherwise turn into palette speckle), but keep edges: only
@@ -291,6 +292,7 @@ export class PixelPass {
         uSub: { value: new THREE.Vector2() },
         uScale: { value: 1 },
         uOffset: { value: new THREE.Vector2() },
+        uView: { value: new THREE.Vector2(4, 4) },
       },
       vertexShader: /* glsl */ `
         varying vec2 vUv;
@@ -302,6 +304,7 @@ export class PixelPass {
         uniform vec2 uSub;
         uniform vec2 uOffset;
         uniform float uScale;
+        uniform vec2 uView;
         // Sharp bilinear: position in art pixels; inside a pixel the colour is flat, and only
         // within half a device pixel of a seam does it blend into the neighbour (linear
         // filtering does the blend). Smooth sub-pixel scrolling comes for free.
@@ -309,7 +312,13 @@ export class PixelPass {
           vec2 p = (gl_FragCoord.xy + uOffset) / uScale + uSub;
           vec2 seam = floor(p + 0.5);
           p = seam + clamp((p - seam) * uScale, -0.5, 0.5);
-          gl_FragColor = texture2D(tPost, p / uRes);
+          vec3 c = texture2D(tPost, p / uRes).rgb;
+          // The screen vignette (it used to be a CSS layer blended over the whole canvas every
+          // frame): radial-gradient(ellipse at 50% 45%, transparent 55%, rgba(20,18,10,.32)),
+          // its ellipse reaching the farthest corner (1.579 x the closest-side ellipse).
+          vec2 q = (gl_FragCoord.xy / uView - vec2(0.5, 0.55)) / vec2(0.5, 0.45);
+          float vig = 0.32 * clamp((length(q) / 1.5792 - 0.55) / 0.45, 0.0, 1.0);
+          gl_FragColor = vec4(mix(c, vec3(0.0784, 0.0706, 0.0392), vig), 1.0);
         }
       `,
     });
@@ -350,6 +359,7 @@ export class PixelPass {
     (this.mat.uniforms.uRes.value as THREE.Vector2).set(lw, lh);
     this.mat.uniforms.uSS.value = this.ss;
     this.blit.uniforms.uScale.value = scale;
+    (this.blit.uniforms.uView.value as THREE.Vector2).set(w, h);
     (this.blit.uniforms.uOffset.value as THREE.Vector2).set((lw * scale - w) / 2, 0);
   }
 

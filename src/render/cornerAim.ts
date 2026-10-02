@@ -18,6 +18,7 @@ export class CornerAim {
   private pos = new Float32Array(DOTS * 3);
   private alpha = new Float32Array(DOTS);
   private ball = new Ball();
+  private solvedAt = -1;
   private lastKey = '';
 
   constructor() {
@@ -85,8 +86,10 @@ export class CornerAim {
 
     // Re-solve the flight only when the aim or the style changes.
     const key = `${t.x.toFixed(2)}|${t.z.toFixed(2)}|${float}`;
-    if (key === this.lastKey) return;
+    // (A full flight solve: at most 20 a second while the aim is moving.)
+    if (key === this.lastKey || time - this.solvedAt < 0.05) return;
     this.lastKey = key;
+    this.solvedAt = time;
     const r = match.solveCorner(t.x, t.z, float);
     const b = this.ball;
     b.pos.copy(match.ball.pos);

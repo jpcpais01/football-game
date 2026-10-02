@@ -6,7 +6,7 @@ import { Player } from '../sim/player';
 import { bodyShape, type BodyShape } from '../sim/body';
 import type { Kit } from '../sim/teams';
 import { clamp, lerp, smoothstep } from '../sim/vec';
-import { PYLONS, blobMaterial, litMaterial } from './look';
+import { PYLONS, SHARED, blobMaterial, litMaterial } from './look';
 import { divePose, type DivePose } from '../sim/keeperPose';
 import type { Officials } from './officials';
 import type { Benches } from './bench';
@@ -36,8 +36,11 @@ type PartName =
   | 'flag';
 
 interface Part {
+  name: PartName;
   mesh: THREE.InstancedMesh;
   perPlayer: number;
+  /** Player id drawn in each packed slot this frame (see cull). */
+  order: number[];
 }
 
 const THIGH = 0.43;
@@ -47,8 +50,11 @@ const HIP_Y = 0.94;
 const HEAD_TOP = 0.24;
 const BASE_HEIGHT = HIP_Y + 0.04 + 0.6 + HEAD_TOP;
 const HAIR_PARTS: PartName[] = ['hairShort', 'hairCurly', 'hairBun'];
-/** Too small to show in the sun's shadow map (~4-8 cm per texel). */
-const NO_SHADOW = new Set<PartName>(['hand', 'neck', 'boot', 'flag', ...HAIR_PARTS]);
+/** Which hair mesh each look.hairStyle wears (0 and 1 share the short cut). */
+const HAIR_OF_STYLE: PartName[] = ['hairShort', 'hairShort', 'hairCurly', 'hairBun'];
+/** Too small to show in the sun's shadow map (~16 cm per texel), or inside another part's
+ * shadow (the shorts round the thigh). */
+const NO_SHADOW = new Set<PartName>(['hand', 'neck', 'boot', 'flag', 'forearm', 'shortsLeg', ...HAIR_PARTS]);
 /**
  * Secondary-motion channels. Arms, forearms, head and shoulders carry inertia: they lag
  * and overshoot as the body speeds up, brakes, turns and lands, and swing into sudden
@@ -210,7 +216,7 @@ function buildGeometries(): Record<PartName, THREE.BufferGeometry> {
     const thumb = new THREE.CapsuleGeometry(0.012, 0.035, 1, 5);
     thumb.rotateX(0.5);
     thumb.translate(0, -0.05, 0.04);
-    return mergeGeometries([palm.toNonIndexed(), fingers.toNonIndexed(), thumb.toNonIndexed()])!;
+    return mergeGeometries([palm, fingers, thumb])!;
   })();
   const shortsLeg = lathe(
     [
@@ -260,8 +266,8 @@ function buildGeometries(): Record<PartName, THREE.BufferGeometry> {
     const cloth = new THREE.PlaneGeometry(0.3, 0.22, 1, 1);
     cloth.translate(0, -0.35, 0.15);
     cloth.rotateY(Math.PI / 2);
-    const a = stick.toNonIndexed();
-    const b = cloth.toNonIndexed();
+    const a = stick;
+    const b = cloth;
     a.setAttribute('aCloth', new THREE.Float32BufferAttribute(new Float32Array(a.getAttribute('position').count), 1));
     b.setAttribute('aCloth', new THREE.Float32BufferAttribute(new Float32Array(b.getAttribute('position').count).fill(1), 1));
     return mergeGeometries([a, b])!;
@@ -289,11 +295,15 @@ float bendT(vec3 p) {
 }
 `;
 
-function injectBend(shader: { vertexShader: string }, kind: 'torso' | 'thigh'): void {
-  shader.vertexShader = shader.vertexShader
-    .replace('#include <common>', `#include <common>\n${BEND_GLSL(kind)}`)
-    .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\nobjectNormal = bendRot(aBend * bendT(position)) * objectNormal;')
-    .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed = bendRot(aBend * bendT(position)) * transformed;');
+/** The bend rotation is built once per vertex and shared by the normal and the position
+ * (depth materials have no normal chunk, so there it's built with the position). */
+function injectBend(shader: { vertexShader: string }, kind: 'torso' | 'thigh', normals = true): void {
+  shader.vertexShader = shader.vertexShader.replace('#include <common>', `#include <common>\n${BEND_GLSL(kind)}`);
+  shader.vertexShader = normals
+    ? shader.vertexShader
+        .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\nmat3 bendR = bendRot(aBend * bendT(position));\nobjectNormal = bendR * objectNormal;')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed = bendR * transformed;')
+    : shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed = bendRot(aBend * bendT(position)) * transformed;');
 }
 
 function withBend<T extends THREE.Material>(mat: T, kind: 'torso' | 'thigh'): T {
@@ -339,7 +349,7 @@ function withToe<T extends THREE.Material>(mat: T): T {
 /** Shadow-map material that bends the same way, so shadows match the body. */
 function bendDepth(kind: 'torso' | 'thigh'): THREE.MeshDepthMaterial {
   const m = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
-  m.onBeforeCompile = (shader) => injectBend(shader, kind);
+  m.onBeforeCompile = (shader) => injectBend(shader, kind, false);
   m.customProgramCacheKey = () => `bend-depth-${kind}`;
   return m;
 }
@@ -494,6 +504,7 @@ function trimmedMaterial(hook: string, roughness = 0.8): THREE.MeshStandardMater
 export class PlayersView {
   readonly group = new THREE.Group();
   private parts = {} as Record<PartName, Part>;
+  private partList: Part[] = [];
   private contact: THREE.InstancedMesh;
   private flood: THREE.InstancedMesh;
   private ring: THREE.Mesh;
@@ -505,11 +516,15 @@ export class PlayersView {
   private projView = new THREE.Matrix4();
   private sphere = new THREE.Sphere();
   private visible: number[] = [];
+  /** Per player id: its packed slot this frame (-1 = culled), and its slot in its own hair
+   * mesh and in the flag mesh (only the hair style he wears and the linesmen's flags draw). */
+  private slot: Int16Array;
+  private hairSlot: Int16Array;
+  private flagSlot: Int16Array;
   /** Visible set the kit attributes are currently packed for (null = needs packing). */
   private packedFor: number[] | null = null;
   /** Per-player attributes that only change with the kits: master copies for culling. */
-  private statics: { attr: THREE.BufferAttribute; master: Float32Array; per: number }[] = [];
-  private hidden = new THREE.Matrix4().makeScale(0, 0, 0);
+  private statics: { attr: THREE.BufferAttribute; master: Float32Array; part: Part }[] = [];
 
   // scratch
   private e = new THREE.Euler();
@@ -577,6 +592,9 @@ export class PlayersView {
     this.extra = extra;
     this.list = [...match.players, ...extra];
     this.n = this.list.length;
+    this.slot = new Int16Array(this.n).fill(-1);
+    this.hairSlot = new Int16Array(this.n).fill(-1);
+    this.flagSlot = new Int16Array(this.n).fill(-1);
     this.sF = new Float32Array(this.n);
     this.spF = new Float32Array(this.n);
     this.sS = new Float32Array(this.n);
@@ -672,7 +690,8 @@ export class PlayersView {
       mesh.receiveShadow = true;
       if (name === 'torso' || name === 'thigh') mesh.customDepthMaterial = bendDepth(name);
       this.group.add(mesh);
-      this.parts[name] = { mesh, perPlayer: per[name] };
+      this.parts[name] = { name, mesh, perPlayer: per[name], order: [] };
+      this.partList.push(this.parts[name]);
     }
     this.applyColors(match);
 
@@ -778,16 +797,15 @@ export class PlayersView {
     }
     num.needsUpdate = true;
     pat.needsUpdate = true;
-    for (const name of Object.keys(this.parts) as PartName[]) {
-      const m = this.parts[name].mesh;
+    for (const { mesh: m } of this.partList) {
       if (m.instanceColor) m.instanceColor.needsUpdate = true;
     }
     // Snapshot the kit attributes: culling packs visible players to the front.
     this.statics = [];
     this.packedFor = null;
-    for (const name of Object.keys(this.parts) as PartName[]) {
-      const { mesh, perPlayer } = this.parts[name];
-      const keep = (attr: THREE.BufferAttribute | null) => attr && this.statics.push({ attr, master: (attr.array as Float32Array).slice(), per: perPlayer });
+    for (const part of this.partList) {
+      const { mesh } = part;
+      const keep = (attr: THREE.BufferAttribute | null) => attr && this.statics.push({ attr, master: (attr.array as Float32Array).slice(), part });
       keep(mesh.instanceColor);
       for (const [k, a] of Object.entries(mesh.geometry.attributes)) {
         if (!POSE_ATTRS.includes(k) && (a as THREE.InstancedBufferAttribute).isInstancedBufferAttribute) keep(a as THREE.BufferAttribute);
@@ -797,8 +815,10 @@ export class PlayersView {
 
   /**
    * Draw only players the camera can see (with a margin for the long evening shadows they
-   * throw into view): pack their instances to the front of every part's buffers and draw
-   * that many. Off-screen players then cost nothing in either the shadow or the main pass.
+   * throw into view). Runs before posing: each visible player gets a packed slot at the
+   * front of every part's buffers and is written straight there; off-screen players are not
+   * posed at all and cost nothing in either the shadow or the main pass. Hair and the flag
+   * pack separately, so only the hair style each player wears is drawn.
    */
   private cull(): void {
     const vis = this.visible;
@@ -806,32 +826,51 @@ export class PlayersView {
     const cam = this.camera;
     if (cam) {
       cam.updateMatrixWorld();
-      this.projView.copy(cam.matrixWorld).invert().premultiply(cam.projectionMatrix);
+      this.projView.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
       this.frustum.setFromProjectionMatrix(this.projView);
     }
+    this.slot.fill(-1);
+    this.hairSlot.fill(-1);
+    this.flagSlot.fill(-1);
+    for (const part of this.partList) part.order.length = 0;
+    const lines = this.officials?.lines;
     for (let i = 0; i < this.list.length; i++) {
       const p = this.list[i];
       this.sphere.center.set(p.pos.x, 1, p.pos.z);
       this.sphere.radius = 7; // a margin for long evening shadows thrown into view
-      if (!cam || this.frustum.intersectsSphere(this.sphere)) vis.push(p.id);
+      if (cam && !this.frustum.intersectsSphere(this.sphere)) continue;
+      this.slot[p.id] = vis.length;
+      vis.push(p.id);
+      const hair = this.parts[HAIR_OF_STYLE[p.look.hairStyle] ?? 'hairBun'];
+      this.hairSlot[p.id] = hair.order.length;
+      hair.order.push(p.id);
+      if (lines && lines.includes(p)) {
+        this.flagSlot[p.id] = this.parts.flag.order.length;
+        this.parts.flag.order.push(p.id);
+      }
+    }
+    for (const part of this.partList) {
+      if (part.name === 'flag' || HAIR_PARTS.includes(part.name)) continue;
+      for (const id of vis) part.order.push(id);
     }
     const n = vis.length;
-    for (const name of Object.keys(this.parts) as PartName[]) {
-      const { mesh, perPlayer: per } = this.parts[name];
-      // Rewritten every frame: pack in place (slots only move toward the front).
-      const pack = (attr: THREE.BufferAttribute, size: number) => {
-        const a = attr.array as Float32Array;
-        for (let j = 0; j < n; j++) {
-          if (vis[j] === j) continue;
-          a.copyWithin(j * per * size, vis[j] * per * size, (vis[j] + 1) * per * size);
-        }
-      };
-      pack(mesh.instanceMatrix, 16);
+    for (const part of this.partList) {
+      const { mesh, perPlayer: per } = part;
+      const count = part.order.length * per;
+      mesh.count = count;
+      // three still issues a draw for an instanced mesh with nothing in it.
+      mesh.visible = count > 0;
+      // Per-frame data: upload only the part that's drawn.
+      mesh.instanceMatrix.clearUpdateRanges();
+      mesh.instanceMatrix.addUpdateRange(0, count * 16);
+      mesh.instanceMatrix.needsUpdate = true;
       for (const k of POSE_ATTRS) {
         const b = mesh.geometry.getAttribute(k) as THREE.BufferAttribute | undefined;
-        if (b) pack(b, b.itemSize);
+        if (!b) continue;
+        b.clearUpdateRanges();
+        b.addUpdateRange(0, count * b.itemSize);
+        b.needsUpdate = true;
       }
-      mesh.count = n * per;
     }
     // Kit attributes: copied from the master in the same order — only when the visible set
     // changes (they don't change otherwise, so there's nothing to upload).
@@ -840,27 +879,69 @@ export class PlayersView {
     for (let j = 0; same && j < n; j++) same = prev![j] === vis[j];
     if (!same) {
       this.packedFor = vis.slice();
-      for (const { attr, master, per } of this.statics) {
+      for (const { attr, master, part } of this.statics) {
         const a = attr.array as Float32Array;
-        const size = attr.itemSize;
-        for (let j = 0; j < n; j++) a.set(master.subarray(vis[j] * per * size, (vis[j] + 1) * per * size), j * per * size);
+        const w = part.perPlayer * attr.itemSize;
+        const order = part.order;
+        for (let j = 0; j < order.length; j++) a.set(master.subarray(order[j] * w, (order[j] + 1) * w), j * w);
         attr.clearUpdateRanges();
-        attr.addUpdateRange(0, n * per * size);
+        attr.addUpdateRange(0, order.length * w);
         attr.needsUpdate = true;
       }
     }
-    // Per-frame data: upload only the part that's drawn.
-    for (const name of Object.keys(this.parts) as PartName[]) {
-      const { mesh, perPlayer: per } = this.parts[name];
-      mesh.instanceMatrix.clearUpdateRanges();
-      mesh.instanceMatrix.addUpdateRange(0, n * per * 16);
-      for (const k of POSE_ATTRS) {
-        const b = mesh.geometry.getAttribute(k) as THREE.BufferAttribute | undefined;
-        if (!b) continue;
-        b.clearUpdateRanges();
-        b.addUpdateRange(0, n * per * b.itemSize);
-      }
+    // Ground shadows: one contact blob per visible player, and the floodlight fans only
+    // once the floodlights are bright enough to throw them.
+    const flood = SHARED.uFlood.value > 0.01;
+    this.flood.visible = flood && n > 0;
+    this.contact.visible = n > 0;
+    this.contact.count = n;
+    this.flood.count = flood ? n * PYLONS.length : 0;
+    for (const m of [this.contact, this.flood]) {
+      m.instanceMatrix.clearUpdateRanges();
+      m.instanceMatrix.addUpdateRange(0, m.count * 16);
+      m.instanceMatrix.needsUpdate = true;
     }
+  }
+
+  /** out = parent * T(x,y,z) (no rotation). Safe with out === parent. */
+  private chainT(out: THREE.Matrix4, parent: THREE.Matrix4, x: number, y: number, z: number): THREE.Matrix4 {
+    const p = parent.elements;
+    const o = out.elements;
+    for (let i = 0; i < 4; i++) {
+      const t = p[i] * x + p[4 + i] * y + p[8 + i] * z + p[12 + i];
+      o[i] = p[i];
+      o[4 + i] = p[4 + i];
+      o[8 + i] = p[8 + i];
+      o[12 + i] = t;
+    }
+    return out;
+  }
+
+  /** out = parent * T(x,y,z) * Rx(rx): a hinge (knees, ankles). Safe with out === parent. */
+  private chainX(out: THREE.Matrix4, parent: THREE.Matrix4, x: number, y: number, z: number, rx: number): THREE.Matrix4 {
+    const p = parent.elements;
+    const o = out.elements;
+    const c = Math.cos(rx);
+    const sn = Math.sin(rx);
+    for (let i = 0; i < 4; i++) {
+      const a = p[i];
+      const b = p[4 + i];
+      const d = p[8 + i];
+      const t = a * x + b * y + d * z + p[12 + i];
+      o[i] = a;
+      o[4 + i] = b * c + d * sn;
+      o[8 + i] = d * c - b * sn;
+      o[12 + i] = t;
+    }
+    return out;
+  }
+
+  /** Thigh (this.j1) and shin (this.j2) of a leg: the thigh's soft curve takes 0.22 of the knee. */
+  private legChain(P: THREE.Matrix4, hipX: number, hip: number, yaw: number, out: number, knee: number, leg: number): void {
+    this.chain(this.j1, P, hipX, -0.03, 0, -hip, yaw, out);
+    const soft = knee * 0.22;
+    this.chainX(this.j2, this.j1, 0, 0, 0, soft);
+    this.chainX(this.j2, this.j2, 0, -THIGH * leg, 0, knee - soft);
   }
 
   /** local = T(x,y,z) * Ry * Rx * Rz ; out = parent * local */
@@ -871,13 +952,16 @@ export class PlayersView {
     return out.multiplyMatrices(parent, this.loc);
   }
 
+  /** Instance `index` of a part = m * scale(sx, sy, sz), written straight into the buffer. */
   private put(name: PartName, index: number, m: THREE.Matrix4, sx = 1, sy = 1, sz = 1): void {
-    if (sx !== 1 || sy !== 1 || sz !== 1) {
-      this.sm.makeScale(sx, sy, sz);
-      this.sm.premultiply(m);
-      this.parts[name].mesh.setMatrixAt(index, this.sm);
-    } else {
-      this.parts[name].mesh.setMatrixAt(index, m);
+    const a = this.parts[name].mesh.instanceMatrix.array as Float32Array;
+    const e = m.elements;
+    const o = index * 16;
+    for (let i = 0; i < 4; i++) {
+      a[o + i] = e[i] * sx;
+      a[o + 4 + i] = e[4 + i] * sy;
+      a[o + 8 + i] = e[8 + i] * sz;
+      a[o + 12 + i] = e[12 + i];
     }
   }
 
@@ -927,6 +1011,8 @@ export class PlayersView {
     const toe = this.parts.boot.mesh.geometry.getAttribute('aToe') as THREE.InstancedBufferAttribute;
     const off = this.officials;
     if (this.list[0] !== match.players[0]) this.applyColors(match);
+    this.cull();
+    const floodOn = this.flood.visible;
     for (const p of this.list) {
       const x = lerp(p.prevPos.x, p.pos.x, alpha);
       const z = lerp(p.prevPos.z, p.pos.z, alpha);
@@ -1174,16 +1260,20 @@ export class PlayersView {
             smoothstep(0.75, 1, vol) * Math.sin(Math.PI * smoothstep(0.7, 1, u) * (1 - v * 0.6)) * 0.14;
           if (hop > 0) pKnee += hop * 2.5; // tucks as he leaves the ground
 
-          const apply = (gHip: number, gKnee: number, h: number, k: number) => [lerp(gHip, h, inK * (1 - outK)), lerp(gKnee, k, inK * (1 - outK))];
+          const kk = inK * (1 - outK);
           if (right) {
-            [hipR, kneeR] = apply(hipR, kneeR, kHip, kKnee);
-            [hipL, kneeL] = apply(hipL, kneeL, pHip, pKnee);
+            hipR = lerp(hipR, kHip, kk);
+            kneeR = lerp(kneeR, kKnee, kk);
+            hipL = lerp(hipL, pHip, kk);
+            kneeL = lerp(kneeL, pKnee, kk);
             ankleR = kAnkle;
             legYawR = (open + across) * inK;
             legOutR = lerp(legOutR, kOut + kOutVol, inK * (1 - outK));
           } else {
-            [hipL, kneeL] = apply(hipL, kneeL, kHip, kKnee);
-            [hipR, kneeR] = apply(hipR, kneeR, pHip, pKnee);
+            hipL = lerp(hipL, kHip, kk);
+            kneeL = lerp(kneeL, kKnee, kk);
+            hipR = lerp(hipR, pHip, kk);
+            kneeR = lerp(kneeR, pKnee, kk);
             ankleL = kAnkle;
             legYawL = (open + across) * inK;
             legOutL = lerp(legOutL, kOut + kOutVol, inK * (1 - outK));
@@ -1918,7 +2008,14 @@ export class PlayersView {
         this.headYaw[id] *= Math.exp(-dt * 8);
       }
 
-      // ---------------- skeleton
+      // ---------------- skeleton (only for players in view)
+      const j = this.slot[id];
+      if (j < 0) {
+        // Off screen: the feet re-plant cleanly when he comes back into view.
+        this.inStance[id * 2] = this.inStance[id * 2 + 1] = 0;
+        this.footW[id * 2] = this.footW[id * 2 + 1] = 0;
+        continue;
+      }
       const R = this.root;
       this.e.set(0, Math.PI / 2 - facing - yawExtra, 0, 'YXZ');
       R.makeRotationFromEuler(this.e);
@@ -1931,14 +2028,14 @@ export class PlayersView {
       this.chain(R, R, 0, lift, 0, leanF, 0, leanS + roll);
 
       const P = this.chain(this.pelvis, R, 0, hipY, 0, 0, pelvisYaw, pelvisRoll);
-      this.put('pelvis', id, P, bs.torsoW, 1, bs.torsoD);
+      this.put('pelvis', j, P, bs.torsoW, 1, bs.torsoD);
       // Torso mesh sits at the waist unrotated; the shader bends it through the spine.
-      const T = this.chain(this.j3, P, 0, 0.04, 0, 0, 0, 0);
-      this.put('torso', id, T, bs.torsoW, bs.torsoL, bs.torsoD);
+      const T = this.chainT(this.j3, P, 0, 0.04, 0);
+      this.put('torso', j, T, bs.torsoW, bs.torsoL, bs.torsoD);
       const flex = spineFlex + 0.04;
       const tw = twist - pelvisYaw;
       const side = spineSide - pelvisRoll;
-      bend.setXYZ(id, flex, tw, side);
+      bend.setXYZ(j, flex, tw, side);
       const C = this.chain(this.chest, T, 0, 0, 0, flex, tw, side);
       // Neck and head: level gaze (counter the body's pitch and roll), turned toward the
       // ball, lagging the body a touch. The neck takes part of every turn and nod, so the
@@ -1948,20 +2045,15 @@ export class PlayersView {
       const hP = headPitch + headLevel;
       const hY = this.headYaw[id];
       const N = this.chain(this.neck, C, 0, 0.58 * bs.torsoL, 0, hP * 0.4, hY * 0.3, headRoll * 0.4);
-      this.put('neck', id, N, bs.neck, bs.neckLen, bs.neck);
+      this.put('neck', j, N, bs.neck, bs.neckLen, bs.neck);
       const top = 0.075 * bs.neckLen;
       this.chain(this.j1, N, 0, top, 0, hP * 0.6, hY * 0.7, headRoll * 0.6);
-      this.chain(this.j1, this.j1, 0, 0.02 * bs.torsoL + (bs.neckLen - 1) * 0.08 - top, 0, 0, 0, 0);
-      this.put('head', id, this.j1);
+      this.chainT(this.j1, this.j1, 0, 0.02 * bs.torsoL + (bs.neckLen - 1) * 0.08 - top, 0);
+      this.put('head', j, this.j1);
       const style = p.look.hairStyle;
-      const parts = this.parts;
-      parts.hairShort.mesh.setMatrixAt(id, this.hidden);
-      parts.hairCurly.mesh.setMatrixAt(id, this.hidden);
-      parts.hairBun.mesh.setMatrixAt(id, this.hidden);
-      if (style === 0) this.put('hairShort', id, this.j1);
-      else if (style === 1) this.put('hairShort', id, this.j1, 0.985, 0.95, 0.985);
-      else if (style === 2) this.put('hairCurly', id, this.j1);
-      else this.put('hairBun', id, this.j1);
+      const hs = this.hairSlot[id];
+      if (style === 1) this.put('hairShort', hs, this.j1, 0.985, 0.95, 0.985);
+      else this.put(HAIR_OF_STYLE[style] ?? 'hairBun', hs, this.j1);
 
       // Arms (left = +x local; swing + = forward). The shoulder itself moves: forward and
       // back with the arm, up and a little in as the arm rises above the shoulder.
@@ -1974,17 +2066,14 @@ export class PlayersView {
         const elev = smoothstep(1.1, 2.9, raise);
         const protract = 0.028 * Math.sin(clamp(swing, -1.5, 1.5)) * (1 - 0.5 * elev);
         this.chain(this.j1, C, sideSign * (0.198 * bs.shoulder - 0.014 * elev), 0.5 * bs.torsoL + 0.045 * elev, protract, -swing, 0, sideSign * out);
-        this.put('upperArm', id * 2 + sd, this.j1, bs.arm, bs.armLen, bs.arm);
+        this.put('upperArm', j * 2 + sd, this.j1, bs.arm, bs.armLen, bs.arm);
         this.chain(this.j2, this.j1, 0, -0.29 * bs.armLen, 0, -elbow, sideSign * (sd === 0 ? armRotL : armRotR), 0);
-        this.put('forearm', id * 2 + sd, this.j2, 0.5 + 0.5 * bs.arm, bs.armLen, 0.5 + 0.5 * bs.arm);
+        this.put('forearm', j * 2 + sd, this.j2, 0.5 + 0.5 * bs.arm, bs.armLen, 0.5 + 0.5 * bs.arm);
         // Hand at the wrist, relaxed with the palm toward the body; keeper gloves are bigger.
         this.chain(this.j3, this.j2, 0, -0.245 * bs.armLen, 0, 0.1, 0, sideSign * -0.08);
         const g = p.role === 'GK' ? 1.25 : 1;
-        this.put('hand', id * 2 + sd, this.j3, g, g, g);
-        if (sd === 1) {
-          if (off && off.lines.includes(p)) this.chain(this.sm, this.j3, 0, -0.08, 0.02, 0, 0, 0), this.parts.flag.mesh.setMatrixAt(id, this.sm);
-          else this.parts.flag.mesh.setMatrixAt(id, this.hidden);
-        }
+        this.put('hand', j * 2 + sd, this.j3, g, g, g);
+        if (sd === 1 && this.flagSlot[id] >= 0) this.put('flag', this.flagSlot[id], this.chainT(this.sm, this.j3, 0, -0.08, 0.02));
       }
 
       // Legs: the thigh curves into a soft knee (shader bend), the shin takes the rest.
@@ -2006,6 +2095,7 @@ export class PlayersView {
       for (let sd = 0; sd < 2; sd++) {
         const sideSign = sd === 0 ? 1 : -1;
         const fi = id * 2 + sd;
+        const fj = j * 2 + sd;
         let hip = sd === 0 ? hipL : hipR;
         let knee = sd === 0 ? kneeL : kneeR;
         let out = sd === 0 ? legOutL : legOutR;
@@ -2051,11 +2141,12 @@ export class PlayersView {
             out = lerp(out, this.ikOut, w);
           } else if (stance) this.inStance[fi] = 2; // out of reach (pushed off it): pick the foot up
         }
+        // j1/j2 already hold this leg (the floor check posed it and it stands).
+        let posed = false;
         if (upright && w < 0.999) {
           // Never through the grass: an action's foot that would go below it stands on it.
-          this.chain(this.j1, P, hipX, -0.03, 0, -hip, yaw, sideSign * out);
-          this.chain(this.j2, this.j1, 0, 0, 0, knee * 0.22, 0, 0);
-          this.chain(this.j2, this.j2, 0, -THIGH * bs.leg, 0, knee * 0.78, 0, 0);
+          this.legChain(P, hipX, hip, yaw, sideSign * out, knee, bs.leg);
+          posed = true;
           this.tv.set(0, -SHIN * bs.leg, 0).applyMatrix4(this.j2);
           const floor = 0.07 * sc;
           if (this.tv.y < floor) {
@@ -2064,27 +2155,24 @@ export class PlayersView {
               hip = this.ikH;
               knee = this.ikK;
               out = this.ikOut;
+              posed = false;
             }
           }
         }
-
-        this.chain(this.j1, P, hipX, -0.03, 0, -hip, yaw, sideSign * out);
-        this.put('shortsLeg', fi, this.j1, bs.thigh, 1, bs.thigh);
-        this.put('thigh', fi, this.j1, bs.thigh, bs.leg, bs.thigh);
-        const soft = knee * 0.22;
-        kneeBend.setXYZ(fi, soft, 0, 0);
-        this.chain(this.j2, this.j1, 0, 0, 0, soft, 0, 0);
-        this.chain(this.j2, this.j2, 0, -THIGH * bs.leg, 0, knee - soft, 0, 0);
-        this.put('shin', fi, this.j2, bs.calf, bs.leg, bs.calf);
+        if (!posed) this.legChain(P, hipX, hip, yaw, sideSign * out, knee, bs.leg);
+        this.put('shortsLeg', fj, this.j1, bs.thigh, 1, bs.thigh);
+        this.put('thigh', fj, this.j1, bs.thigh, bs.leg, bs.thigh);
+        kneeBend.setXYZ(fj, knee * 0.22, 0, 0);
+        this.put('shin', fj, this.j2, bs.calf, bs.leg, bs.calf);
         // Ankle (+ = toes down). Free: roughly level with the ground, with the stride's
         // trail and cock-up; planted: flat on the grass (or rolled up onto the toe).
         const extra = sd === 0 ? ankleL : ankleR;
         const freeA = clamp(hip - knee, -1.2, 0.6) - 0.35 * smoothstep(0.6, 1.0, knee) + (trail - toesUp) * ik - extra;
         const flatA = hip - knee - leanF + heelUp - toesUp;
         const ankle = lerp(freeA, flatA, w);
-        this.chain(this.j3, this.j2, 0, -SHIN * bs.leg, 0, ankle, 0, 0);
-        this.put('boot', fi, this.j3);
-        toe.setX(fi, heelUp * w + 0.25 * trail * ik);
+        this.chainX(this.j3, this.j2, 0, -SHIN * bs.leg, 0, ankle);
+        this.put('boot', fj, this.j3);
+        toe.setX(fj, heelUp * w + 0.25 * trail * ik);
       }
 
       // Contact shadow.
@@ -2093,10 +2181,10 @@ export class PlayersView {
       const lying = p.action === 'slide' || p.action === 'dive' ? 1.5 : 1;
       this.s.set(0.8 * lying, 1, 0.8 * lying);
       this.sm.compose(this.v, this.q, this.s);
-      this.contact.setMatrixAt(id, this.sm);
+      this.contact.setMatrixAt(j, this.sm);
 
       // Floodlight shadows: one faint, long shadow away from each pylon.
-      for (let k = 0; k < PYLONS.length; k++) {
+      for (let k = 0; floodOn && k < PYLONS.length; k++) {
         let dx = x - PYLONS[k][0];
         let dz = z - PYLONS[k][1];
         const d = Math.hypot(dx, dz);
@@ -2107,17 +2195,9 @@ export class PlayersView {
         this.v.set(x + dx * len * 0.5, 0.011 + k * 0.0005, z + dz * len * 0.5);
         this.s.set(0.75 * lying, 1, len);
         this.sm.compose(this.v, this.q, this.s);
-        this.flood.setMatrixAt(id * PYLONS.length + k, this.sm);
+        this.flood.setMatrixAt(j * PYLONS.length + k, this.sm);
       }
     }
-    bend.needsUpdate = true;
-    kneeBend.needsUpdate = true;
-    toe.needsUpdate = true;
-
-    this.cull();
-    for (const name of Object.keys(this.parts) as PartName[]) this.parts[name].mesh.instanceMatrix.needsUpdate = true;
-    this.contact.instanceMatrix.needsUpdate = true;
-    this.flood.instanceMatrix.needsUpdate = true;
 
     // Controlled player ring + marker.
     const c = match.controlled;

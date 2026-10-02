@@ -15,46 +15,48 @@ export class Minimap {
   private el = document.createElement('div');
   private cv = document.createElement('canvas');
   private g = this.cv.getContext('2d')!;
+  /** The pitch and its markings, drawn once per size. */
+  private bg = document.createElement('canvas');
   private W = 0;
   private H = 0;
   private dpr = Math.min(2, window.devicePixelRatio || 1);
   private lastDraw = 0;
+  /** Measure again before the next draw (reading the layout every draw forces a reflow). */
+  private dirty = true;
 
   constructor(parent: HTMLElement) {
     this.el.className = 'minimap';
     this.el.appendChild(this.cv);
     parent.appendChild(this.el);
+    window.addEventListener('resize', () => (this.dirty = true));
   }
 
   setVisible(v: boolean): void {
     this.el.style.display = v ? '' : 'none';
+    this.dirty = true;
   }
 
   private size(): void {
+    this.dirty = false;
+    this.dpr = Math.min(2, window.devicePixelRatio || 1);
     const w = Math.round(this.el.clientWidth);
     const h = Math.round((w * PITCH.width) / PITCH.length);
     if (w === this.W && h === this.H) return;
     this.W = w;
     this.H = h;
-    this.cv.width = Math.round(w * this.dpr);
-    this.cv.height = Math.round(h * this.dpr);
+    this.cv.width = this.bg.width = Math.round(w * this.dpr);
+    this.cv.height = this.bg.height = Math.round(h * this.dpr);
     this.cv.style.height = `${h}px`;
+    if (w) this.drawPitch();
   }
 
-  update(m: Match, now: number): void {
-    if (now - this.lastDraw < 1 / 30) return;
-    this.lastDraw = now;
-    this.size();
-    const { W, H, g } = this;
-    if (!W) return;
+  private drawPitch(): void {
+    const { W, H } = this;
+    const g = this.bg.getContext('2d')!;
     g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     g.clearRect(0, 0, W, H);
     const sx = W / PITCH.length;
     const sz = H / PITCH.width;
-    const px = (x: number) => (x + PITCH.halfL) * sx;
-    const pz = (z: number) => (z + PITCH.halfW) * sz;
-
-    // Pitch and markings.
     g.fillStyle = 'rgba(28, 74, 40, 0.72)';
     g.fillRect(0, 0, W, H);
     g.strokeStyle = 'rgba(244, 239, 227, 0.55)';
@@ -71,18 +73,40 @@ export class Minimap {
     const boxH = PITCH.boxHalfWidth * 2 * sz;
     g.strokeRect(0.5, (H - boxH) / 2, boxW, boxH);
     g.strokeRect(W - boxW - 0.5, (H - boxH) / 2, boxW, boxH);
+  }
 
-    // Players: the opponents first, so your team draws on top.
+  update(m: Match, now: number): void {
+    if (now - this.lastDraw < 1 / 30) return;
+    this.lastDraw = now;
+    if (this.dirty) this.size();
+    const { W, H, g } = this;
+    if (!W) return;
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, this.cv.width, this.cv.height);
+    g.drawImage(this.bg, 0, 0);
+    g.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    const sx = W / PITCH.length;
+    const sz = H / PITCH.width;
+    const px = (x: number) => (x + PITCH.halfL) * sx;
+    const pz = (z: number) => (z + PITCH.halfW) * sz;
+
+    // Players: the opponents first, so your team draws on top. One path per shirt colour.
     const r = Math.max(2.2, W / 64);
+    g.lineWidth = 1;
     for (const t of [1 - m.humanTeam, m.humanTeam]) {
       const kit = m.teams[t].info.kit;
-      for (const p of m.teams[t].players) {
-        const c = p.role === 'GK' ? kit.gkShirt : kit.shirt;
+      for (const gk of [false, true]) {
+        const c = gk ? kit.gkShirt : kit.shirt;
         g.fillStyle = hex(c);
         g.strokeStyle = lum(c) > 150 ? 'rgba(10, 12, 20, 0.85)' : 'rgba(244, 239, 227, 0.8)';
-        g.lineWidth = 1;
         g.beginPath();
-        g.arc(px(p.pos.x), pz(p.pos.z), r, 0, Math.PI * 2);
+        for (const p of m.teams[t].players) {
+          if ((p.role === 'GK') !== gk) continue;
+          const x = px(p.pos.x);
+          const y = pz(p.pos.z);
+          g.moveTo(x + r, y);
+          g.arc(x, y, r, 0, Math.PI * 2);
+        }
         g.fill();
         g.stroke();
       }

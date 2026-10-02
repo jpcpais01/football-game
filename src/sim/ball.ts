@@ -29,6 +29,10 @@ export class Ball {
   events: BallEvents = { bounce: 0, post: 0, net: 0, netX: 0, netY: 0, netZ: 0 };
 
   private tmp = new V3();
+  /** Spin decay factors in the air and on the grass, for the last dt (it's only ever DT or 2 DT). */
+  private eDt = -1;
+  private eSpin = 0;
+  private eGrass = 0;
 
   reset(x: number, z: number): void {
     this.pos.set(x, R, z);
@@ -87,8 +91,8 @@ export class Ball {
 
     if (!this.onGround) {
       v.y -= GRAVITY * dt;
-      const decay = Math.exp(-dt / BALL.spinDecay);
-      w.scale(decay);
+      this.decayFor(dt);
+      w.scale(this.eSpin);
     }
 
     // Near the goal frame, move in small sub-steps so a fast ball can't tunnel
@@ -146,7 +150,8 @@ export class Ball {
         w.x = v.z / R;
       }
       // Grass kills vertical-axis spin quickly.
-      w.y *= Math.exp(-dt / 0.6);
+      this.decayFor(dt);
+      w.y *= this.eGrass;
       if (Math.abs(v.x) + Math.abs(v.z) < 0.02) {
         v.x = 0;
         v.z = 0;
@@ -157,38 +162,48 @@ export class Ball {
     this.collideSurrounds();
   }
 
+  private decayFor(dt: number): void {
+    if (dt === this.eDt) return;
+    this.eDt = dt;
+    this.eSpin = Math.exp(-dt / BALL.spinDecay);
+    this.eGrass = Math.exp(-dt / 0.6);
+  }
+
+  /** One wall (along `axis` at ±limit, `height` tall): bounce the ball back off it with restitution e. */
+  private hit(axis: 'x' | 'z', limit: number, height: number, e: number): void {
+    const p = this.pos;
+    const v = this.vel;
+    const c = axis === 'x' ? p.x : p.z;
+    const vc = axis === 'x' ? v.x : v.z;
+    if (Math.abs(c) > limit - R && p.y < height + R && Math.sign(vc) === Math.sign(c)) {
+      const back = Math.sign(c) * (limit - R);
+      if (axis === 'x') {
+        p.x = back;
+        v.x = -v.x * e;
+        v.z *= 0.75;
+      } else {
+        p.z = back;
+        v.z = -v.z * e;
+        v.x *= 0.75;
+      }
+      v.y *= 0.7;
+      this.spin.scale(0.4);
+      this.events.bounce = Math.max(this.events.bounce, Math.abs(vc) * 0.5);
+    }
+  }
+
   /**
    * Ad boards round the pitch and the front walls of the stands, so a ball that goes out
    * thuds into them and drops instead of flying away. (Matches the rendered stadium.)
    */
   private collideSurrounds(): void {
     const p = this.pos;
-    const v = this.vel;
-    const hit = (axis: 'x' | 'z', limit: number, height: number, e: number) => {
-      const c = axis === 'x' ? p.x : p.z;
-      const vc = axis === 'x' ? v.x : v.z;
-      if (Math.abs(c) > limit - R && p.y < height + R && Math.sign(vc) === Math.sign(c)) {
-        const back = Math.sign(c) * (limit - R);
-        if (axis === 'x') {
-          p.x = back;
-          v.x = -v.x * e;
-          v.z *= 0.75;
-        } else {
-          p.z = back;
-          v.z = -v.z * e;
-          v.x *= 0.75;
-        }
-        v.y *= 0.7;
-        this.spin.scale(0.4);
-        this.events.bounce = Math.max(this.events.bounce, Math.abs(vc) * 0.5);
-      }
-    };
     // Boards along the touchlines and beside the goals (open behind the goal mouth).
-    hit('z', PITCH.halfW + 3.8, 0.9, 0.35);
-    if (Math.abs(p.z) > PITCH.goalHalfWidth + 3.5) hit('x', PITCH.halfL + 4.5, 0.9, 0.35);
+    this.hit('z', PITCH.halfW + 3.8, 0.9, 0.35);
+    if (Math.abs(p.z) > PITCH.goalHalfWidth + 3.5) this.hit('x', PITCH.halfL + 4.5, 0.9, 0.35);
     // Stand walls behind them.
-    hit('z', PITCH.halfW + 7.5, 1.6, 0.3);
-    hit('x', PITCH.halfL + 8.5, 1.4, 0.3);
+    this.hit('z', PITCH.halfW + 7.5, 1.6, 0.3);
+    this.hit('x', PITCH.halfL + 8.5, 1.4, 0.3);
   }
 
   /** Friction impulse at the contact point, capped by maxImpulse (N·s). */

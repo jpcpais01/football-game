@@ -62,6 +62,7 @@ float cNoise(vec2 p) {
 }
 /** Soft shadows of clouds drifting over the ground with the wind (0 = clear, 1 = shaded). */
 float cloudShadow(vec3 wp) {
+  if (uClouds <= 0.0) return 0.0; // clear sky (rain, dusk): skip the noise
   vec2 q = wp.xz * 0.016 - uWind * uTimeC * 0.012;
   float n = cNoise(q) * 0.65 + cNoise(q * 2.3 + 7.1) * 0.35;
   return smoothstep(0.5, 0.72, n) * uClouds;

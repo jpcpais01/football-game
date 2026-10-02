@@ -1210,10 +1210,12 @@ export class Match {
     const minD = PLAYER.radius * 2;
     for (let i = 0; i < ps.length; i++) {
       const a = ps[i];
+      const ap = a.pos;
       for (let j = i + 1; j < ps.length; j++) {
         const b = ps[j];
-        const dx = b.pos.x - a.pos.x;
-        const dz = b.pos.z - a.pos.z;
+        const dx = b.pos.x - ap.x;
+        if (dx >= minD || dx <= -minD) continue;
+        const dz = b.pos.z - ap.z;
         const d2 = dx * dx + dz * dz;
         if (d2 >= minD * minD || d2 < 1e-8) continue;
         const d = Math.sqrt(d2);

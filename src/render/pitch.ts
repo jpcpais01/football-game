@@ -24,6 +24,42 @@ float vnoise(vec2 p) {
 float fbm(vec2 p) { return vnoise(p) * 0.6 + vnoise(p * 2.13) * 0.28 + vnoise(p * 4.7) * 0.12; }
 `;
 
+/** Distance (m) to the nearest chalk line: baked once into a texture (see bakeNoise). */
+const LINES_GLSL = /* glsl */ `
+const float HL = ${PITCH.halfL.toFixed(2)};
+const float HW = ${PITCH.halfW.toFixed(2)};
+float segDist(vec2 p, vec2 a, vec2 b) {
+  vec2 pa = p - a, ba = b - a;
+  float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+  return length(pa - ba * h);
+}
+float rectDist(vec2 p, vec2 mn, vec2 mx) {
+  float d = segDist(p, vec2(mn.x, mn.y), vec2(mx.x, mn.y));
+  d = min(d, segDist(p, vec2(mx.x, mn.y), vec2(mx.x, mx.y)));
+  d = min(d, segDist(p, vec2(mx.x, mx.y), vec2(mn.x, mx.y)));
+  d = min(d, segDist(p, vec2(mn.x, mx.y), vec2(mn.x, mn.y)));
+  return d;
+}
+float linesDist(vec2 p) {
+  vec2 q = vec2(abs(p.x), p.y);
+  float d = rectDist(p, vec2(-HL, -HW), vec2(HL, HW));
+  d = min(d, abs(p.x) + step(HW, abs(p.y)) * 1e3);
+  d = min(d, abs(length(p) - ${PITCH.circleRadius.toFixed(2)}));
+  d = min(d, max(length(p) - 0.22, 0.0));
+  d = min(d, rectDist(q, vec2(HL - ${PITCH.boxDepth.toFixed(2)}, -${PITCH.boxHalfWidth.toFixed(2)}), vec2(HL, ${PITCH.boxHalfWidth.toFixed(2)})));
+  d = min(d, rectDist(q, vec2(HL - ${PITCH.sixDepth.toFixed(2)}, -${PITCH.sixHalfWidth.toFixed(2)}), vec2(HL, ${PITCH.sixHalfWidth.toFixed(2)})));
+  vec2 spot = vec2(HL - ${PITCH.penaltySpot.toFixed(2)}, 0.0);
+  d = min(d, max(length(q - spot) - 0.2, 0.0));
+  float arc = abs(length(q - spot) - ${PITCH.circleRadius.toFixed(2)});
+  arc += step(HL - ${PITCH.boxDepth.toFixed(2)}, q.x) * 1e3;
+  d = min(d, arc);
+  vec2 c = vec2(abs(p.x), abs(p.y)) - vec2(HL, HW);
+  float ca = abs(length(c) - 1.0) + step(0.0, c.x) * 1e3 + step(0.0, c.y) * 1e3;
+  d = min(d, ca);
+  return d;
+}
+`;
+
 /**
  * The grass's noise never changes, so it's computed once on the GPU (the same functions,
  * the same values) into two textures, instead of ~14 value-noise lookups per pixel every
@@ -32,9 +68,14 @@ float fbm(vec2 p) { return vnoise(p) * 0.6 + vnoise(p * 2.13) * 0.28 + vnoise(p 
  *  fine:   r = patchiness fbm(p*0.08), g = grain vnoise(p*7), b = wear fbm(p*0.6), a = chalk vnoise(p*3)
  *  coarse: r = wind fbm(p*0.045),      g = wet vnoise(p*0.5)
  */
-function bakeNoise(renderer: THREE.WebGLRenderer): { fine: THREE.Texture; coarse: THREE.Texture } {
-  const bake = (w: number, h: number, body: string) => {
-    const rt = new THREE.WebGLRenderTarget(w, h, { generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false });
+function bakeNoise(renderer: THREE.WebGLRenderer): { fine: THREE.Texture; coarse: THREE.Texture; lines: THREE.Texture } {
+  const bake = (w: number, h: number, body: string, mips = true) => {
+    const rt = new THREE.WebGLRenderTarget(w, h, {
+      generateMipmaps: mips,
+      minFilter: mips ? THREE.LinearMipmapLinearFilter : THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
+      depthBuffer: false,
+    });
     rt.texture.wrapS = rt.texture.wrapT = THREE.ClampToEdgeWrapping;
     rt.texture.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
     const mat = new THREE.ShaderMaterial({
@@ -42,6 +83,7 @@ function bakeNoise(renderer: THREE.WebGLRenderer): { fine: THREE.Texture; coarse
       depthWrite: false,
       vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
       fragmentShader: `${NOISE_GLSL}
+        ${LINES_GLSL}
         varying vec2 vUv;
         void main() {
           // Same world position the pitch shader will look it up at.
@@ -64,6 +106,9 @@ function bakeNoise(renderer: THREE.WebGLRenderer): { fine: THREE.Texture; coarse
   return {
     fine: bake(2048, 1024, 'gl_FragColor = vec4(fbm(p * 0.08), vnoise(p * 7.0), fbm(p * 0.6), vnoise(p * 3.0));'),
     coarse: bake(512, 256, 'gl_FragColor = vec4(fbm(p * 0.045), vnoise(p * 0.5), 0.0, 1.0);'),
+    // The chalk lines as a distance field (metres, up to 1): ~13 segment and arc distances
+    // per pixel every frame become one texture read. A texel is 6 cm; the lines are 12 cm.
+    lines: bake(2048, 1024, 'gl_FragColor = vec4(min(linesDist(p), 1.0), 0.0, 0.0, 1.0);', false),
   };
 }
 
@@ -75,7 +120,7 @@ export function createPitch(renderer: THREE.WebGLRenderer, marks: THREE.Texture)
 
   const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.92, metalness: 0 });
   mat.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, SHARED, { uTimeC: SHARED.uTime, uNoiseFine: { value: noise.fine }, uNoiseCoarse: { value: noise.coarse }, uMarks: { value: marks } });
+    Object.assign(shader.uniforms, SHARED, { uTimeC: SHARED.uTime, uNoiseFine: { value: noise.fine }, uNoiseCoarse: { value: noise.coarse }, uLines: { value: noise.lines }, uMarks: { value: marks } });
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vGrassWorld;')
       .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvGrassWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;');
@@ -96,37 +141,8 @@ export function createPitch(renderer: THREE.WebGLRenderer, marks: THREE.Texture)
         const float HW = ${PITCH.halfW.toFixed(2)};
         uniform sampler2D uNoiseFine;
         uniform sampler2D uNoiseCoarse;
+        uniform sampler2D uLines;
         uniform sampler2D uMarks;
-        float segDist(vec2 p, vec2 a, vec2 b) {
-          vec2 pa = p - a, ba = b - a;
-          float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
-          return length(pa - ba * h);
-        }
-        float rectDist(vec2 p, vec2 mn, vec2 mx) {
-          float d = segDist(p, vec2(mn.x, mn.y), vec2(mx.x, mn.y));
-          d = min(d, segDist(p, vec2(mx.x, mn.y), vec2(mx.x, mx.y)));
-          d = min(d, segDist(p, vec2(mx.x, mx.y), vec2(mn.x, mx.y)));
-          d = min(d, segDist(p, vec2(mn.x, mx.y), vec2(mn.x, mn.y)));
-          return d;
-        }
-        float linesDist(vec2 p) {
-          vec2 q = vec2(abs(p.x), p.y);
-          float d = rectDist(p, vec2(-HL, -HW), vec2(HL, HW));
-          d = min(d, abs(p.x) + step(HW, abs(p.y)) * 1e3);
-          d = min(d, abs(length(p) - ${PITCH.circleRadius.toFixed(2)}));
-          d = min(d, max(length(p) - 0.22, 0.0));
-          d = min(d, rectDist(q, vec2(HL - ${PITCH.boxDepth.toFixed(2)}, -${PITCH.boxHalfWidth.toFixed(2)}), vec2(HL, ${PITCH.boxHalfWidth.toFixed(2)})));
-          d = min(d, rectDist(q, vec2(HL - ${PITCH.sixDepth.toFixed(2)}, -${PITCH.sixHalfWidth.toFixed(2)}), vec2(HL, ${PITCH.sixHalfWidth.toFixed(2)})));
-          vec2 spot = vec2(HL - ${PITCH.penaltySpot.toFixed(2)}, 0.0);
-          d = min(d, max(length(q - spot) - 0.2, 0.0));
-          float arc = abs(length(q - spot) - ${PITCH.circleRadius.toFixed(2)});
-          arc += step(HL - ${PITCH.boxDepth.toFixed(2)}, q.x) * 1e3;
-          d = min(d, arc);
-          vec2 c = vec2(abs(p.x), abs(p.y)) - vec2(HL, HW);
-          float ca = abs(length(c) - 1.0) + step(0.0, c.x) * 1e3 + step(0.0, c.y) * 1e3;
-          d = min(d, ca);
-          return d;
-        }
         float gLine;
         float gWet;
         vec3 grass(vec2 p, vec3 viewDir) {
@@ -168,7 +184,7 @@ export function createPitch(renderer: THREE.WebGLRenderer, marks: THREE.Texture)
           vec3 soil = mix(vec3(0.27, 0.2, 0.13), vec3(0.42, 0.33, 0.22), nf.g);
           col = mix(col, soil, mk.r);
           // Chalk.
-          float d = linesDist(p);
+          float d = texture2D(uLines, nuv).r;
           float aa = fwidth(d) * 0.8 + 0.01;
           gLine = (1.0 - smoothstep(0.06 - aa, 0.06 + aa, d)) * (1.0 - mk.r * 0.85);
           col = mix(col, vec3(0.92, 0.92, 0.88) * (0.94 + nf.a * 0.06), gLine * 0.9);

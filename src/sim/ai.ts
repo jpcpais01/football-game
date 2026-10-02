@@ -148,6 +148,7 @@ export class AI {
   private mark: (Player | null)[] = [];
   private markAt = [0, 0];
   private offBallT: number[] = [];
+  private offK: number[] = [];
 
   constructor(private m: Match) {
     for (let i = 0; i < 22; i++) {
@@ -204,8 +205,14 @@ export class AI {
     // Along his sprint curve from a standstill: start where his speed already is.
     const c = this.sprintCurve(q);
     const n = c.v.length;
+    // The last point of the curve at or below his speed (c.v only rises): binary search.
     let k0 = 0;
-    while (k0 < n - 1 && c.v[k0 + 1] <= v) k0++;
+    let top = n - 1;
+    while (k0 < top) {
+      const mid = (k0 + top + 1) >> 1;
+      if (c.v[mid] <= v) k0 = mid;
+      else top = mid - 1;
+    }
     const s0 = c.s[k0];
     const goal = s0 + d;
     const last = n - 1;
@@ -630,9 +637,13 @@ export class AI {
     const top = q.topSpeed + 0.5;
     const px = q.pos.x;
     const pz = q.pos.z;
+    const gk = q.role === 'GK';
+    const head = q.headReach;
+    const R = PLAYER.reach + 0.15;
+    const RB = R + 0.01;
     for (let i = 0; i < n; i++) {
       const t = i * SAMPLE_DT;
-      if (ys[i] > this.playHeight(q, xs[i], zs[i])) continue;
+      if (ys[i] > (gk ? this.playHeight(q, xs[i], zs[i]) : head)) continue;
       // A ball going past within reach of where he stands is his without a step: check the
       // whole stretch it travels up to this sample, not just the sample (a hard pass covers
       // a couple of metres between two).
@@ -643,11 +654,17 @@ export class AI {
         const cz = pz + q.vel.z * tc;
         const ax = xs[i - 1];
         const az = zs[i - 1];
-        const vx = xs[i] - ax;
-        const vz = zs[i] - az;
-        const l2 = vx * vx + vz * vz;
-        const k = l2 > 1e-6 ? clamp(((cx - ax) * vx + (cz - az) * vz) / l2, 0, 1) : 0;
-        if (Math.hypot(cx - ax - vx * k, cz - az - vz * k) < PLAYER.reach + 0.15 && ys[i - 1] < 1) return i;
+        const bx = xs[i];
+        const bz = zs[i];
+        // (Out of the stretch's bounding box widened by the reach: it can't come near him.)
+        const near = cx > Math.min(ax, bx) - RB && cx < Math.max(ax, bx) + RB && cz > Math.min(az, bz) - RB && cz < Math.max(az, bz) + RB;
+        if (near) {
+          const vx = bx - ax;
+          const vz = bz - az;
+          const l2 = vx * vx + vz * vz;
+          const k = l2 > 1e-6 ? clamp(((cx - ax) * vx + (cz - az) * vz) / l2, 0, 1) : 0;
+          if (Math.hypot(cx - ax - vx * k, cz - az - vz * k) < R && ys[i - 1] < 1) return i;
+        }
       }
       const d = dist2D(px, pz, xs[i], zs[i]) - reach;
       if (react + d / top > t + 0.05) continue;
@@ -675,7 +692,12 @@ export class AI {
       if (t > tOpp - margin) break;
       if (Math.abs(xs[i]) > PITCH.halfL - 0.5 || Math.abs(zs[i]) > PITCH.halfW - 0.5) break;
       if (ys[i] > this.playHeight(q, xs[i], zs[i])) continue;
-      if (i > from && this.runTime(q, xs[i], zs[i], react, reach) > t) continue;
+      if (i > from) {
+        // Cheap bound first: runTime is never under react + distance / top speed.
+        const dd = dist2D(q.pos.x, q.pos.z, xs[i], zs[i]) - reach;
+        if (dd >= 0.3 && react + dd / (q.topSpeed + 0.5) > t + 0.05) continue;
+        if (this.runTime(q, xs[i], zs[i], react, reach) > t) continue;
+      }
       let v = xs[i] * dir * MEET_PROGRESS - t * MEET_WAIT - Math.max(0, MEET_CLOSE - (tOpp - t)) * MEET_CONTEST;
       if (Math.abs(t - prev) < 0.2) v += 0.6;
       if (v > bestV) {
@@ -943,8 +965,9 @@ export class AI {
       this.goalZ[p.id] = tz;
     }
     this.offBallT[p.id] = m.time;
-    const tau = 0.18 + (1 - tr.react) * 0.55;
-    const k = 1 - Math.exp(-DT / tau);
+    // The smoothing rate depends only on his reactions: worked out once.
+    let k = this.offK[p.id];
+    if (k === undefined) k = this.offK[p.id] = 1 - Math.exp(-DT / (0.18 + (1 - tr.react) * 0.55));
     const gx = (this.goalX[p.id] += (tx - this.goalX[p.id]) * k);
     const gz = (this.goalZ[p.id] += (tz - this.goalZ[p.id]) * k);
 
@@ -1077,8 +1100,11 @@ export class AI {
     }
   }
 
+  private spAt = [-1, -1];
+  private spBest: (Player | null)[] = [null, null];
   private isSecondPresser(p: Player): boolean {
     const m = this.m;
+    if (this.spAt[p.team] === m.time) return this.spBest[p.team] === p;
     const ch = this.chaser[p.team];
     let best: Player | null = null;
     let bd = 1e9;
@@ -1090,6 +1116,8 @@ export class AI {
         best = q;
       }
     }
+    this.spAt[p.team] = m.time;
+    this.spBest[p.team] = bd < 16 ? best : null;
     return best === p && bd < 16;
   }
 

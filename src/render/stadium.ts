@@ -303,6 +303,14 @@ interface CrowdOpts {
 }
 
 export function crowdMaterial(o: CrowdOpts): THREE.ShaderMaterial {
+  const mat = crowdShader(o);
+  // Drawn after the rest of the opaque scene: whatever stands in front (flags, banners,
+  // players, the roof) has already filled the depth buffer, so those crowd pixels are skipped.
+  mat.userData.crowd = true;
+  return mat;
+}
+
+function crowdShader(o: CrowdOpts): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     side: THREE.DoubleSide,
     uniforms: {
@@ -447,36 +455,43 @@ export function crowdMaterial(o: CrowdOpts): THREE.ShaderMaterial {
           float scarfUp = step(hash(cell + 5.5), max(max(max(ultra, awayEnd) * 0.75, uExcite * uExcite * 0.8), sing * 0.95)) * (1.0 - uChant.w * step(0.05, sing));
           float armsUp = max(max(scarfUp, ultra * step(0.6, beat) * step(0.5, hash(cell + 7.7))), uChant.w * step(0.05, sing) * step(hash(cell + 2.2) * 0.25, uChant.z + 0.3));
 
-          float h = hash(cell + 7.1);
-          vec3 club = mix(uA, uB, step(hash(cell * 0.37 + floor(cell.x / 14.0)), mix(mix(0.22, 0.95, awayEnd), 0.02, ultra)));
-          float clubShare = mix(0.55, 0.85, max(ultra, awayEnd));
-          vec3 shirt = h < clubShare ? club * (0.78 + 0.22 * hash(cell + 2.0))
-            : h < clubShare + 0.12 ? vec3(0.86, 0.84, 0.79)
-            : h < clubShare + 0.22 ? vec3(0.17, 0.18, 0.21)
-            : vec3(0.34, 0.38, 0.47);
-          vec3 skin = mix(vec3(0.93, 0.76, 0.6), vec3(0.42, 0.28, 0.18), hash(cell + 9.2));
-          vec3 hair = mix(vec3(0.08, 0.06, 0.05), vec3(0.45, 0.32, 0.18), hash(cell + 3.9) * hash(cell + 3.9));
-          vec3 legsCol = mix(vec3(0.12, 0.14, 0.2), vec3(0.3, 0.3, 0.32), hash(cell + 4.7));
-
-          float sh = 0.62 + 0.38 * smoothstep(0.0, 1.7, hy);
-          if (scarfUp > 0.5 && ax < 0.27 && y > 1.86 && y < 1.97) {
-            vec3 sc = mix(club, vec3(0.95, 0.93, 0.88), step(0.5, fract(x * 6.0 + 0.25)));
-            return vec4(sc * sh, 1.0);
-          }
+          // Which part of him (if any) the ray meets, first; he's only dressed when it's him
+          // (most rows are misses, through the gaps between heads).
           vec2 hq = vec2(x, (y - 1.6) * 0.92);
-          if (length(hq) < 0.105) {
-            gTorch = step(0.9965, hash(cell + floor(uTime * 3.0 + hash(cell) * 10.0)));
-            vec3 c = mix(skin, hair, step(0.04, hq.y) * step(0.3, hash(cell + 0.7)));
-            return vec4(c * sh * (1.0 - 0.25 * smoothstep(0.05, 0.105, ax)), 1.0);
-          }
-          if (armsUp > 0.5 ? (abs(ax - 0.21) < 0.045 && y > 1.32 && y < 1.92) : (abs(ax - 0.225) < 0.04 && y > 1.0 && y < 1.42)) {
-            float hand = armsUp > 0.5 ? step(1.84, y) : step(y, 1.07);
-            return vec4(mix(shirt * 0.85, skin, hand) * sh, 1.0);
-          }
-          if (y > 0.86 && y < 1.46 && ax < 0.2 - max(0.0, y - 1.38) * 1.3) {
+          float part = scarfUp > 0.5 && ax < 0.27 && y > 1.86 && y < 1.97 ? 1.0
+            : length(hq) < 0.105 ? 2.0
+            : (armsUp > 0.5 ? (abs(ax - 0.21) < 0.045 && y > 1.32 && y < 1.92) : (abs(ax - 0.225) < 0.04 && y > 1.0 && y < 1.42)) ? 3.0
+            : y > 0.86 && y < 1.46 && ax < 0.2 - max(0.0, y - 1.38) * 1.3 ? 4.0
+            : y > 0.0 && y < 0.88 && abs(ax - 0.075) < 0.068 ? 5.0
+            : 0.0;
+          if (part > 0.5) {
+            float sh = 0.62 + 0.38 * smoothstep(0.0, 1.7, hy);
+            if (part > 4.5) return vec4(mix(vec3(0.12, 0.14, 0.2), vec3(0.3, 0.3, 0.32), hash(cell + 4.7)) * sh, 1.0);
+            vec3 club = mix(uA, uB, step(hash(cell * 0.37 + floor(cell.x / 14.0)), mix(mix(0.22, 0.95, awayEnd), 0.02, ultra)));
+            if (part < 1.5) {
+              vec3 sc = mix(club, vec3(0.95, 0.93, 0.88), step(0.5, fract(x * 6.0 + 0.25)));
+              return vec4(sc * sh, 1.0);
+            }
+            vec3 skin = mix(vec3(0.93, 0.76, 0.6), vec3(0.42, 0.28, 0.18), hash(cell + 9.2));
+            if (part < 2.5) {
+              gTorch = step(0.9965, hash(cell + floor(uTime * 3.0 + hash(cell) * 10.0)));
+              float hh = hash(cell + 3.9);
+              vec3 hair = mix(vec3(0.08, 0.06, 0.05), vec3(0.45, 0.32, 0.18), hh * hh);
+              vec3 c = mix(skin, hair, step(0.04, hq.y) * step(0.3, hash(cell + 0.7)));
+              return vec4(c * sh * (1.0 - 0.25 * smoothstep(0.05, 0.105, ax)), 1.0);
+            }
+            float h = hash(cell + 7.1);
+            float clubShare = mix(0.55, 0.85, max(ultra, awayEnd));
+            vec3 shirt = h < clubShare ? club * (0.78 + 0.22 * hash(cell + 2.0))
+              : h < clubShare + 0.12 ? vec3(0.86, 0.84, 0.79)
+              : h < clubShare + 0.22 ? vec3(0.17, 0.18, 0.21)
+              : vec3(0.34, 0.38, 0.47);
+            if (part < 3.5) {
+              float hand = armsUp > 0.5 ? step(1.84, y) : step(y, 1.07);
+              return vec4(mix(shirt * 0.85, skin, hand) * sh, 1.0);
+            }
             return vec4(shirt * sh * (1.0 - 0.28 * smoothstep(0.09, 0.2, ax)), 1.0);
           }
-          if (y > 0.0 && y < 0.88 && abs(ax - 0.075) < 0.068) return vec4(legsCol * sh, 1.0);
         }
         // Seat backs (the ultras' end is a standing terrace: none); the club's name in white.
         if (ultra < 0.5 && hy < 0.46 && abs(fx) < gSeat.x * 0.44) {
@@ -2026,7 +2041,7 @@ export function createStadium(homeColor: number, awayColor: number, club: Stadiu
       const flood = updateShared(time, excitement, atmo, tifo, terraces);
       roofLight.color.setRGB(0.25 + flood * 1.4, 0.24 + flood * 1.35, 0.22 + flood * 1.2);
       // The beams are invisible until dusk: don't spend fill on them.
-      shafts.visible = flood > 0.02;
+      shafts.visible = flood > 0.2; // below this a beam adds well under one colour step
       glows.update(flood);
     },
   };

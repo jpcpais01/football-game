@@ -608,7 +608,7 @@ export function createOldGround(homeColor: number, awayColor: number, club: Stad
       const flood = updateShared(time, excitement, atmo, tifo, terraces);
       // The near stand here is low: its shadow reaches a third as far onto the pitch.
       SHARED.uShadowZ0.value = 43 - (49.5 - SHARED.uShadowZ0.value) * 0.3;
-      shafts.visible = flood > 0.02;
+      shafts.visible = flood > 0.2; // below this a beam adds well under one colour step
       glows.update(flood);
     },
   };

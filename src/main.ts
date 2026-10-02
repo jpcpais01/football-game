@@ -4,6 +4,7 @@ import './style.css';
 import * as THREE from 'three';
 import { DT, GOAL_SEQ, MATCH, PITCH } from './sim/constants';
 import { CELEBRATIONS, Match } from './sim/match';
+import { rollTimeAt } from './sim/kick';
 import { createPitch } from './render/pitch';
 import { TurfMarks } from './render/turfMarks';
 import { createStadium } from './render/stadium';
@@ -66,6 +67,12 @@ renderer.shadowMap.type = THREE.PCFShadowMap; // (PCFSoft is gone in r18x; this 
 app.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
+/** Static scenery: its world matrices are worked out once, not walked every frame. */
+const freeze = <T extends THREE.Object3D>(o: T): T => {
+  o.updateMatrixWorld(true);
+  o.matrixWorldAutoUpdate = false;
+  return o;
+};
 // Shadow texels well under an art pixel are wasted: 512 covers the 80 m around the camera
 // at ~16 cm (an art pixel is ~25 cm there). Redrawn every other frame (see frame()).
 const atmo = new Atmosphere(scene, { shadowSize: startsHD ? (coarse ? 1024 : 2048) : 512 });
@@ -82,6 +89,9 @@ const CROWD_SHOT = Number(params.get('crowd')) || 0;
 const DEBUG_CORNER = params.get('corner');
 let debugCornerDone = false;
 
+// The pass engine's roll table (a few thousand simulated rolls): built during boot, not
+// in the middle of the first passing move.
+rollTimeAt(4, 1);
 const club = new Club();
 // The attract mode behind the menus plays our own club.
 let match = new Match(Date.now() & 0xffff, club.matchSetup(Date.now() & 0xffff));
@@ -92,34 +102,50 @@ const rain = new Rain();
 /** The atmosphere in the stands: songs, drums, pyro (see Terraces). */
 const terraces = new Terraces();
 scene.add(rain.group);
-scene.add(createPitch(renderer, turfMarks.texture));
+scene.add(freeze(createPitch(renderer, turfMarks.texture)));
 // The stands wear the club's colours and crest; rebuilt when the kit or crest changes.
-const makeStadium = () =>
-  (club.state.ground === 'old' ? createOldGround : createStadium)(club.info().kit.shirt, club.opponentInfo().kit.shirt, {
+const makeStadium = () => {
+  const st = (club.state.ground === 'old' ? createOldGround : createStadium)(club.info().kit.shirt, club.opponentInfo().kit.shirt, {
     crest: crestCanvas(club.state.crest, 256),
     name: club.info().name,
     motto: club.bannerColors(),
     founded: club.state.crest.year,
   });
+  // The crowd (the costliest shader) draws after the rest of the opaque scene, so whatever
+  // stands in front of it has already filled the depth buffer and hides those pixels.
+  st.group.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (m.isMesh && !Array.isArray(m.material) && m.material.userData.crowd && m.renderOrder === 0) m.renderOrder = 1;
+  });
+  return st;
+};
 let stadium = makeStadium();
-scene.add(stadium.group);
+scene.add(freeze(stadium.group));
 boot.__boot?.(0.75);
 let fanPhoto: HTMLCanvasElement | null = null;
 
 function rebuildStadium(): void {
   scene.remove(stadium.group);
+  // Free the old ground's GPU memory: geometry, materials and every texture they hold.
+  const textures = new Set<THREE.Texture>();
   stadium.group.traverse((o) => {
     const m = o as THREE.Mesh;
     m.geometry?.dispose();
     const mats = Array.isArray(m.material) ? m.material : m.material ? [m.material] : [];
-    for (const mat of mats) mat.dispose();
+    for (const mat of mats) {
+      for (const v of Object.values(mat as unknown as Record<string, unknown>)) if (v instanceof THREE.Texture) textures.add(v);
+      const u = (mat as THREE.ShaderMaterial).uniforms;
+      if (u) for (const { value } of Object.values(u)) if (value instanceof THREE.Texture) textures.add(value);
+      mat.dispose();
+    }
   });
+  for (const t of textures) t.dispose();
   stadium = makeStadium();
-  scene.add(stadium.group);
+  scene.add(freeze(stadium.group));
   if (fanPhoto) stadium.setFanBanner(fanPhoto);
 }
 const goals = createGoals();
-scene.add(goals.group);
+scene.add(freeze(goals.group));
 const officials = new Officials();
 const benches = new Benches(22 + officials.all.length);
 benches.reset(club.benchSetup(Date.now() & 0xffff));
@@ -282,16 +308,23 @@ ui.appendChild(aimMark);
 const aimPos = new THREE.Vector3();
 /** Where the aiming reticle is on screen this frame (null when it isn't shown). */
 let aimScreen: { x: number; y: number } | null = null;
+/** Whether the reticle / charge bar are up (so idle frames don't touch the DOM). */
+let aimShown = false;
+let chargeShown = false;
 
 function updateAim(): void {
   aimScreen = null;
   const a = playing && !paused && match.aimingShot ? match.aimPoint() : null;
   if (!a) {
-    aimMark.classList.remove('show');
+    if (aimShown) aimMark.classList.remove('show'), (aimShown = false);
     return;
   }
   aimPos.set(a.x, a.y, a.z).project(rig.camera);
-  if (aimPos.z > 1) return aimMark.classList.remove('show');
+  if (aimPos.z > 1) {
+    aimMark.classList.remove('show');
+    aimShown = false;
+    return;
+  }
   const x = (aimPos.x * 0.5 + 0.5) * window.innerWidth;
   const y = (-aimPos.y * 0.5 + 0.5) * window.innerHeight;
   aimScreen = { x, y };
@@ -300,6 +333,7 @@ function updateAim(): void {
   const off = Math.abs(a.z) > PITCH.goalHalfWidth - 0.1 || a.y > PITCH.goalHeight - 0.1;
   aimMark.classList.toggle('off', off);
   aimMark.classList.add('show');
+  aimShown = true;
 }
 
 function updateCharge(alpha: number): void {
@@ -313,7 +347,7 @@ function updateCharge(alpha: number): void {
   // A player switch cancels a charge that was being held.
   if (btn >= 0 && inp.holdTime[btn] > match.switchT + 0.05) btn = -1;
   if (btn < 0) {
-    charge.classList.remove('show');
+    if (chargeShown) charge.classList.remove('show'), (chargeShown = false);
     return;
   }
   const hold = inp.holdTime[btn];
@@ -352,7 +386,7 @@ function updateCharge(alpha: number): void {
     y = (-headPos.y * 0.5 + 0.5) * window.innerHeight;
   }
   charge.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
-  charge.classList.add('show');
+  if (!chargeShown) charge.classList.add('show'), (chargeShown = true);
 }
 
 const fpsEl = document.createElement('div');
@@ -429,6 +463,8 @@ function startGame(seed: number): void {
   newMatch(seed);
   playing = true;
   paused = false;
+  playHz = 120;
+  slowFor = 0;
   home.hide();
   onResize();
   controls.setVisible(true);
@@ -653,6 +689,8 @@ function onResize(): void {
   pixelPass.resize(renderer.domElement.width, renderer.domElement.height);
   updateFineTicks();
   renderer.domElement.style.imageRendering = pixelLook() ? 'pixelated' : '';
+  // The pixel look draws the vignette in its upscale pass (no full-screen layer to blend).
+  vignette.style.display = pixelLook() ? 'none' : '';
   fineRow.style.display = pixelLook() ? '' : 'none';
   applyGraphics();
   rotate.classList.toggle('show', playing && h > w && matchMedia('(pointer: coarse)').matches);
@@ -670,7 +708,14 @@ let frameAvg = 16.7;
 /** Frame pacing: the display's refresh interval, and the interval we actually draw at. */
 let rafAvg = 16.7;
 let lastRaf = performance.now();
+/** The display's real refresh interval: the shortest seen between two refreshes. */
+let rafMin = 16.7;
 let targetMs = 16.7;
+/** Match frame rate: 120, or a steady 60 on a device that can't hold 120 (a steady 60
+ * looks smoother than an uneven 80-110, and runs far cooler). */
+let playHz = 120;
+/** How long the frames have been coming too slowly for the play rate (seconds). */
+let slowFor = 0;
 
 let perfCheckAt = performance.now() + 3000;
 let fpsFrames = 0;
@@ -805,18 +850,34 @@ function frame(now: number): void {
     void Promise.race([compiled, timeout]).then(() => requestAnimationFrame(() => boot.__bootDone?.()));
   }
   requestAnimationFrame(frame);
-  // Frame pacing: a frame scheduler at the target rate — 120 fps in play, 90 on the home
-  // screen, 60 under the pause menu. On a faster display, refreshes are skipped evenly to
+  // Frame pacing: a frame scheduler at the target rate — 120 fps in play (60 if the device
+  // can't hold it), 60 on the home screen, 30 under the pause menu (only the crowd moves)
+  // and behind full-screen menus. On a faster display, refreshes are skipped evenly to
   // hold the rate; on a slower one every refresh is drawn.
   rafAvg += (Math.min(50, now - lastRaf) - rafAvg) * 0.1;
+  if (now - lastRaf > 5) rafMin = Math.min(rafMin, now - lastRaf);
   lastRaf = now;
-  targetMs = 1000 / (paused ? 60 : playing ? 120 : 90);
+  const hidden = home.opaque && !playing;
+  targetMs = 1000 / (paused || hidden ? 30 : playing ? playHz : 60);
   if (now < nextFrameAt - rafAvg * 0.5) return;
   nextFrameAt = now - nextFrameAt > targetMs ? now + targetMs : nextFrameAt + targetMs;
   const t0 = performance.now();
   const frameMs = now - last;
   const dt = Math.min(0.1, frameMs / 1000);
   last = now;
+  // A full-screen menu covers the stadium: keep only the crowd's songs going behind it (the
+  // attract match waits where it is).
+  if (hidden) {
+    terraces.update(dt, match);
+    audio.terraces(terraces);
+    return;
+  }
+  // 120 fps that keeps missing (frames well over 9 ms for a few seconds on a display that
+  // could show them) drops to a steady 60 for the rest of the match.
+  if (playing && !paused && playHz === 120 && rafMin < 10) {
+    slowFor = frameMs > 10.5 ? slowFor + dt : Math.max(0, slowFor - dt * 0.5);
+    if (slowFor > 3) playHz = 60;
+  }
 
   const running = !paused;
   if (running) {
@@ -875,7 +936,8 @@ function frame(now: number): void {
   terraces.update(running ? dt : 0, match);
   stadium.update(now / 1000, match.excitement, atmo, tifo, terraces);
   turfMarks.update(match, renderer);
-  if (playing) hud.update(match, now / 1000), minimap.update(match, now / 1000);
+  if (playing) hud.update(match, now / 1000);
+  if (playing && !paused) minimap.update(match, now / 1000);
   updateAim();
   // Corner ring and flight preview (holding Shoot shows the floated ball).
   cornerAim.update(match, playing && controls.input.held[Btn.C], now / 1000);

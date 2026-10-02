@@ -139,9 +139,15 @@ export class Controls {
     }
     const c = this.btnEls[2];
     const p = this.mode === 'attack' && inp.held[2] ? Math.min(1, inp.holdTime[2] / 0.85) : 0;
-    c.style.setProperty('--p', p.toFixed(3));
-    c.classList.toggle('charging', p > 0);
+    // The shot ring: touch the style only when it visibly changes (steps of half a percent).
+    const q = Math.round(p * 200);
+    if (q !== this.ringQ) {
+      if ((q > 0) !== (this.ringQ > 0)) c.classList.toggle('charging', q > 0);
+      this.ringQ = q;
+      c.style.setProperty('--p', (q / 200).toFixed(3));
+    }
   }
+  private ringQ = -1;
 
   /**
    * Sliding up on Pass / Through while holding = lofted ball (FIFA-Mobile style).

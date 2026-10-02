@@ -45,6 +45,11 @@ export interface KickPlan {
   expires: number; // sim time
 }
 
+/** Smoothing factors for the last dt (always DT in a match). */
+let expDt = -1;
+let exp8 = 0;
+let exp10 = 0;
+
 export class Player {
   readonly pos = new V3();
   readonly vel = new V3();
@@ -151,8 +156,22 @@ export class Player {
 
   /** Acceleration (m/s²): the accel stat, scaled by body mass. */
   get accelRate(): number {
-    return PLAYER.accel * (0.8 + 0.35 * this.attrs.accel) * clamp(Math.pow(78 / this.attrs.weight, 0.3), 0.92, 1.08);
+    // (Math.pow is costly and this is asked thousands of times a second: remembered for
+    // the stats it was worked out from.)
+    const { accel, weight } = this.attrs;
+    if (accel !== this.accelFor || weight !== this.weightFor) {
+      this.accelFor = accel;
+      this.weightFor = weight;
+      this.accelMemo = PLAYER.accel * (0.8 + 0.35 * accel) * clamp(Math.pow(78 / weight, 0.3), 0.92, 1.08);
+    }
+    return this.accelMemo;
   }
+  private accelFor = NaN;
+  private weightFor = NaN;
+  private accelMemo = 0;
+  /** How sharply his build lets him cut, for the height it was worked out from. */
+  private agileFor = NaN;
+  private agileMemo = 1;
 
   /** Effective strength in duels: the stat plus body weight. */
   get duelStrength(): number {
@@ -312,7 +331,11 @@ export class Player {
         // foot under the body), which gives cuts a natural rhythm.
         const plant = Math.cos(this.stridePhase);
         // Agile, compact players cut sharper than tall, heavy ones.
-        const body = clamp(Math.pow(1.8 / this.attrs.height, 0.6), 0.92, 1.08);
+        if (this.attrs.height !== this.agileFor) {
+          this.agileFor = this.attrs.height;
+          this.agileMemo = clamp(Math.pow(1.8 / this.agileFor, 0.6), 0.92, 1.08);
+        }
+        const body = this.agileMemo;
         const latMax = PLAYER.lateral * (0.8 + 0.3 * this.attrs.agility) * body * (0.78 + 0.44 * plant * plant) * dt;
         if (lat > latMax) {
           lx *= latMax / lat;
@@ -334,8 +357,13 @@ export class Player {
       // cross product of velocity change and direction
       latAcc = ((this.vel.z - vz) * (vx / Math.max(sp, 0.01)) - (this.vel.x - vx) * (vz / Math.max(sp, 0.01))) / dt;
     }
-    const k = 1 - Math.exp(-dt * 8);
-    this.accelFwd += (clamp(accelFwd, -12, 12) - this.accelFwd) * (1 - Math.exp(-dt * 10));
+    if (dt !== expDt) {
+      expDt = dt;
+      exp8 = 1 - Math.exp(-dt * 8);
+      exp10 = 1 - Math.exp(-dt * 10);
+    }
+    const k = exp8;
+    this.accelFwd += (clamp(accelFwd, -12, 12) - this.accelFwd) * exp10;
     this.balanceCD = Math.max(0, this.balanceCD - dt);
     this.leanFwd += (clamp(accelFwd * 0.03 + nsp * 0.018, -0.25, 0.35) - this.leanFwd) * k;
     this.leanSide += (clamp(-latAcc * 0.035, -0.35, 0.35) - this.leanSide) * k;

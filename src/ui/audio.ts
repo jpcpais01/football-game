@@ -14,6 +14,7 @@ export class GameAudio {
   private chants: ChantAudio | null = null;
   private rainGain: GainNode | null = null;
   private raining = false;
+  private rainOff: ReturnType<typeof setTimeout> | undefined;
   private excite = 0.2;
   muted = false;
 
@@ -95,7 +96,8 @@ export class GameAudio {
     shelf.gain.value = 5;
     this.rainGain = ctx.createGain();
     this.rainGain.gain.value = this.raining ? 0.22 : 0;
-    rain.connect(hp).connect(shelf).connect(this.rainGain).connect(this.master);
+    rain.connect(hp).connect(shelf).connect(this.rainGain);
+    if (this.raining) this.rainGain.connect(this.master);
     rain.start();
   }
 
@@ -103,7 +105,13 @@ export class GameAudio {
   setRain(on: boolean): void {
     if (on === this.raining) return;
     this.raining = on;
-    if (this.ctx && this.rainGain) this.rainGain.gain.setTargetAtTime(on ? 0.22 : 0, this.ctx.currentTime, 0.6);
+    if (!this.ctx || !this.rainGain) return;
+    const g = this.rainGain;
+    clearTimeout(this.rainOff);
+    // A dry ground unplugs the rain chain once it has faded (nothing left to compute).
+    if (on) g.connect(this.master);
+    else this.rainOff = setTimeout(() => !this.raining && g.disconnect(), 4000);
+    g.gain.setTargetAtTime(on ? 0.22 : 0, this.ctx.currentTime, 0.6);
   }
 
   /** Sing what the terraces are singing (call every frame). */

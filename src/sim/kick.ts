@@ -34,7 +34,7 @@ function loadScratch(from: V3, vx: number, vy: number, vz: number, spin: V3): Ba
 }
 
 /** Speed the ball has when it has travelled `dist` metres along the ground (or -1 if it stops short). */
-function groundArrival(from: V3, fx: number, fz: number, v0: number, rollFrac: number, dist: number, out: { t: number }): number {
+function groundArrival(from: V3, fx: number, fz: number, v0: number, rollFrac: number, dist: number, out: { t: number }, floor = -1): number {
   const spin = makeSpin(fx, fz, (v0 / 0.11) * rollFrac, 0, new V3());
   const b = loadScratch(from, fx * v0, 0, fz * v0, spin);
   let t = 0;
@@ -50,6 +50,8 @@ function groundArrival(from: V3, fx: number, fz: number, v0: number, rollFrac: n
       return Math.sqrt(b.vel.x * b.vel.x + b.vel.z * b.vel.z);
     }
     if (b.vel.x === 0 && b.vel.z === 0) break;
+    // Already slower than `floor`: it can only slow further, so it won't arrive at that pace.
+    if (floor > 0 && b.vel.x * b.vel.x + b.vel.z * b.vel.z < floor * floor * 0.98) break;
   }
   out.t = t;
   return -1;
@@ -71,7 +73,7 @@ export function solveGroundPass(from: V3, tx: number, tz: number, arriveSpeed: n
   let bestT = 0;
   for (let i = 0; i < 16; i++) {
     const mid = (lo + hi) * 0.5;
-    const s = groundArrival(from, dx, dz, mid, rollFrac, dist, tOut);
+    const s = groundArrival(from, dx, dz, mid, rollFrac, dist, tOut, arriveSpeed);
     if (s < arriveSpeed) {
       lo = mid;
     } else {
@@ -288,6 +290,18 @@ function buildRollTable(): { v0: number; d: Float32Array; v: Float32Array }[] {
   return out;
 }
 
+/** First index where the distance rolled reaches x (a row only ever grows: binary search). */
+function firstAtLeast(d: Float32Array, x: number): number {
+  let lo = 0;
+  let hi = d.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (d[mid] < x) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
 /**
  * Ground pass that covers `dist` metres in about `wantT` seconds (strike speed 4..maxV).
  * Returns the time it really takes and the speed it arrives with, or null if it can't
@@ -300,8 +314,7 @@ export function rollingPass(dist: number, wantT: number, maxV = 19): { v0: numbe
   for (const row of rollTable) {
     if (row.v0 > maxV) break;
     // First moment it has rolled `dist`.
-    let i = 0;
-    while (i < row.d.length && row.d[i] < dist) i++;
+    const i = firstAtLeast(row.d, dist);
     if (i >= row.d.length || row.v[i] < 0.8) continue;
     const t = (i + 1) * TABLE_DT;
     const err = Math.abs(t - wantT);
@@ -317,8 +330,8 @@ export function rollingPass(dist: number, wantT: number, maxV = 19): { v0: numbe
 export function rollTimeAt(v0: number, dist: number): number {
   if (!rollTable) rollTable = buildRollTable();
   const row = rollTable[Math.max(0, Math.min(rollTable.length - 1, Math.round(v0) - 4))];
-  for (let i = 0; i < row.d.length; i++) if (row.d[i] >= dist) return (i + 1) * TABLE_DT;
-  return -1;
+  const i = firstAtLeast(row.d, dist);
+  return i < row.d.length ? (i + 1) * TABLE_DT : -1;
 }
 
 /** A ground pass struck at `v0` m/s along the unit direction (dx, dz): side-foot, partly rolling (as in the table). */
@@ -351,8 +364,7 @@ export function rollAt(v0: number, t: number, out: { d: number; v: number }): { 
 export function rollPaceFor(dist: number, arrive: number): number {
   if (!rollTable) rollTable = buildRollTable();
   for (const row of rollTable) {
-    let i = 0;
-    while (i < row.d.length && row.d[i] < dist) i++;
+    const i = firstAtLeast(row.d, dist);
     if (i < row.d.length && row.v[i] >= arrive) return row.v0;
   }
   return 20;

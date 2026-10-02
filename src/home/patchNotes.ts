@@ -1,5 +1,6 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.68', note: 'Big performance pass: players out of view cost nothing, cheaper pitch, crowd and particle drawing, quieter audio when silent, menus no longer run the stadium behind them, and the match engine thinks about a quarter faster with identical results. Phones that can’t hold 120 fps settle at a smooth 60.' },
   { v: '0.67', note: 'Living benches: seven real substitutes in each dugout, in team kit with their own bodies. Mostly sat, each his own way, they get up to stretch, walk out to watch, squat at the line, warm up, lean in for chances, clutch heads at misses and leap up for goals.' },
   { v: '0.66', note: 'Livelier players: arms and heads swing with speed-ups, stops and turns, shoulders and neck move, and feet plant on the grass, rolling heel to toe instead of sliding. Catches, carries and throw-ins no longer reach behind the back; instep strikes point the toes.' },
   { v: '0.65', note: 'Your aim counts: a pass goes to a team-mate within about 40° of where the stick points, a through ball too, now also played along the stick’s own line. Nobody there? It goes into the space you aimed at, never off the other way.' },

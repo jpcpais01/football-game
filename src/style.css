@@ -157,12 +157,12 @@ html, body {
 .joy-base {
   position: absolute; left: -64px; top: -64px; width: 128px; height: 128px; border-radius: 50%;
   border: 2px solid rgba(244, 239, 227, 0.28); background: rgba(20, 26, 22, 0.18);
-  pointer-events: none; transition: opacity 0.2s; opacity: 0.55;
+  pointer-events: none; transition: opacity 0.2s; opacity: 0.55; will-change: transform;
 }
 .joy-base.active { opacity: 1; transition: none; }
 .joy-knob {
   position: absolute; left: 36px; top: 36px; width: 56px; height: 56px; border-radius: 50%;
-  background: rgba(244, 239, 227, 0.85); box-shadow: 0 3px 10px rgba(0, 0, 0, 0.25);
+  background: rgba(244, 239, 227, 0.85); box-shadow: 0 3px 10px rgba(0, 0, 0, 0.25); will-change: transform;
 }
 
 .btn {

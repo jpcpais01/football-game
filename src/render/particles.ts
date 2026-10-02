@@ -37,6 +37,12 @@ export class Particles {
   private kind = new Uint8Array(MAX);
   private baseSize = new Float32Array(MAX);
   private next = MOTES;
+  /** Particles alive beyond the motes (0 most of a match: then only the motes are drawn
+   * and uploaded), and whether any were last frame. */
+  private live = 0;
+  private wasLive = false;
+  /** New particles were spawned: their colours need uploading. */
+  private colDirty = false;
   private gPos = new Float32Array(GROUND * 3);
   private gCol = new Float32Array(GROUND * 3);
   private gSize = new Float32Array(GROUND);
@@ -46,6 +52,7 @@ export class Particles {
   private gLive = 0;
   private gLanded = false;
   private groundGeo: THREE.BufferGeometry;
+  private ground: THREE.Points;
   private mat: THREE.ShaderMaterial;
   private geo: THREE.BufferGeometry;
   private c = new THREE.Color();
@@ -75,6 +82,12 @@ export class Particles {
         varying float vA;
         varying float vSoft;
         void main() {
+          if (aAlpha < 0.01) {
+            // Dead: off screen, so it doesn't even reach the rasteriser.
+            gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+            gl_PointSize = 1.0;
+            return;
+          }
           vCol = color;
           vA = aAlpha;
           vec4 mv = modelViewMatrix * vec4(position, 1.0);
@@ -111,6 +124,8 @@ export class Particles {
     gg.setAttribute('aAlpha', new THREE.BufferAttribute(this.gAlpha, 1).setUsage(THREE.DynamicDrawUsage));
     this.groundGeo = gg;
     const ground = new THREE.Points(gg, this.mat);
+    ground.visible = false;
+    this.ground = ground;
     ground.frustumCulled = false;
     ground.renderOrder = 7;
     this.points.add(ground);
@@ -130,6 +145,8 @@ export class Particles {
 
   private spawn(kind: Kind, x: number, y: number, z: number, vx: number, vy: number, vz: number, life: number, size: number, color: number): void {
     const i = this.alloc();
+    if (this.life[i] <= 0) this.live++;
+    this.colDirty = true;
     this.kind[i] = kind;
     this.pos.set([x, y, z], i * 3);
     this.vel.set([vx, vy, vz], i * 3);
@@ -192,7 +209,7 @@ export class Particles {
   private land(i: number): void {
     const j = this.gNext;
     this.gNext = (j + 1) % GROUND;
-    this.gLive = Math.min(GROUND, this.gLive + 1);
+    if (this.gLife[j] <= 0) this.gLive++;
     this.gPos[j * 3] = this.pos[i * 3];
     this.gPos[j * 3 + 1] = 0.03;
     this.gPos[j * 3 + 2] = this.pos[i * 3 + 2];
@@ -250,10 +267,12 @@ export class Particles {
     // Confetti the terraces throw.
     if (terraces) for (const c of terraces.confetti.splice(0)) this.throwConfetti(c.end, c.amount);
     // Confetti on the grass: lies there, then fades away.
+    this.ground.visible = this.gLive > 0;
     if (this.gLive > 0 && dt > 0) {
       for (let j = 0; j < GROUND; j++) {
         if (this.gLife[j] <= 0) continue;
         this.gLife[j] -= dt;
+        if (this.gLife[j] <= 0) this.gLive--;
         this.gAlpha[j] = this.gLife[j] > 0 ? Math.min(0.95, this.gLife[j] / 6) : 0;
       }
       const gg = this.groundGeo.attributes;
@@ -291,7 +310,9 @@ export class Particles {
       }
     }
 
-    for (let i = 0; i < MAX; i++) {
+    // Everything beyond the motes is dead most of the time: then the loop stops at them.
+    const end = this.live > 0 || this.wasLive ? MAX : MOTES;
+    for (let i = 0; i < end; i++) {
       const k = this.kind[i];
       const i3 = i * 3;
       if (k === Kind.Mote && i < MOTES) {
@@ -319,6 +340,8 @@ export class Particles {
         continue;
       }
       this.life[i] -= dt;
+      const died = this.life[i] <= 0;
+      if (died) this.live--;
       const t = 1 - this.life[i] / this.maxLife[i]; // 0 → 1 over the life
       let vx = this.vel[i3];
       let vy = this.vel[i3 + 1];
@@ -350,6 +373,7 @@ export class Particles {
           if (this.pos[i3 + 1] < 0.05) {
             // On the grass (the pitch and its surrounds): it stays there for a while.
             if (Math.abs(this.pos[i3]) < PITCH.halfL + 4 && Math.abs(this.pos[i3 + 2]) < PITCH.halfW + 4) this.land(i);
+            if (!died) this.live--;
             this.life[i] = 0;
             this.alpha[i] = 0;
             continue;
@@ -377,9 +401,18 @@ export class Particles {
       this.pos[i3 + 1] += vy * dt;
       this.pos[i3 + 2] += vz * dt;
     }
-    (this.geo.attributes.position as THREE.BufferAttribute).needsUpdate = true;
-    (this.geo.attributes.color as THREE.BufferAttribute).needsUpdate = true;
-    (this.geo.attributes.aSize as THREE.BufferAttribute).needsUpdate = true;
-    (this.geo.attributes.aAlpha as THREE.BufferAttribute).needsUpdate = true;
+    // Upload (and draw) only what's in use: the motes, plus the rest while any is alive.
+    const n = this.live > 0 ? MAX : MOTES;
+    this.wasLive = this.live > 0;
+    this.geo.setDrawRange(0, n);
+    const a = this.geo.attributes;
+    for (const attr of [a.position, a.aSize, a.aAlpha, a.color] as THREE.BufferAttribute[]) {
+      // Colours change only for the motes' tint, and when something new is spawned.
+      const count = attr === a.color && !this.colDirty ? MOTES : end;
+      attr.clearUpdateRanges();
+      attr.addUpdateRange(0, count * attr.itemSize);
+      attr.needsUpdate = true;
+    }
+    this.colDirty = false;
   }
 }

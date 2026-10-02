@@ -25,6 +25,9 @@ const ROOT = [138.6, 146.8];
 const END_GAIN = [1, 0.62];
 const END_PAN = [-0.55, 0.55];
 
+/** The tension choir's three voices: a slightly beating unison and the octave below. */
+const VOICE_DETUNE = [1, 1.011, 0.5];
+
 export class ChantAudio {
   /** Overall level of the terraces (menus sink it). */
   readonly out: GainNode;
@@ -34,6 +37,11 @@ export class ChantAudio {
   /** Per end: the anticipation — a rising wall of noise and a swelling "oooOOO". */
   private tension: { noiseF: BiquadFilterNode; noiseG: GainNode; voices: OscillatorNode[]; choirG: GainNode }[] = [];
   private paramsAt = -1;
+  /** Per end: the danger last sent to the tension layer, whether its choir is in the graph,
+   * and since when it has been silent (a silent choir is unplugged: no saws to compute). */
+  private lastDanger = [-1, -1];
+  private choirOn = [true, true];
+  private choirQuietAt = [0, 0];
 
   constructor(
     private ctx: AudioContext,
@@ -97,7 +105,7 @@ export class ChantAudio {
     f2.connect(choirG);
     choirG.connect(bus);
     const voices: OscillatorNode[] = [];
-    for (const m of [1, 1.011, 0.5]) {
+    for (const m of VOICE_DETUNE) {
       const o = ctx.createOscillator();
       o.type = 'sawtooth';
       o.frequency.value = ROOT[e] * 0.85 * m;
@@ -166,10 +174,10 @@ export class ChantAudio {
     // Director time → audio time (a small fixed latency so nothing lands in the past).
     const toCtx = ctx.currentTime + 0.06 - dir.t;
     const horizon = dir.t + 0.35;
-    for (const end of dir.boos.splice(0)) this.boo(end, ctx.currentTime + 0.15);
-    for (const lv of dir.oohs.splice(0)) this.ooh(lv, ctx.currentTime + 0.05);
-    for (const end of dir.erupts.splice(0)) this.erupt(end, ctx.currentTime + 0.02);
-    for (const end of dir.groans.splice(0)) this.groan(end, ctx.currentTime + 0.05);
+    if (dir.boos.length) for (const end of dir.boos.splice(0)) this.boo(end, ctx.currentTime + 0.15);
+    if (dir.oohs.length) for (const lv of dir.oohs.splice(0)) this.ooh(lv, ctx.currentTime + 0.05);
+    if (dir.erupts.length) for (const end of dir.erupts.splice(0)) this.erupt(end, ctx.currentTime + 0.02);
+    if (dir.groans.length) for (const end of dir.groans.splice(0)) this.groan(end, ctx.currentTime + 0.05);
     // The anticipation follows each team's danger: louder and louder, the "ooo" rising.
     const now = ctx.currentTime;
     if (now - this.paramsAt > 0.08) {
@@ -177,11 +185,25 @@ export class ChantAudio {
       for (let e = 0; e < 2; e++) {
         const d = dir.danger[e];
         const L = this.tension[e];
+        const sw = Math.max(0, (d - 0.25) / 0.75);
+        // The choir only sings above a quarter danger: off the graph a while after it fades.
+        if (sw > 0) {
+          this.choirQuietAt[e] = now;
+          if (!this.choirOn[e]) {
+            this.choirOn[e] = true;
+            L.choirG.connect(this.ends[e]);
+          }
+        } else if (this.choirOn[e] && now - this.choirQuietAt[e] > 2) {
+          this.choirOn[e] = false;
+          L.choirG.disconnect();
+        }
+        // A steady danger needs no new automation.
+        if (Math.abs(d - this.lastDanger[e]) < 0.003) continue;
+        this.lastDanger[e] = d;
         L.noiseG.gain.setTargetAtTime(0.015 + 0.6 * d * d, now, 0.2);
         L.noiseF.frequency.setTargetAtTime(480 + 750 * d, now, 0.25);
-        const sw = Math.max(0, (d - 0.25) / 0.75);
         L.choirG.gain.setTargetAtTime(0.16 * sw * Math.sqrt(sw), now, 0.25);
-        for (const [i, o] of L.voices.entries()) o.frequency.setTargetAtTime(ROOT[e] * 0.85 * [1, 1.011, 0.5][i] * (1 + 0.5 * d), now, 0.3);
+        if (this.choirOn[e]) for (let i = 0; i < 3; i++) L.voices[i].frequency.setTargetAtTime(ROOT[e] * 0.85 * VOICE_DETUNE[i] * (1 + 0.5 * d), now, 0.3);
       }
     }
     if (!s) return;
