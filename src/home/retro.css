@@ -1,0 +1,220 @@
+/* ================================================================ 90s game night skin
+   Layered over home.css. A cartridge-era menu, kept clean: a pixel display face for
+   titles, numbers and buttons (the condensed face stays for reading), square boxes with
+   stepped pixel corners drawn by a 3px frame (box-shadow rings, so hard drop shadows
+   still work), banded gradients, a faint dither and CRT scanlines, and stepped motion. */
+
+.shell {
+  /* Jersey 10: shirt-number pixel face for display; Silkscreen for small labels. */
+  --pixel: 'Jersey 10', var(--font);
+  --pixel-sm: 'Silkscreen', var(--font);
+  --night: #14123a;
+  --night-2: #1d1a4e;
+  --night-3: #2b2670;
+  --neon: #ff4fa3;
+  --cyan: #5ef2ff;
+  --line: rgba(190, 200, 255, 0.16);
+  --line-2: rgba(190, 200, 255, 0.3);
+  --glass: rgba(16, 14, 44, 0.86);
+  --glass-2: rgba(28, 24, 70, 0.86);
+}
+
+/* The pixel frame: a 3px ring with the corners stepped out, plus a hard drop shadow.
+   Each framed element sets --pf (ring colour) and optionally --ps (shadow). */
+.shell :where(.tile, .play-btn, .coins, .record span, .back, .chip, .mu-vs, .m-box, .m-close, .btn-primary, .btn-ghost,
+  .btn-danger, .toast, .home-foot .notes, .home-foot .update, .st-free, .sq-star, .buy, .pack-tile, .field input) {
+  --pf: var(--line-2);
+  --ps: rgba(0, 0, 0, 0.5);
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: 0 -3px 0 0 var(--pf), 0 3px 0 0 var(--pf), -3px 0 0 0 var(--pf), 3px 0 0 0 var(--pf), 6px 6px 0 2px var(--ps) !important;
+}
+
+/* Screens: a dithered night, scanlines over the top. */
+.shell .screen::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 30;
+  background:
+    repeating-linear-gradient(180deg, transparent 0 2px, rgba(0, 0, 0, 0.14) 2px 3px),
+    repeating-conic-gradient(rgba(255, 255, 255, 0.025) 0 25%, transparent 0 50%) 0 0 / 4px 4px;
+}
+.screen-home {
+  background:
+    linear-gradient(90deg, rgba(14, 10, 40, 0.92) 0%, rgba(20, 14, 58, 0.55) 52%, rgba(14, 10, 40, 0.72) 100%),
+    linear-gradient(0deg, rgba(40, 10, 60, 0.7), transparent 40%);
+}
+.screen-squad, .screen-store, .screen-club {
+  background:
+    linear-gradient(180deg, #0d0b2a 0 20%, #12103a 20% 45%, #181452 45% 70%, #1f1a62 70% 100%);
+}
+.screen-store {
+  background: linear-gradient(180deg, #120a2a 0 25%, #1c0f3e 25% 55%, #2a1450 55% 80%, #3a1a58 80% 100%);
+}
+
+/* ---------------------------------------------------------------- type */
+.shell :is(h1, h2, h3, .scr-title, .club-btn b, .tile h2, .hero-title, .sq-ovr b, .coins b, .record b, .mu-team b,
+  .mu-vs, .play-btn, .btn-primary, .btn-ghost, .buy, .chip, .pack-tile h3, .res-title, .res-num, .res-coins,
+  .toast, .notes-list b, .sq-star b, .hero-reward b) {
+  font-family: var(--pixel);
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  -webkit-font-smoothing: none;
+}
+.shell :is(.kicker, .club-btn small, .field span, .pd-group h4, .mu-team span, .sq-ovr span, .sq-meta, .st-free,
+  .home-foot .hint, .home-foot .ver, .home-foot .notes, .home-foot .update, .record span) {
+  font-family: var(--pixel-sm);
+  font-weight: 400;
+  -webkit-font-smoothing: none;
+}
+/* Jersey 10 sits small on its body: sizes up a step. */
+.shell .scr-title { font-size: 38px; }
+.shell .tile h2 { font-size: 34px; }
+.shell .m-box h3 { font-size: 32px; }
+.club-btn b { font-size: 30px !important; }
+.coins b { font-size: 26px; }
+.record b { font-size: 22px; }
+.mu-team b { font-size: clamp(20px, 5.6vh, 26px); }
+.mu-vs { font-size: 22px; }
+.shell .play-btn { font-size: clamp(26px, 7.6vh, 36px); }
+.shell .buy, .shell .btn-primary, .shell .btn-ghost { font-size: 22px; }
+.shell .chip { font-size: 18px; }
+.shell .toast { font-size: 20px; }
+.shell .pack-tile h3 { font-size: 26px; }
+.hero-reward b { font-size: 1.25em; }
+.notes-list b { font-size: 18px; }
+.sq-star b { font-size: 18px; }
+.shell :is(.scr-title, .tile h2, .m-box h3, .pack-tile h3) {
+  letter-spacing: 0.04em; text-shadow: 3px 3px 0 rgba(0, 0, 0, 0.55);
+}
+
+/* ---------------------------------------------------------------- top bar */
+.club-btn small { color: var(--cyan); font-size: 9px; letter-spacing: 0.12em; }
+.club-btn b { letter-spacing: 0.03em; line-height: 0.9; text-shadow: 3px 3px 0 rgba(0, 0, 0, 0.5); }
+.shell .crest * { shape-rendering: crispEdges; }
+.record { gap: 10px; margin-left: 10px; }
+.shell .record span { --pf: rgba(190, 200, 255, 0.18); background: rgba(16, 14, 44, 0.8); padding: 2px 8px; font-size: 10px; align-items: center; gap: 4px; }
+.record span:nth-child(1) b { color: #6ff0a8; }
+.record span:nth-child(3) b { color: #ff8a7a; }
+.shell .coins { --pf: #b37400; background: linear-gradient(180deg, #3a2a06 0 50%, #2a1e04 50%); padding: 4px 12px 4px 6px; }
+.coins b { color: #ffe066; text-shadow: 2px 2px 0 #000; }
+.coin {
+  border-radius: 0;
+  background:
+    linear-gradient(#fff6c4, #fff6c4) 30% 25% / 22% 22% no-repeat,
+    linear-gradient(180deg, #ffe066 0 45%, #ffbf1f 45% 75%, #c98a0c 75%);
+  box-shadow: 0 -2px 0 0 #7a5208, 0 2px 0 0 #7a5208, -2px 0 0 0 #7a5208, 2px 0 0 0 #7a5208;
+}
+.coins .coin { width: 20px; height: 20px; margin-left: 4px; }
+.shell .back { --pf: var(--line-2); background: var(--glass-2); font-family: var(--pixel); }
+.shell .chip { --pf: var(--line-2); background: rgba(16, 14, 44, 0.8); --ps: rgba(0, 0, 0, 0.35); }
+.shell .chip.on { --pf: #b37400; background: var(--gold); color: #1a1406; }
+
+/* ---------------------------------------------------------------- tiles */
+.home-grid { gap: 18px; margin: 12px 6px 10px 3px; }
+.shell .tile { background: var(--glass); }
+button.tile:hover { transform: translate(-2px, -2px); --pf: rgba(190, 200, 255, 0.5); }
+button.tile:active { transform: translate(3px, 3px); --ps: transparent; }
+.chev { font-family: var(--pixel); font-size: 48px; color: var(--cyan); animation: nudge 1s steps(2) infinite; }
+@keyframes nudge { 50% { transform: translateX(3px); } }
+
+/* Hero: a banded sunset red, scanline stripes, an extruded 90s title. */
+.shell .hero {
+  --pf: #ff8a7a;
+  --ps: rgba(40, 0, 20, 0.6);
+  background: linear-gradient(180deg, #ef4b4e 0 22%, #d23345 22% 46%, #a81f3c 46% 70%, #6e1234 70% 88%, #3e0a28 88%);
+}
+.hero-stripes {
+  opacity: 0.2; -webkit-mask: none; mask: none;
+  background: repeating-linear-gradient(180deg, transparent 0 6px, rgba(0, 0, 0, 0.35) 6px 9px);
+}
+.hero-glow {
+  border-radius: 0; filter: none; opacity: 0.9; width: 46%; right: -6%; top: -18%;
+  background: radial-gradient(circle, rgba(255, 224, 102, 0.55) 0 22%, rgba(255, 170, 70, 0.3) 22% 38%, rgba(255, 120, 90, 0.14) 38% 55%, transparent 55%);
+  animation: glow-step 6s steps(6) infinite alternate;
+}
+@keyframes glow-step { to { transform: translate(-10%, 14%); } }
+.hero .kicker { color: #ffe0a8; font-size: 11px; letter-spacing: 0.12em; }
+.hero .kicker::before { content: '★ '; color: #ffe066; }
+.hero-title {
+  font-family: var(--pixel); font-weight: 400; letter-spacing: 0.03em; line-height: 0.85; margin-top: 0;
+  color: #ffe066; text-shadow: none;
+  background: linear-gradient(180deg, #fffbe0 0 30%, #ffe066 30% 55%, #ffb020 55% 80%, #ff7a1a 80%);
+  font-size: clamp(56px, 17vh, 120px);
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  filter: drop-shadow(3px 3px 0 #7a1024) drop-shadow(3px 3px 0 #2a0414);
+}
+.shell .mu-vs { --pf: #ffe066; --ps: rgba(0, 0, 0, 0.4); background: #2a0414; color: #ffe066; padding: 3px 8px; margin: 0 6px; flex: 0 0 auto; }
+.mu-team b { text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.45); }
+.mu-team span { font-size: 10px; letter-spacing: 0.08em; }
+
+/* The big button: a chunky cartridge-era key. */
+.shell .play-btn {
+  --pf: #6b3f00;
+  --ps: #2a0414;
+  background: linear-gradient(180deg, #fff3a0 0 18%, #ffe066 18% 55%, #ffbf1f 55% 82%, #e69a10 82%);
+  letter-spacing: 0.06em; margin: 4px 0 4px 3px; animation: none;
+  transition: transform 0.06s steps(1);
+}
+.play-btn::after { width: 18%; background: rgba(255, 255, 255, 0.55); animation: sweep 3.2s steps(10) infinite; }
+.play-btn i { background: none; border-radius: 0; animation: blink 1s steps(1) infinite; }
+.shell .play-btn:active { transform: translate(4px, 4px); --ps: transparent; }
+@keyframes blink { 50% { opacity: 0; } }
+.hero-reward { font-size: 13px; color: rgba(255, 230, 210, 0.85); }
+.hero-reward b { color: #ffe066; }
+
+/* Squad tile. */
+.sq-ovr b { color: #ffe066; text-shadow: 3px 3px 0 #6b3f00, 6px 6px 0 rgba(0, 0, 0, 0.4); }
+.sq-ovr span { font-size: 10px; letter-spacing: 0.1em; line-height: 1.5; }
+.sq-meta { font-size: 10px; letter-spacing: 0.08em; }
+.sq-ovr b { font-size: clamp(48px, 15vh, 76px) !important; }
+.shell .sq-star { --pf: var(--rcol); --ps: rgba(0, 0, 0, 0.45); }
+.sq-stars { gap: 12px; right: 18px; bottom: 15px; }
+.sq-star b { text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.4); }
+
+/* Store tile. */
+.shell .store-tile {
+  background:
+    radial-gradient(circle at 82% 72%, rgba(255, 196, 60, 0.3) 0 18%, rgba(176, 92, 255, 0.24) 18% 36%, transparent 36%),
+    var(--glass);
+}
+.st-pack .pack-art.mini { animation: float-step 2.4s steps(4) infinite; }
+@keyframes float-step { 0%, 100% { transform: translateY(0) rotate(-6deg); } 50% { transform: translateY(-6px) rotate(-6deg); } }
+.shell .st-free { --pf: var(--line-2); --ps: rgba(0, 0, 0, 0.35); background: rgba(16, 14, 44, 0.9); font-size: 10px; letter-spacing: 0.06em; left: 19px; bottom: 17px; }
+.shell .st-free.ready { --pf: #1a7a44; background: #3ddc84; color: #06240f; animation: blink-soft 1s steps(1) infinite; }
+@keyframes blink-soft { 50% { background: #6ff0a8; } }
+
+/* Footer. */
+.home-foot { padding: 0 3px 3px; }
+.home-foot .hint { font-size: 9px; letter-spacing: 0.08em; }
+.home-foot .ver { font-size: 10px; }
+.home-foot .ver { color: var(--cyan); opacity: 1; }
+.shell .home-foot :is(.notes, .update) { --pf: var(--line-2); --ps: rgba(0, 0, 0, 0.35); background: rgba(16, 14, 44, 0.85); padding: 4px 9px; font-size: 9px; letter-spacing: 0.06em; margin-right: 6px; }
+
+/* ---------------------------------------------------------------- store shelf */
+.shell .pack-tile { --pf: var(--line); background: rgba(16, 14, 44, 0.7); }
+.shell .pack-tile.free { --pf: #2fc070; background: rgba(20, 60, 40, 0.5); }
+.shell .buy { --pf: #6b3f00; --ps: rgba(0, 0, 0, 0.45); background: linear-gradient(180deg, #fff3a0 0 18%, #ffe066 18% 55%, #ffbf1f 55%); }
+.shell .buy:active { transform: translate(3px, 3px); --ps: transparent; }
+.shell .pack-tile.free .buy { --pf: #1a7a44; background: linear-gradient(180deg, #b6ffd2 0 18%, #6ff0a8 18% 55%, #2fc070 55%); }
+
+/* ---------------------------------------------------------------- modals, buttons, toast */
+.shell .m-box { --pf: rgba(190, 200, 255, 0.4); --ps: rgba(0, 0, 0, 0.6); background: linear-gradient(180deg, #1d1a4e 0 40%, #171442 40% 75%, #12103a 75%); animation: pop-step 0.24s steps(4); }
+@keyframes pop-step { from { transform: scale(0.9); opacity: 0; } }
+.shell .m-close { --ps: transparent; background: var(--glass-2); font-family: var(--pixel); }
+.shell .btn-primary { --pf: #6b3f00; background: linear-gradient(180deg, #fff3a0 0 18%, #ffe066 18% 55%, #ffbf1f 55%); }
+.shell .btn-primary:active, .shell .btn-ghost:active { transform: translate(3px, 3px); --ps: transparent; }
+.shell .btn-ghost { background: var(--glass-2); }
+.shell .btn-danger { --pf: rgba(255, 90, 90, 0.5); }
+.shell .field input { --ps: transparent; background: rgba(8, 6, 26, 0.8); font-family: var(--pixel); }
+.shell .field input:focus { --pf: var(--gold); }
+.shell .toast { --pf: var(--cyan); background: #12103a; }
+.notes-list b { color: var(--cyan); }
+.sbar i, .sbar i::after { border-radius: 0; }
+.sbar i { height: 8px; }
+.sbar i::after { background: repeating-linear-gradient(90deg, currentColor 0 6px, transparent 6px 8px); }
+.res-title { text-shadow: 4px 4px 0 rgba(0, 0, 0, 0.5); }
+.shell .res-coins { border-radius: 0; }
+
+@media (max-height: 430px) {
+  .home-grid { gap: 14px; margin: 8px 6px 8px 3px; }
+  .club-btn b { font-size: 18px; }
+}

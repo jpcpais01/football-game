@@ -1,5 +1,8 @@
 import { PATCH_NOTES } from './patchNotes';
+import '@fontsource/jersey-10/latin-400.css';
+import '@fontsource/silkscreen/latin-400.css';
 import './home.css';
+import './retro.css';
 import type { Club } from '../meta/club';
 import { FREE_PACK_HOURS } from '../meta/club';
 import { type Card, STAT_LABEL, type StatKey, overall, sellValue, traitsOf, RARITY_LABEL, bodyName } from '../meta/cards';
