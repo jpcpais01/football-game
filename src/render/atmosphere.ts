@@ -18,6 +18,11 @@ export class Atmosphere {
   private c1 = new THREE.Color();
   private c2 = new THREE.Color();
   private shadowTarget = new THREE.Vector3();
+  /** 'evening': kick-off at golden hour, full time under floodlights. 'sunny': a clear,
+   * crisp midday match. */
+  weather: 'evening' | 'sunny' = 'evening';
+  /** How much atmospheric haze the background gets (read by the stadium shaders). */
+  haze = 1;
 
   // Key colours at kick-off (a) and at full time (b).
   private sunA = new THREE.Color(0xffe6c2);
@@ -59,6 +64,10 @@ export class Atmosphere {
 
   /** Sets the time of day. */
   set(progress: number): void {
+    if (this.weather === 'sunny') return this.setSunny();
+    this.haze = 1;
+    this.fog.near = 95;
+    this.fog.far = 300;
     const t = clamp(progress, 0, 1);
     // Sun sinks from ~30° to ~11°.
     const elev = lerp(30, 15, t) * (Math.PI / 180);
@@ -86,6 +95,32 @@ export class Atmosphere {
     SHARED.uDew.value = smoothstep(0.55, 1, t);
     this.c2.setHex(0x9fb0cc).lerp(new THREE.Color(0x8a96c4), dusk);
     SHARED.uShadeTint.value.copy(this.c2);
+  }
+
+  /** Clear midday: high bright sun, crisp shadows, deep blue sky, almost no haze. */
+  private setSunny(): void {
+    const elev = (52 * Math.PI) / 180;
+    const az = -0.5;
+    const h = Math.cos(elev);
+    SUN_DIR.set(Math.sin(-az) * h, -Math.sin(elev), -Math.cos(az) * h).normalize();
+    this.sun.color.setHex(0xfff6e6);
+    this.sun.intensity = 3.1;
+    this.hemi.color.setHex(0xbcd6ff);
+    this.hemi.groundColor.setHex(0x5f7a3c);
+    this.hemi.intensity = 1.05;
+    this.skyTop.setHex(0x3f86e0);
+    this.skyHorizon.setHex(0xc7e2f7);
+    this.sunGlow.copy(this.sun.color);
+    this.fog.color.setHex(0xcfe3f2);
+    this.bg.setHex(0xcfe3f2);
+    this.fog.near = 260;
+    this.fog.far = 900;
+    this.haze = 0.15;
+    // High sun: the near stand's shadow barely reaches the touchline.
+    SHARED.uShadowZ0.value = 33;
+    SHARED.uFlood.value = 0;
+    SHARED.uDew.value = 0;
+    SHARED.uShadeTint.value.setHex(0xa9c3e8);
   }
 
   /** Keeps the shadow map centred on what the camera sees (snapped to texels: no shimmer). */

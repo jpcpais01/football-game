@@ -41,6 +41,7 @@ export class PixelPass {
         uLevels: { value: 22 },
         uOutline: { value: new THREE.Color(0x120f2a) },
         uNight: { value: 0 },
+        uCool: { value: 1 },
       },
       vertexShader: /* glsl */ `
         varying vec2 vUv;
@@ -50,7 +51,7 @@ export class PixelPass {
         uniform sampler2D tColor;
         uniform sampler2D tDepth;
         uniform vec2 uRes;
-        uniform float uNear, uFar, uLevels, uNight;
+        uniform float uNear, uFar, uLevels, uNight, uCool;
         uniform vec3 uOutline;
         varying vec2 vUv;
 
@@ -87,7 +88,7 @@ export class PixelPass {
 
           // 90s night grade: cool, slightly purple shadows; warm, creamy highlights.
           float l = dot(c, vec3(0.299, 0.587, 0.114));
-          c = mix(c, c * vec3(0.86, 0.84, 1.14), (1.0 - l) * (0.3 + 0.25 * uNight));
+          c = mix(c, c * vec3(0.86, 0.84, 1.14), (1.0 - l) * (0.3 + 0.25 * uNight) * uCool);
           c = mix(c, c * vec3(1.06, 1.0, 0.9), smoothstep(0.55, 1.0, l) * 0.35);
           c = mix(vec3(l), c, 1.08); // a touch more colour
 
@@ -117,7 +118,8 @@ export class PixelPass {
     return this.target.height;
   }
 
-  render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera, night: number): void {
+  render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera, night: number, cool = 1): void {
+    this.mat.uniforms.uCool.value = cool;
     this.mat.uniforms.uNear.value = camera.near;
     this.mat.uniforms.uFar.value = camera.far;
     this.mat.uniforms.uNight.value = night;

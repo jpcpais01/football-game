@@ -84,6 +84,15 @@ try {
   /* keep default */
 }
 const pixelPass = new PixelPass();
+
+// Match weather: evening (golden hour into floodlights) or a sunny day.
+try {
+  const w = localStorage.getItem('weather');
+  if (w === 'sunny' || w === 'evening') atmo.weather = w;
+} catch {
+  /* keep default */
+}
+if (params.get('weather') === 'sunny') atmo.weather = 'sunny';
 if (params.has('zoom')) rig.distOverride = Number(params.get('zoom')) || 10;
 const FIXED_DPR = params.has('dpr');
 if (FIXED_DPR) renderer.setPixelRatio((dpr = Number(params.get('dpr')) || 1));
@@ -129,6 +138,7 @@ pauseMenu.innerHTML = `
     <h2>Paused</h2>
     <button class="resume">Resume</button>
     <button class="restart ghost">Restart match</button>
+    <button class="weather ghost">Match: Evening</button>
     <button class="graphics ghost">Graphics: Pixel</button>
     <button class="camera ghost">Camera: Normal</button>
     <button class="sound ghost">Sound: on</button>
@@ -238,6 +248,18 @@ pauseMenu.querySelector('.resume')!.addEventListener('click', () => setPaused(fa
 pauseMenu.querySelector('.restart')!.addEventListener('click', () => {
   newMatch();
   setPaused(false);
+});
+const weatherBtn = pauseMenu.querySelector('.weather') as HTMLButtonElement;
+const weatherLabel = () => (weatherBtn.textContent = `Match: ${atmo.weather === 'sunny' ? 'Sunny day' : 'Evening'}`);
+weatherLabel();
+weatherBtn.addEventListener('click', () => {
+  atmo.weather = atmo.weather === 'sunny' ? 'evening' : 'sunny';
+  weatherLabel();
+  try {
+    localStorage.setItem('weather', atmo.weather);
+  } catch {
+    /* ignore */
+  }
 });
 const graphicsBtn = pauseMenu.querySelector('.graphics') as HTMLButtonElement;
 const applyGraphics = () => {
@@ -449,7 +471,7 @@ function frame(now: number): void {
   if (playing) hud.update(match, now / 1000);
   updateCharge(alpha);
 
-  if (graphics === 'pixel') pixelPass.render(renderer, scene, rig.camera, SHARED.uFlood.value);
+  if (graphics === 'pixel') pixelPass.render(renderer, scene, rig.camera, SHARED.uFlood.value, atmo.weather === 'sunny' ? 0.35 : 1);
   else renderer.render(scene, rig.camera);
   cpuAvg += (performance.now() - t0 - cpuAvg) * 0.05;
   adaptQuality(frameMs, now);

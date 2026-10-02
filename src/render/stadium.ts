@@ -29,6 +29,8 @@ const U = {
   uSunDir: { value: new THREE.Vector3() },
   uSunColor: { value: new THREE.Color() },
   uFlood: SHARED.uFlood,
+  /** Background haze strength (1 = evening haze, low on a clear sunny day). */
+  uHaze: { value: 1 },
 };
 
 function crowdMaterial(sectionA: number, sectionB: number, mixAB: number): THREE.ShaderMaterial {
@@ -53,7 +55,7 @@ function crowdMaterial(sectionA: number, sectionB: number, mixAB: number): THREE
       precision highp float;
       varying vec2 vUv;
       varying float vDist;
-      uniform float uTime, uExcite, uMix, uFogNear, uFogFar, uFlood;
+      uniform float uTime, uExcite, uMix, uFogNear, uFogFar, uFlood, uHaze;
       uniform vec3 uA, uB, uFog, uLight;
 
       float hash(vec2 p) { return fract(sin(dot(p, vec2(41.3, 289.1))) * 15731.743); }
@@ -93,7 +95,7 @@ function crowdMaterial(sectionA: number, sectionB: number, mixAB: number): THREE
         vec3 avg = mix(seatCol, mix(uA, uB, uMix) * 0.6 + 0.1, 0.55);
         c = mix(c, avg, smoothstep(0.2, 0.7, px));
         // Keep the stands calm: soften contrast toward their average colour.
-        c = mix(c, avg, 0.3);
+        c = mix(c, avg, 0.12 + 0.18 * uHaze);
 
         c = pow(c, vec3(2.2)) * uLight;
         // Phone cameras flashing once it's dark.
@@ -102,7 +104,7 @@ function crowdMaterial(sectionA: number, sectionB: number, mixAB: number): THREE
 
         // Atmospheric haze: the background sits back behind the play.
         float fog = smoothstep(uFogNear, uFogFar, vDist);
-        c = mix(c, uFog, 0.18 + fog * 0.7);
+        c = mix(c, uFog, (0.18 + fog * 0.7) * uHaze);
         gl_FragColor = vec4(c, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -682,6 +684,7 @@ export function createStadium(homeColor: number, awayColor: number): Stadium {
       U.uSunColor.value.copy(atmo.sun.color);
       const fog = atmo.sun.parent instanceof THREE.Scene ? (atmo.sun.parent.fog as THREE.Fog | null) : null;
       if (fog) U.uFog.value.copy(fog.color);
+      U.uHaze.value = atmo.haze;
       // Crowd light: sky + a share of the sun + floodlights.
       const flood = SHARED.uFlood.value;
       c.copy(atmo.hemi.color).multiplyScalar(atmo.hemi.intensity * 0.55);
