@@ -160,8 +160,8 @@ function zoneRange(path: PathPt[], o: number, zone: number): [number, number] {
   return [u0, u1];
 }
 
-/** Closes the open ends of the bowl with the cross-section's outline. */
-function bowlCaps(path: PathPt[], mat: THREE.Material): THREE.Mesh {
+/** Closes the open ends of the bowl with the cross-section's outline (same attributes as a strip). */
+function bowlCaps(path: PathPt[]): THREE.BufferGeometry {
   const outline = [
     [0, 0], [0, 1.4], [0.4, 1.4], [20, 11.5], [22, 11.5], [22, 14.5], [21, 14.5], [21, 15.8], [21.5, 15.8], [46, 34], [46, 40], [48, 40], [48, 0],
   ].map(([o, h]) => new THREE.Vector2(o, h));
@@ -172,9 +172,46 @@ function bowlCaps(path: PathPt[], mat: THREE.Material): THREE.Mesh {
     for (const t of tris) for (const k of t) pos.push(...at(p, outline[k].x, outline[k].y, v).toArray());
   }
   const geo = new THREE.BufferGeometry();
+  const n = pos.length / 3;
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(n * 2), 2));
+  geo.setAttribute('aHome', new THREE.Float32BufferAttribute(new Float32Array(n), 1));
+  geo.setAttribute('aAway', new THREE.Float32BufferAttribute(new Float32Array(n), 1));
+  geo.setIndex([...Array(n).keys()]);
   geo.computeVertexNormals();
-  return new THREE.Mesh(geo, mat);
+  return geo;
+}
+
+/**
+ * Bake a group of static meshes into one mesh per material (world transforms applied), so
+ * dozens of small props cost a handful of draws. Meshes flagged `userData.live` (cloth,
+ * anything animated in its own space) are kept as they are.
+ */
+function bakeStatic(src: THREE.Group): THREE.Group {
+  src.updateMatrixWorld(true);
+  const byMat = new Map<THREE.Material, THREE.BufferGeometry[]>();
+  const out = new THREE.Group();
+  const live: THREE.Object3D[] = [];
+  src.traverse((o) => {
+    if (!(o instanceof THREE.Mesh) || o instanceof THREE.InstancedMesh) return;
+    if (o.userData.live) return void live.push(o);
+    const g = (o.geometry as THREE.BufferGeometry).clone().applyMatrix4(o.matrixWorld);
+    const flat = g.index ? g.toNonIndexed() : g;
+    for (const k of Object.keys(flat.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'uv') flat.deleteAttribute(k);
+    const list = byMat.get(o.material as THREE.Material) ?? [];
+    list.push(flat);
+    byMat.set(o.material as THREE.Material, list);
+  });
+  for (const [mat, geos] of byMat) {
+    const m = new THREE.Mesh(mergeGeometries(geos)!, mat);
+    m.receiveShadow = true;
+    out.add(m);
+  }
+  for (const o of live) {
+    o.removeFromParent();
+    out.add(o);
+  }
+  return out;
 }
 
 // ------------------------------------------------------------------ crowd
@@ -242,41 +279,48 @@ function crowdMaterial(o: CrowdOpts): THREE.ShaderMaterial {
         vec2 cell = floor(g);
         vec2 f = fract(g);
         float occ = step(hash(cell), mix(mix(0.92, 0.86, awayEnd), 1.0, ultra));
-
-        // Colours: the ends are a sea of their club, the main stands a mix.
         float awayShare = mix(mix(0.22, 0.95, awayEnd), 0.02, ultra);
-        float h = hash(cell + 7.1);
-        vec3 club = mix(uA, uB, step(hash(cell * 0.37 + floor(cell.x / 14.0)), awayShare));
-        float clubShare = mix(0.55, 0.85, max(ultra, awayEnd));
-        vec3 shirt = h < clubShare ? club * (0.78 + 0.22 * hash(cell + 2.0))
-          : h < clubShare + 0.12 ? vec3(0.86, 0.84, 0.79)
-          : h < clubShare + 0.22 ? vec3(0.17, 0.18, 0.21)
-          : vec3(0.34, 0.38, 0.47);
 
-        // Movement: ultras bounce together in a rolling wave; others now and then.
-        float ph = hash(cell + 3.3) * 6.283;
-        float beat = sin(uTime * 7.5 - cell.y * 0.5 + hash(vec2(cell.y, 1.0)) * 0.6);
-        float jump = ultra * max(0.0, beat) * (0.1 + 0.12 * uExcite)
-          + (1.0 - ultra) * max(0.0, sin(uTime * (7.0 + hash(cell + 1.1) * 3.0) + ph)) * uExcite * uExcite * 0.22;
-        float sway = sin(uTime * 1.3 + ph) * 0.03;
-        vec2 q = f - vec2(0.5 + sway, 0.0) - vec2(0.0, jump);
-        float body = step(abs(q.x), 0.3) * step(0.08, q.y) * step(q.y, 0.62);
-        float head = step(length((q - vec2(0.0, 0.74)) * vec2(1.0, 1.25)), 0.16);
-        // Scarves held up overhead: always in the ends, everywhere when it's loud.
-        float scarfUp = step(hash(cell + 5.5), max(max(ultra, awayEnd) * 0.75, uExcite * uExcite * 0.8));
-        float scarf = scarfUp * step(abs(q.x), 0.46) * step(0.86, q.y) * step(q.y, 0.97);
-        vec3 scarfCol = mix(club, vec3(0.95, 0.93, 0.88), step(0.5, fract(q.x * 3.0 + 0.25)));
-
-        vec3 seatCol = vec3(0.16, 0.19, 0.27) * (0.9 + 0.2 * step(0.5, fract(cell.y * 0.5)));
-        vec3 skin = mix(vec3(0.93, 0.76, 0.6), vec3(0.42, 0.28, 0.18), hash(cell + 9.2));
-        vec3 c = seatCol;
-        c = mix(c, shirt, body * occ);
-        c = mix(c, skin, head * occ);
-        c = mix(c, scarfCol, scarf * occ);
-
+        // Far away a fan is smaller than a pixel: only the stand's average colour shows, so
+        // skip drawing individual fans there (most of the bowl, most of the time).
         float px = max(fwidth(g.x), fwidth(g.y));
-        vec3 avg = mix(seatCol, club * 0.75 + 0.06, mix(0.55, 0.8, max(ultra, awayEnd)));
-        c = mix(c, avg, smoothstep(0.2, 0.7, px));
+        float detail = 1.0 - smoothstep(0.2, 0.7, px);
+        vec3 seatAvg = vec3(0.16, 0.19, 0.27);
+        vec3 avg = mix(seatAvg, mix(uA, uB, awayShare) * 0.75 + 0.06, mix(0.55, 0.8, max(ultra, awayEnd)));
+        vec3 c = avg;
+        vec3 club = mix(uA, uB, awayShare);
+        if (detail > 0.0) {
+          // Colours: the ends are a sea of their club, the main stands a mix.
+          float h = hash(cell + 7.1);
+          club = mix(uA, uB, step(hash(cell * 0.37 + floor(cell.x / 14.0)), awayShare));
+          float clubShare = mix(0.55, 0.85, max(ultra, awayEnd));
+          vec3 shirt = h < clubShare ? club * (0.78 + 0.22 * hash(cell + 2.0))
+            : h < clubShare + 0.12 ? vec3(0.86, 0.84, 0.79)
+            : h < clubShare + 0.22 ? vec3(0.17, 0.18, 0.21)
+            : vec3(0.34, 0.38, 0.47);
+
+          // Movement: ultras bounce together in a rolling wave; others now and then.
+          float ph = hash(cell + 3.3) * 6.283;
+          float beat = sin(uTime * 7.5 - cell.y * 0.5 + hash(vec2(cell.y, 1.0)) * 0.6);
+          float jump = ultra * max(0.0, beat) * (0.1 + 0.12 * uExcite)
+            + (1.0 - ultra) * max(0.0, sin(uTime * (7.0 + hash(cell + 1.1) * 3.0) + ph)) * uExcite * uExcite * 0.22;
+          float sway = sin(uTime * 1.3 + ph) * 0.03;
+          vec2 q = f - vec2(0.5 + sway, 0.0) - vec2(0.0, jump);
+          float body = step(abs(q.x), 0.3) * step(0.08, q.y) * step(q.y, 0.62);
+          float head = step(length((q - vec2(0.0, 0.74)) * vec2(1.0, 1.25)), 0.16);
+          // Scarves held up overhead: always in the ends, everywhere when it's loud.
+          float scarfUp = step(hash(cell + 5.5), max(max(ultra, awayEnd) * 0.75, uExcite * uExcite * 0.8));
+          float scarf = scarfUp * step(abs(q.x), 0.46) * step(0.86, q.y) * step(q.y, 0.97);
+          vec3 scarfCol = mix(club, vec3(0.95, 0.93, 0.88), step(0.5, fract(q.x * 3.0 + 0.25)));
+
+          vec3 seatCol = seatAvg * (0.9 + 0.2 * step(0.5, fract(cell.y * 0.5)));
+          vec3 skin = mix(vec3(0.93, 0.76, 0.6), vec3(0.42, 0.28, 0.18), hash(cell + 9.2));
+          vec3 fan = seatCol;
+          fan = mix(fan, shirt, body * occ);
+          fan = mix(fan, skin, head * occ);
+          fan = mix(fan, scarfCol, scarf * occ);
+          c = mix(avg, fan, detail);
+        }
         c = mix(c, avg, 0.05 + 0.1 * uHaze);
 
         // Card display: every fan holds one card, together they make the picture.
@@ -809,18 +853,19 @@ function lightShafts(spots: THREE.Vector3[]): THREE.Group {
       }
     `,
   });
-  for (const from of spots) {
+  // All beams in one static mesh (one draw).
+  const geos = spots.map((from) => {
     const target = new THREE.Vector3(from.x * 0.3, 0, from.z * 0.3);
     const len = from.distanceTo(target);
     const geo = new THREE.ConeGeometry(16, len, 24, 1, true);
     geo.translate(0, -len / 2, 0); // apex at the origin
-    const m = new THREE.Mesh(geo, mat);
-    m.position.copy(from);
-    m.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), target.clone().sub(from).normalize());
-    m.frustumCulled = false;
-    m.renderOrder = 6;
-    g.add(m);
-  }
+    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, -1, 0), target.clone().sub(from).normalize());
+    return geo.applyMatrix4(new THREE.Matrix4().compose(from, q, new THREE.Vector3(1, 1, 1)));
+  });
+  const m = new THREE.Mesh(mergeGeometries(geos)!, mat);
+  m.frustumCulled = false;
+  m.renderOrder = 6;
+  g.add(m);
   return g;
 }
 
@@ -898,11 +943,10 @@ function pitchside(home: number, away: number): THREE.Group {
     for (const sz of [-1, 1]) {
       const p = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 1.6, 6), pole);
       p.position.set(sx * PITCH.halfL, 0.8, sz * PITCH.halfW);
-      p.castShadow = true;
       g.add(p);
       const f = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.3, 6, 2), flagMat);
       f.position.set(sx * PITCH.halfL + 0.2, 1.45, sz * PITCH.halfW);
-      f.castShadow = true;
+      f.userData.live = true; // cloth moves in its own space
       g.add(f);
     }
   }
@@ -987,32 +1031,13 @@ function sky(): THREE.Mesh {
     `,
   });
   const m = new THREE.Mesh(geo, mat);
-  m.renderOrder = -20;
+  // Drawn after the other opaque objects: it's far behind everything, so the depth test
+  // skips every pixel the stadium and pitch already cover (nearly all of them in play).
+  m.renderOrder = 3;
   m.frustumCulled = false;
   return m;
 }
 
-/** Distant rooftops and trees: depth behind the stands, softened by the haze. */
-function skyline(): THREE.Mesh {
-  const parts: THREE.BufferGeometry[] = [];
-  let seed = 7;
-  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-  for (let i = 0; i < 90; i++) {
-    const a = (i / 90) * Math.PI * 2 + rnd() * 0.05;
-    const r = 230 + rnd() * 60;
-    const tree = rnd() < 0.45;
-    const h = tree ? 8 + rnd() * 8 : 10 + rnd() * 26;
-    const w = tree ? 10 + rnd() * 10 : 12 + rnd() * 18;
-    const g = tree ? new THREE.SphereGeometry(w * 0.5, 7, 5) : new THREE.BoxGeometry(w, h, w * 0.7);
-    if (tree) g.scale(1, h / w, 1);
-    g.rotateY(-a);
-    g.translate(Math.cos(a) * r, tree ? h * 0.4 : h / 2, Math.sin(a) * r);
-    parts.push(g.toNonIndexed());
-  }
-  const geo = mergeGeometries(parts)!;
-  const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: 0x55605e }));
-  return mesh;
-}
 
 /**
  * Supporters' banners hung over the railings at the front of the lower tier, plus the
@@ -1193,16 +1218,18 @@ function fanBanners(path: PathPt[], home: number): { group: THREE.Group; set(pho
 export function createStadium(homeColor: number, awayColor: number): Stadium {
   const group = new THREE.Group();
   group.add(sky());
-  group.add(skyline());
 
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(800, 800), litMaterial({ color: 0x6f7262, roughness: 0.95 }));
   ground.rotation.x = -Math.PI / 2;
   ground.position.y = -0.03;
+  // Under/behind everything: draw after the stands and players so covered pixels are skipped.
+  ground.renderOrder = 2;
   group.add(ground);
   const apron = new THREE.Mesh(new THREE.PlaneGeometry(PITCH.length + 30, PITCH.width + 26), litMaterial({ color: 0x4f6a3c, roughness: 0.95 }));
   apron.rotation.x = -Math.PI / 2;
   apron.position.y = -0.02;
   apron.receiveShadow = true;
+  apron.renderOrder = 2;
   group.add(apron);
 
   // ---- the bowl
@@ -1226,7 +1253,13 @@ export function createStadium(homeColor: number, awayColor: number): Stadium {
   });
   const upperCrowd = crowdMaterial({ home: homeColor, away: awayColor, shade: [-2, 12], stripes: true });
 
-  const strip = (a: [number, number], b: [number, number], mat: THREE.Material) => group.add(new THREE.Mesh(ringStrip(path, a, b), mat));
+  // Strips sharing a material are merged: one draw per material for the whole bowl.
+  const byMat = new Map<THREE.Material, THREE.BufferGeometry[]>();
+  const strip = (a: [number, number], b: [number, number], mat: THREE.Material) => {
+    const list = byMat.get(mat) ?? [];
+    list.push(ringStrip(path, a, b));
+    byMat.set(mat, list);
+  };
   strip([0, 0], [0, 1.4], ribbon); // pitch-level ribbon on the stand front
   strip([0, 1.4], LOWER[0], concrete);
   strip(LOWER[0], LOWER[1], lowerCrowd);
@@ -1240,7 +1273,8 @@ export function createStadium(homeColor: number, awayColor: number): Stadium {
   strip([48, 40], [ROOF_EDGE, ROOF_H], roofMat);
   strip([ROOF_EDGE, ROOF_H], [ROOF_EDGE, ROOF_H - 2.2], fascia);
   strip([ROOF_EDGE + 0.3, ROOF_H - 2.25], [ROOF_EDGE + 3, ROOF_H - 2.05], roofLight);
-  group.add(bowlCaps(path, concrete));
+  byMat.get(concrete)!.push(bowlCaps(path));
+  for (const [mat, geos] of byMat) group.add(new THREE.Mesh(geos.length > 1 ? mergeGeometries(geos)! : geos[0], mat));
 
   // Trusses under the roof and floodlight banks along its inner edge.
   const tmpA = new THREE.Vector3();
@@ -1279,8 +1313,9 @@ export function createStadium(homeColor: number, awayColor: number): Stadium {
   group.add(adBoards());
   group.add(crowdFlags(path, homeColor, awayColor));
   group.add(banners(path, homeColor, awayColor));
-  group.add(pitchside(homeColor, awayColor));
-  group.add(lightShafts(spots));
+  group.add(bakeStatic(pitchside(homeColor, awayColor)));
+  const shafts = lightShafts(spots);
+  group.add(shafts);
   const fan = fanBanners(path, homeColor);
   group.add(fan.group);
 
@@ -1309,6 +1344,8 @@ export function createStadium(homeColor: number, awayColor: number): Stadium {
       c.add(c2);
       U.uLight.value.copy(c);
       roofLight.color.setRGB(0.25 + flood * 1.4, 0.24 + flood * 1.35, 0.22 + flood * 1.2);
+      // The beams are invisible until dusk: don't spend fill on them.
+      shafts.visible = flood > 0.02;
       glowMat.opacity = 0.12 + flood * 0.88;
       for (const g of glows) g.scale.setScalar(16 + flood * 18);
     },

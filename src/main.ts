@@ -44,7 +44,7 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 0.95;
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.PCFShadowMap; // (PCFSoft is gone in r18x; this is what it fell back to)
 app.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -59,7 +59,7 @@ const club = new Club();
 let match = new Match(Date.now() & 0xffff, club.matchSetup(Date.now() & 0xffff));
 match.autoPlay = true;
 
-scene.add(createPitch());
+scene.add(createPitch(renderer));
 const stadium = createStadium(match.teams[0].info.kit.shirt, match.teams[1].info.kit.shirt);
 scene.add(stadium.group);
 const goals = createGoals();
@@ -73,6 +73,7 @@ scene.add(ballView.group);
 const particles = new Particles(match.teams[0].info.kit.shirt, match.teams[1].info.kit.shirt);
 scene.add(particles.points);
 const rig = new CameraRig(window.innerWidth / window.innerHeight);
+playersView.camera = rig.camera;
 if (params.has('showcase')) rig.distOverride = 9;
 // Camera setting (Close / Normal / Far), remembered on this device.
 const CAMERA_ORDER: CameraPreset[] = ['close', 'normal', 'far'];
@@ -589,4 +590,4 @@ function frame(now: number): void {
 requestAnimationFrame(frame);
 
 // Expose for debugging in the console.
-if (DEBUG) (window as unknown as { game: unknown }).game = { get match() { return match; }, renderer };
+if (DEBUG) (window as unknown as { game: unknown }).game = { get match() { return match; }, renderer, scene, pixelPass, stadium, atmo };

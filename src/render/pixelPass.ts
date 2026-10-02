@@ -2,18 +2,25 @@ import * as THREE from 'three';
 
 /**
  * Pixel-art presentation. The world is rendered at a low resolution into an HDR target
- * (much cheaper than full resolution), then one full-screen pass:
- * - upscales with crisp, nearest-neighbour pixels,
- * - draws 1-pixel outlines on silhouettes found in the depth buffer,
- * - applies the filmic tone map and a 90s night grade (cool shadows, warm highlights),
- * - quantises colours with a light ordered dither so gradients become pixel bands.
+ * (much cheaper than full resolution), then:
+ * 1. One pass *at that low resolution* (one fragment per art pixel, not per screen pixel):
+ *    1-pixel outlines from the depth buffer, glow, clarity, the filmic tone map and grade,
+ *    and an ordered-dither quantise so gradients become pixel bands.
+ * 2. A blit to the screen: crisp nearest-neighbour pixels, scrolled by the camera's
+ *    sub-pixel remainder. One texture read per screen pixel.
+ * Every screen pixel inside an art pixel would compute the same colour anyway, so doing
+ * the work per art pixel gives the identical picture for a fraction of the fill cost.
  * The HUD and controls are DOM, so they stay sharp.
  */
 export class PixelPass {
   readonly target: THREE.WebGLRenderTarget;
+  /** The finished low-res picture (graded, outlined, quantised). */
+  private post: THREE.WebGLRenderTarget;
   private scene = new THREE.Scene();
   private cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  private quad: THREE.Mesh;
   private mat: THREE.ShaderMaterial;
+  private blit: THREE.ShaderMaterial;
   /** Low-res height in pixels. */
   height = 380;
 
@@ -28,6 +35,8 @@ export class PixelPass {
     this.target.texture.generateMipmaps = false;
     this.target.depthTexture = new THREE.DepthTexture(4, 4);
     this.target.depthTexture.type = THREE.UnsignedIntType;
+    this.post = new THREE.WebGLRenderTarget(4, 4, { minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: false });
+    this.post.texture.generateMipmaps = false;
 
     this.mat = new THREE.ShaderMaterial({
       depthTest: false,
@@ -41,8 +50,8 @@ export class PixelPass {
         uLevels: { value: 22 },
         uOutline: { value: new THREE.Color(0x120f2a) },
         uNight: { value: 0 },
+        uExposure: { value: 1 },
         uCool: { value: 1 },
-        uSub: { value: new THREE.Vector2() },
       },
       vertexShader: /* glsl */ `
         varying vec2 vUv;
@@ -52,11 +61,26 @@ export class PixelPass {
         uniform sampler2D tColor;
         uniform sampler2D tDepth;
         uniform vec2 uRes;
-        uniform vec2 uSub;
-        uniform float uNear, uFar, uLevels, uNight, uCool;
+        uniform float uNear, uFar, uLevels, uNight, uCool, uExposure;
         uniform vec3 uOutline;
         varying vec2 vUv;
 
+        // ACES filmic, exactly as three.js does it (it skips tone mapping for render targets,
+        // and this pass renders into one).
+        vec3 RRTAndODTFit(vec3 v) {
+          vec3 a = v * (v + 0.0245786) - 0.000090537;
+          vec3 b = v * (0.983729 * v + 0.4329510) + 0.238081;
+          return a / b;
+        }
+        vec3 acesFilmic(vec3 color) {
+          const mat3 ACESInputMat = mat3(vec3(0.59719, 0.07600, 0.02840), vec3(0.35458, 0.90834, 0.13383), vec3(0.04823, 0.01566, 0.83777));
+          const mat3 ACESOutputMat = mat3(vec3(1.60475, -0.10208, -0.00327), vec3(-0.53108, 1.10813, -0.07276), vec3(-0.07367, -0.00605, 1.07602));
+          color *= uExposure / 0.6;
+          color = ACESInputMat * color;
+          color = RRTAndODTFit(color);
+          color = ACESOutputMat * color;
+          return clamp(color, 0.0, 1.0);
+        }
         float linDepth(vec2 uv) {
           float z = texture2D(tDepth, uv).x * 2.0 - 1.0;
           return (2.0 * uNear * uFar) / (uFar + uNear - z * (uFar - uNear));
@@ -72,9 +96,8 @@ export class PixelPass {
         }
 
         void main() {
-          // Snap to the centre of the low-res pixel, scrolled by the camera's sub-pixel
-          // remainder so the picture glides instead of stepping a whole pixel at a time.
-          vec2 px = floor(vUv * uRes + uSub) + 0.5;
+          // Rendered at the low resolution: this fragment is exactly one art pixel.
+          vec2 px = gl_FragCoord.xy;
           vec2 uv = px / uRes;
           vec3 c = texture2D(tColor, uv).rgb;
 
@@ -106,7 +129,7 @@ export class PixelPass {
           c = max(c + clamp(c - nb, -0.25, 0.25) * 0.35, 0.0);
 
           // Filmic tone map, then display gamma.
-          c = toneMapping(c);
+          c = acesFilmic(c);
           c = pow(max(c, 0.0), vec3(1.0 / 2.2));
 
           // Ghibli palette: lush greens, teal-blue shadows by day (purple-blue at night),
@@ -144,9 +167,27 @@ export class PixelPass {
         }
       `,
     });
-    const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.mat);
-    quad.frustumCulled = false;
-    this.scene.add(quad);
+    // Upscale: nearest art pixel, scrolled by the camera's sub-pixel remainder so the
+    // picture glides instead of stepping a whole pixel at a time.
+    this.blit = new THREE.ShaderMaterial({
+      depthTest: false,
+      depthWrite: false,
+      uniforms: { tPost: { value: this.post.texture }, uRes: this.mat.uniforms.uRes, uSub: { value: new THREE.Vector2() } },
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform sampler2D tPost;
+        uniform vec2 uRes;
+        uniform vec2 uSub;
+        varying vec2 vUv;
+        void main() { gl_FragColor = texture2D(tPost, (floor(vUv * uRes + uSub) + 0.5) / uRes); }
+      `,
+    });
+    this.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.mat);
+    this.quad.frustumCulled = false;
+    this.scene.add(this.quad);
   }
 
   /** Low-res size for a screen of w×h CSS pixels. */
@@ -154,6 +195,7 @@ export class PixelPass {
     const lh = Math.round(Math.min(this.height, h));
     const lw = Math.max(1, Math.round((w / h) * lh));
     this.target.setSize(lw, lh);
+    this.post.setSize(lw, lh);
     (this.mat.uniforms.uRes.value as THREE.Vector2).set(lw, lh);
   }
 
@@ -162,13 +204,18 @@ export class PixelPass {
   }
 
   render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera, night: number, cool = 1, subX = 0, subY = 0): void {
-    (this.mat.uniforms.uSub.value as THREE.Vector2).set(subX, subY);
+    (this.blit.uniforms.uSub.value as THREE.Vector2).set(subX, subY);
     this.mat.uniforms.uCool.value = cool;
+    this.mat.uniforms.uExposure.value = renderer.toneMappingExposure;
     this.mat.uniforms.uNear.value = camera.near;
     this.mat.uniforms.uFar.value = camera.far;
     this.mat.uniforms.uNight.value = night;
     renderer.setRenderTarget(this.target);
     renderer.render(scene, camera);
+    this.quad.material = this.mat;
+    renderer.setRenderTarget(this.post);
+    renderer.render(this.scene, this.cam);
+    this.quad.material = this.blit;
     renderer.setRenderTarget(null);
     renderer.render(this.scene, this.cam);
   }

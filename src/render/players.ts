@@ -40,6 +40,8 @@ const THIGH = 0.43;
 const SHIN = 0.42;
 const HIP_Y = 0.94;
 const HAIR_PARTS: PartName[] = ['hairShort', 'hairCurly', 'hairBun'];
+/** Too small to show in the sun's shadow map (~4-8 cm per texel). */
+const NO_SHADOW = new Set<PartName>(['hand', 'neck', 'boot', 'flag', ...HAIR_PARTS]);
 
 function lathe(points: [number, number][], segments = 14): THREE.BufferGeometry {
   return new THREE.LatheGeometry(
@@ -84,7 +86,7 @@ function buildGeometries(): Record<PartName, THREE.BufferGeometry> {
   const neck = new THREE.CylinderGeometry(0.052, 0.058, 0.11, 10);
   neck.translate(0, 0.04, 0);
 
-  const head = new THREE.SphereGeometry(0.104, 20, 14);
+  const head = new THREE.SphereGeometry(0.104, 16, 12);
   {
     // Shape a jaw and a slightly longer face.
     const pos = head.getAttribute('position') as THREE.BufferAttribute;
@@ -167,14 +169,14 @@ function buildGeometries(): Record<PartName, THREE.BufferGeometry> {
   // Hand: a relaxed, slightly cupped palm with the fingers together and a thumb.
   // Origin at the wrist; thin across x so the palm faces the body, thumb forward (+z).
   const hand = (() => {
-    const palm = new THREE.SphereGeometry(0.042, 10, 8);
+    const palm = new THREE.SphereGeometry(0.042, 8, 6);
     palm.scale(0.62, 1.05, 1);
     palm.translate(0, -0.045, 0.004);
-    const fingers = new THREE.CapsuleGeometry(0.024, 0.045, 3, 8);
+    const fingers = new THREE.CapsuleGeometry(0.024, 0.045, 2, 6);
     fingers.scale(0.95, 1, 1.45);
     fingers.rotateX(0.25);
     fingers.translate(0, -0.1, 0.012);
-    const thumb = new THREE.CapsuleGeometry(0.012, 0.035, 3, 6);
+    const thumb = new THREE.CapsuleGeometry(0.012, 0.035, 1, 5);
     thumb.rotateX(0.5);
     thumb.translate(0, -0.05, 0.04);
     return mergeGeometries([palm.toNonIndexed(), fingers.toNonIndexed(), thumb.toNonIndexed()])!;
@@ -419,6 +421,14 @@ export class PlayersView {
   private ring: THREE.Mesh;
   private marker: THREE.Mesh;
   private n: number;
+  /** Camera used to cull players out of view (set by the app each frame). */
+  camera: THREE.Camera | null = null;
+  private frustum = new THREE.Frustum();
+  private projView = new THREE.Matrix4();
+  private sphere = new THREE.Sphere();
+  private visible: number[] = [];
+  /** Per-player attributes that only change with the kits: master copies for culling. */
+  private statics: { attr: THREE.BufferAttribute; master: Float32Array; per: number }[] = [];
   private hidden = new THREE.Matrix4().makeScale(0, 0, 0);
 
   // scratch
@@ -525,7 +535,8 @@ export class PlayersView {
       const mesh = new THREE.InstancedMesh(geo, mats[name], count);
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       mesh.frustumCulled = false;
-      mesh.castShadow = true;
+      // Parts smaller than a few shadow-map texels add nothing to the shadow but a draw.
+      mesh.castShadow = !NO_SHADOW.has(name);
       mesh.receiveShadow = true;
       if (name === 'torso' || name === 'thigh') mesh.customDepthMaterial = bendDepth(name);
       this.group.add(mesh);
@@ -624,6 +635,61 @@ export class PlayersView {
     for (const name of Object.keys(this.parts) as PartName[]) {
       const m = this.parts[name].mesh;
       if (m.instanceColor) m.instanceColor.needsUpdate = true;
+    }
+    // Snapshot the kit attributes: culling packs visible players to the front every frame.
+    this.statics = [];
+    for (const name of Object.keys(this.parts) as PartName[]) {
+      const { mesh, perPlayer } = this.parts[name];
+      const keep = (attr: THREE.BufferAttribute | null) => attr && this.statics.push({ attr, master: (attr.array as Float32Array).slice(), per: perPlayer });
+      keep(mesh.instanceColor);
+      for (const [k, a] of Object.entries(mesh.geometry.attributes)) {
+        if (k !== 'aBend' && (a as THREE.InstancedBufferAttribute).isInstancedBufferAttribute) keep(a as THREE.BufferAttribute);
+      }
+    }
+  }
+
+  /**
+   * Draw only players the camera can see (with a margin for the long evening shadows they
+   * throw into view): pack their instances to the front of every part's buffers and draw
+   * that many. Off-screen players then cost nothing in either the shadow or the main pass.
+   */
+  private cull(): void {
+    const vis = this.visible;
+    vis.length = 0;
+    const cam = this.camera;
+    if (cam) {
+      cam.updateMatrixWorld();
+      this.projView.copy(cam.matrixWorld).invert().premultiply(cam.projectionMatrix);
+      this.frustum.setFromProjectionMatrix(this.projView);
+    }
+    for (let i = 0; i < this.list.length; i++) {
+      const p = this.list[i];
+      this.sphere.center.set(p.pos.x, 1, p.pos.z);
+      this.sphere.radius = 5;
+      if (!cam || this.frustum.intersectsSphere(this.sphere)) vis.push(p.id);
+    }
+    const n = vis.length;
+    for (const name of Object.keys(this.parts) as PartName[]) {
+      const { mesh, perPlayer: per } = this.parts[name];
+      // Rewritten every frame: pack in place (slots only move toward the front).
+      const pack = (attr: THREE.BufferAttribute, size: number) => {
+        const a = attr.array as Float32Array;
+        for (let j = 0; j < n; j++) {
+          if (vis[j] === j) continue;
+          a.copyWithin(j * per * size, vis[j] * per * size, (vis[j] + 1) * per * size);
+        }
+      };
+      pack(mesh.instanceMatrix, 16);
+      const b = mesh.geometry.getAttribute('aBend') as THREE.BufferAttribute | undefined;
+      if (b) pack(b, 3);
+      mesh.count = n * per;
+    }
+    // Kit attributes: copied from the master in the same order.
+    for (const { attr, master, per } of this.statics) {
+      const a = attr.array as Float32Array;
+      const size = attr.itemSize;
+      for (let j = 0; j < n; j++) a.set(master.subarray(vis[j] * per * size, (vis[j] + 1) * per * size), j * per * size);
+      attr.needsUpdate = true;
     }
   }
 
@@ -1247,6 +1313,7 @@ export class PlayersView {
     bend.needsUpdate = true;
     kneeBend.needsUpdate = true;
 
+    this.cull();
     for (const name of Object.keys(this.parts) as PartName[]) this.parts[name].mesh.instanceMatrix.needsUpdate = true;
     this.contact.instanceMatrix.needsUpdate = true;
     this.flood.instanceMatrix.needsUpdate = true;
