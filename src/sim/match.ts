@@ -880,24 +880,8 @@ export class Match {
       const his = this.ai.intercept[pt.id].t;
       if (mine < 0 || (his >= 0 && mine > his - 0.3)) return null;
     }
-    // A through ball for us: sprint for the planned spot until the ball is nearly there.
-    if (this.passTarget === c) {
-      const rt = this.ai.runTarget(c);
-      if (rt && this.ballDist(c) > 4 && dist2D(c.pos.x, c.pos.z, rt.x, rt.z) > 1) {
-        out.set(rt.x, 0, rt.z);
-        return 'loose';
-      }
-    }
-    // Run to where the ball is going (the intercept on its predicted path), not where it
-    // is now. Close to the ball, lean back toward the ball itself so the final approach
-    // stays tight.
-    const ip = this.ai.intercept[c.id];
-    const b = this.ball;
-    const gap = this.ballDist(c);
-    const w = clamp((gap - 2) / 6, 0, 1) * 0.85;
-    const bx = b.pos.x + b.vel.x * 0.15;
-    const bz = b.pos.z + b.vel.z * 0.15;
-    out.set(bx + (ip.x - bx) * (0.15 + w), 0, bz + (ip.z - bz) * (0.15 + w));
+    // Go and get it (see AI.meetPoint: the ball itself, led by how it's moving).
+    this.ai.meetPoint(c, out);
     return 'loose';
   }
 
