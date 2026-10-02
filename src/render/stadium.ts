@@ -40,7 +40,7 @@ export interface Stadium {
 /** Flares lighting the crowd at once (the brightest, nearest are what matter). */
 export const MAX_FLARES = 8;
 
-const U = {
+export const U = {
   uTime: { value: 0 },
   uExcite: { value: 0.2 },
   uFog: { value: new THREE.Color() },
@@ -88,7 +88,7 @@ const MAIN_H = 52.5;
 const roofAt = (back: [number, number], edge: number, h: number, o: number) => back[1] + ((o - back[0]) / (edge - back[0])) * (h - back[1]);
 
 /** A point on the stands' front edge with its outward normal and the section it's in. */
-interface PathPt {
+export interface PathPt {
   x: number;
   z: number;
   nx: number;
@@ -161,13 +161,13 @@ function splitPath(path: PathPt[]): { left: PathPt[]; main: PathPt[]; right: Pat
 }
 
 /** Point at (offset, height) behind path point p. */
-const at = (p: PathPt, o: number, h: number, out = new THREE.Vector3()) => out.set(p.x + p.nx * o, h, p.z + p.nz * o);
+export const at = (p: PathPt, o: number, h: number, out = new THREE.Vector3()) => out.set(p.x + p.nx * o, h, p.z + p.nz * o);
 
 /**
  * A surface swept around the bowl between two points of the cross-section. uv is in
  * metres: x along the front edge of the strip, y up the slope. aHome/aAway mark the ends.
  */
-function ringStrip(path: PathPt[], a: [number, number], b: [number, number]): THREE.BufferGeometry {
+export function ringStrip(path: PathPt[], a: [number, number], b: [number, number]): THREE.BufferGeometry {
   const n = path.length;
   const pos = new Float32Array(n * 6);
   const uv = new Float32Array(n * 4);
@@ -205,7 +205,7 @@ function ringStrip(path: PathPt[], a: [number, number], b: [number, number]): TH
 }
 
 /** u-range (metres along the strip front at offset o) covered by a zone. */
-function zoneRange(path: PathPt[], o: number, zone: number): [number, number] {
+export function zoneRange(path: PathPt[], o: number, zone: number): [number, number] {
   let u = 0;
   let u0 = -1;
   let u1 = 0;
@@ -224,7 +224,7 @@ function zoneRange(path: PathPt[], o: number, zone: number): [number, number] {
 }
 
 /** A flat wall in the section plane at each of `pts` with the given (offset, height) outline. */
-function caps(pts: PathPt[], outlinePts: [number, number][]): THREE.BufferGeometry {
+export function caps(pts: PathPt[], outlinePts: [number, number][]): THREE.BufferGeometry {
   const outline = outlinePts.map(([o, h]) => new THREE.Vector2(o, h));
   const tris = THREE.ShapeUtils.triangulateShape(outline, []);
   const pos: number[] = [];
@@ -249,7 +249,7 @@ function caps(pts: PathPt[], outlinePts: [number, number][]): THREE.BufferGeomet
  * dozens of small props cost a handful of draws. Meshes flagged `userData.live` (cloth,
  * anything animated in its own space) are kept as they are.
  */
-function bakeStatic(src: THREE.Group): THREE.Group {
+export function bakeStatic(src: THREE.Group): THREE.Group {
   src.updateMatrixWorld(true);
   const byMat = new Map<THREE.Material, THREE.BufferGeometry[]>();
   const out = new THREE.Group();
@@ -301,7 +301,7 @@ interface CrowdOpts {
   fill?: number;
 }
 
-function crowdMaterial(o: CrowdOpts): THREE.ShaderMaterial {
+export function crowdMaterial(o: CrowdOpts): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     side: THREE.DoubleSide,
     uniforms: {
@@ -581,16 +581,18 @@ export interface StadiumClub {
   name?: string;
   /** The big drop banner over the home end: its words and colours. */
   motto?: { text: string; bg: number; fg: number };
+  /** Year the club was founded (from the crest), for the old ground's gable. */
+  founded?: string;
 }
 
 /** Draws `img` (a 100 x 124 crest) centred at (x, y), `h` tall. */
-function drawCrest(c: CanvasRenderingContext2D, img: CanvasImageSource, x: number, y: number, h: number): void {
+export function drawCrest(c: CanvasRenderingContext2D, img: CanvasImageSource, x: number, y: number, h: number): void {
   const w = h * (100 / 124);
   c.drawImage(img, x - w / 2, y - h / 2, w, h);
 }
 
 /** The travelling fans' card display: their colours in bold diagonals and a big star. */
-function awayTifoTexture(away: number): THREE.CanvasTexture {
+export function awayTifoTexture(away: number): THREE.CanvasTexture {
   const cv = document.createElement('canvas');
   cv.width = 512;
   cv.height = 160;
@@ -628,7 +630,7 @@ function awayTifoTexture(away: number): THREE.CanvasTexture {
   return tex;
 }
 
-function tifoTexture(home: number, club: StadiumClub): THREE.CanvasTexture {
+export function tifoTexture(home: number, club: StadiumClub): THREE.CanvasTexture {
   const cv = document.createElement('canvas');
   cv.width = 512;
   cv.height = 160;
@@ -751,7 +753,7 @@ function ribbonMaterial(home: number): THREE.ShaderMaterial {
 }
 
 /** Hospitality boxes between the tiers: dark glass by day, warm interiors at night. */
-function glassMaterial(): THREE.ShaderMaterial {
+export function glassMaterial(): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     side: THREE.DoubleSide,
     uniforms: { ...U },
@@ -786,7 +788,7 @@ function glassMaterial(): THREE.ShaderMaterial {
   });
 }
 
-function lampMaterial(): THREE.ShaderMaterial {
+export function lampMaterial(): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
     uniforms: { uFlood: SHARED.uFlood },
     vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position,1.0); }`,
@@ -835,7 +837,7 @@ function lampSpots(): THREE.Vector3[] {
 }
 
 /** Roof sheeting seen from below: rafters across, purlins along, a little weathering. */
-function roofMaterial(color: number): THREE.MeshStandardMaterial {
+export function roofMaterial(color: number): THREE.MeshStandardMaterial {
   const m = litMaterial({
     color,
     roughness: 0.75,
@@ -851,7 +853,7 @@ function roofMaterial(color: number): THREE.MeshStandardMaterial {
 }
 
 /** The roof front fascia: the club's name repeated along it, painted on the club colour. */
-function fasciaMaterial(home: number, name: string): THREE.MeshStandardMaterial {
+export function fasciaMaterial(home: number, name: string): THREE.MeshStandardMaterial {
   const cv = document.createElement('canvas');
   cv.width = 1024;
   cv.height = 64;
@@ -886,7 +888,7 @@ function fasciaMaterial(home: number, name: string): THREE.MeshStandardMaterial 
 }
 
 /** Glazed curtain wall (the main stand's flanks): mullions, warm stairwell lights at night. */
-function curtainMaterial(): THREE.MeshStandardMaterial {
+export function curtainMaterial(): THREE.MeshStandardMaterial {
   const m = litMaterial({
     color: 0x2c333d,
     roughness: 0.35,
@@ -960,7 +962,7 @@ function lettersTexture(name: string): THREE.CanvasTexture {
 }
 
 let glowTex: THREE.Texture | null = null;
-function glowTexture(): THREE.Texture {
+export function glowTexture(): THREE.Texture {
   if (glowTex) return glowTex;
   const cv = document.createElement('canvas');
   cv.width = cv.height = 128;
@@ -976,7 +978,9 @@ function glowTexture(): THREE.Texture {
   return glowTex;
 }
 
-const BOARDS: { bg: string; fg: string; text: string }[] = [
+export type Board = { bg: string; fg: string; text: string };
+
+const BOARDS: Board[] = [
   { bg: '#1f3b5c', fg: '#f2ede1', text: 'GAMENIGHT' },
   { bg: '#c8393b', fg: '#ffffff', text: 'ROSSONERI' },
   { bg: '#f1ebdc', fg: '#23345e', text: 'ATLANTIC' },
@@ -987,15 +991,15 @@ const BOARDS: { bg: string; fg: string; text: string }[] = [
   { bg: '#23345e', fg: '#9fd0ff', text: 'HALCYON' },
 ];
 
-/** All board designs in one atlas (8 rows), drawn once at start-up. */
-function boardTexture(): THREE.CanvasTexture {
+/** All board designs in one atlas (8 rows), drawn once per ground. */
+function boardTexture(boards: Board[]): THREE.CanvasTexture {
   const cv = document.createElement('canvas');
   cv.width = 512;
   cv.height = 512;
   const tex = new THREE.CanvasTexture(cv);
   const draw = () => {
     const g = cv.getContext('2d')!;
-    BOARDS.forEach((b, i) => {
+    boards.forEach((b, i) => {
       const y = i * 64;
       g.fillStyle = b.bg;
       g.fillRect(0, y, 512, 64);
@@ -1016,7 +1020,8 @@ function boardTexture(): THREE.CanvasTexture {
   return tex;
 }
 
-function adBoards(): THREE.InstancedMesh {
+/** Pitchside LED boards (8 designs). */
+export function adBoards(boards: Board[] = BOARDS): THREE.InstancedMesh {
   const panelW = 6;
   const geo = new THREE.BoxGeometry(panelW - 0.08, 0.9, 0.12);
   geo.translate(0, 0.45, 0);
@@ -1037,7 +1042,7 @@ function adBoards(): THREE.InstancedMesh {
   // LED boards: the front face shows a design from the atlas and glows more as it gets dark.
   const mat = litMaterial({
     roughness: 0.45,
-    uniforms: { uBoards: { value: boardTexture() } },
+    uniforms: { uBoards: { value: boardTexture(boards) } },
     vertDecl: 'attribute float aDesign; varying float vDesign; varying float vFront;',
     vertBody: 'vDesign = aDesign; vFront = step(0.5, normal.z);',
     fragDecl: 'uniform sampler2D uBoards; varying float vDesign; varying float vFront;',
@@ -1061,7 +1066,7 @@ function adBoards(): THREE.InstancedMesh {
     q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), p.ry);
     m.compose(new THREE.Vector3(p.x, 0, p.z), q, new THREE.Vector3(1, 1, 1));
     mesh.setMatrixAt(i, m);
-    design[i] = (i * 5 + (i >> 2)) % BOARDS.length;
+    design[i] = (i * 5 + (i >> 2)) % boards.length;
   });
   geo.setAttribute('aDesign', new THREE.InstancedBufferAttribute(design, 1));
   mesh.instanceMatrix.needsUpdate = true;
@@ -1074,7 +1079,7 @@ function adBoards(): THREE.InstancedMesh {
  * Flags on poles, waved by fans in the stands: each swings side to side around the pole's
  * foot while the cloth ripples. Most are in the ultras' end.
  */
-function crowdFlags(path: PathPt[], home: number, away: number, club: StadiumClub): THREE.InstancedMesh {
+export function crowdFlags(path: PathPt[], home: number, away: number, club: StadiumClub): THREE.InstancedMesh {
   const cloth = new THREE.PlaneGeometry(2.4, 1.5, 8, 3);
   cloth.translate(1.2, 2.45, 0);
   cloth.setAttribute('aCloth', new THREE.Float32BufferAttribute(new Array(cloth.attributes.position.count).fill(1), 1));
@@ -1244,7 +1249,7 @@ function crowdFlags(path: PathPt[], home: number, away: number, club: StadiumClu
 }
 
 /** Soft volumetric beams from the roof's floodlight banks, visible as dusk falls. */
-function lightShafts(spots: THREE.Vector3[]): THREE.Group {
+export function lightShafts(spots: THREE.Vector3[]): THREE.Group {
   const g = new THREE.Group();
   const mat = new THREE.ShaderMaterial({
     transparent: true,
@@ -1314,7 +1319,7 @@ type ClothPin = 'left' | 'top' | 'sides';
  * - top: hung from its top edge (banners over a railing),
  * - sides: stretched between two poles (held-up banners).
  */
-function windCloth<T extends THREE.Material>(mat: T, amp: number, pin: ClothPin, w: number, h: number): T {
+export function windCloth<T extends THREE.Material>(mat: T, amp: number, pin: ClothPin, w: number, h: number): T {
   const hw = (w / 2).toFixed(3);
   const hh = (h / 2).toFixed(3);
   const free =
@@ -1371,7 +1376,7 @@ function windCloth<T extends THREE.Material>(mat: T, amp: number, pin: ClothPin,
 }
 
 /** Corner flags and the two dugouts on the far touchline. */
-function pitchside(home: number, away: number): THREE.Group {
+export function pitchside(home: number, away: number): THREE.Group {
   const g = new THREE.Group();
   const pole = litMaterial({ color: 0xf2f0e8, roughness: 0.5 });
   const flagMat = windCloth(litMaterial({ color: 0xffd447, roughness: 0.8 }), 0.1, 'left', 0.4, 0.3);
@@ -1427,7 +1432,7 @@ function pitchside(home: number, away: number): THREE.Group {
   return g;
 }
 
-function sky(): THREE.Mesh {
+export function sky(): THREE.Mesh {
   const geo = new THREE.SphereGeometry(700, 32, 16);
   const mat = new THREE.ShaderMaterial({
     side: THREE.BackSide,
@@ -1540,7 +1545,10 @@ function batchedCloth<T extends THREE.Material>(mat: T, amp: number): T {
  * Supporters' banners hung over the railings at the front of the lower tier, plus the
  * ultras' giant drop banner over the hospitality band behind the home goal.
  */
-function banners(path: PathPt[], home: number, away: number, club: StadiumClub): THREE.Mesh {
+/** Where the big drop banner hangs in the home end: (offset, centre height), width, height. */
+export type DropSpot = { o: number; y: number; w: number; h: number };
+
+export function banners(path: PathPt[], home: number, away: number, club: StadiumClub, drop: DropSpot = { o: 20.9, y: 13.7, w: 34, h: 4.2 }): THREE.Mesh {
   const hex = (c: number) => '#' + c.toString(16).padStart(6, '0');
   let crest: CanvasImageSource | null = null;
   const W = '#f3eee2';
@@ -1566,7 +1574,7 @@ function banners(path: PathPt[], home: number, away: number, club: StadiumClub):
   // The drop banner over the boxes in the home end.
   const end = straights[1][Math.floor(straights[1].length / 2)];
   const motto = club.motto;
-  specs.push({ text: (motto?.text || 'ONE CLUB · ONE NIGHT').toUpperCase(), bg: motto ? hex(motto.bg) : hex(home), fg: motto ? hex(motto.fg) : W, w: 34, h: 4.2, style: 2, p: end, o: 20.9, y: 15.8 - 2.1, crests: true });
+  specs.push({ text: (motto?.text || 'ONE CLUB · ONE NIGHT').toUpperCase(), bg: motto ? hex(motto.bg) : hex(home), fg: motto ? hex(motto.fg) : W, w: drop.w, h: drop.h, style: 2, p: end, o: drop.o, y: drop.y, crests: true });
 
   // All artwork in one atlas (rows of 512 px), so every banner is one draw together.
   const rows = specs.map((sp) => Math.max(32, Math.round((512 * sp.h) / sp.w / 4) * 4));
@@ -1691,7 +1699,7 @@ function banners(path: PathPt[], home: number, away: number, club: StadiumClub):
  * The player's photo as a fan-made banner held up on two poles: a big one in the middle of
  * the ultras' end (right in the goal crowd shot) and a smaller one in the far stand.
  */
-function fanBanners(path: PathPt[], home: number): { group: THREE.Group; set(photo: CanvasImageSource | null): void } {
+export function fanBanners(path: PathPt[], home: number): { group: THREE.Group; set(photo: CanvasImageSource | null): void } {
   const group = new THREE.Group();
   group.visible = false;
   const cv = document.createElement('canvas');
@@ -1750,22 +1758,26 @@ function fanBanners(path: PathPt[], home: number): { group: THREE.Group; set(pho
   };
 }
 
-export function createStadium(homeColor: number, awayColor: number, club: StadiumClub = {}): Stadium {
-  const group = new THREE.Group();
-  group.add(sky());
-
+/** The land the ground stands on, and the grass apron round the pitch. */
+export function groundPlanes(): THREE.Mesh[] {
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(800, 800), litMaterial({ color: 0x6f7262, roughness: 0.95 }));
   ground.rotation.x = -Math.PI / 2;
   ground.position.y = -0.03;
   // Under/behind everything: draw after the stands and players so covered pixels are skipped.
   ground.renderOrder = 2;
-  group.add(ground);
   const apron = new THREE.Mesh(new THREE.PlaneGeometry(PITCH.length + 30, PITCH.width + 26), litMaterial({ color: 0x4f6a3c, roughness: 0.95 }));
   apron.rotation.x = -Math.PI / 2;
   apron.position.y = -0.02;
   apron.receiveShadow = true;
   apron.renderOrder = 2;
-  group.add(apron);
+  return [ground, apron];
+}
+
+export function createStadium(homeColor: number, awayColor: number, club: StadiumClub = {}): Stadium {
+  const group = new THREE.Group();
+  group.add(sky());
+
+  group.add(...groundPlanes());
 
   // ---- the stands
   const path = bowlPath();
@@ -2000,7 +2012,80 @@ export function createStadium(homeColor: number, awayColor: number, club: Stadiu
   group.add(nearStand);
 
   const spots = lampSpots();
-  // Lamp glows: one instanced, camera-facing quad per bank (one draw for all of them).
+  const glows = lampGlows(spots);
+  group.add(glows.mesh);
+
+  group.add(adBoards());
+  group.add(crowdFlags(path, homeColor, awayColor, club));
+  group.add(banners(path, homeColor, awayColor, club));
+  group.add(bakeStatic(pitchside(homeColor, awayColor)));
+  const shafts = lightShafts(spots);
+  group.add(shafts);
+  const fan = fanBanners(path, homeColor);
+  group.add(fan.group);
+
+  return {
+    group,
+    setFanBanner: (photo) => fan.set(photo),
+    setNearStand: (show) => {
+      nearStand.visible = show;
+      paddockGroup.visible = !show;
+    },
+    update(time, excitement, atmo, tifo = 0, terraces) {
+      const flood = updateShared(time, excitement, atmo, tifo, terraces);
+      roofLight.color.setRGB(0.25 + flood * 1.4, 0.24 + flood * 1.35, 0.22 + flood * 1.2);
+      // The beams are invisible until dusk: don't spend fill on them.
+      shafts.visible = flood > 0.02;
+      glows.update(flood);
+    },
+  };
+}
+
+/**
+ * Per frame, for any ground: the crowd's light, the chant, the flares, the sky and haze -
+ * the uniforms every stand shader shares. Returns the floodlight level.
+ */
+const c = new THREE.Color();
+const c2 = new THREE.Color();
+
+export function updateShared(time: number, excitement: number, atmo: Atmosphere, tifo = 0, terraces?: Terraces): number {
+  U.uTime.value = time;
+  if (terraces) {
+    U.uChant.value.set(terraces.home, terraces.away, terraces.beat, terraces.arms);
+    // The flares burning now (and their flicker).
+    let i = 0;
+    for (const f of terraces.pyro) {
+      if (i >= MAX_FLARES) break;
+      const age = terraces.t - f.born;
+      if (f.smoke || age < 0) continue;
+      const fade = Math.min(1, age / 0.6, (f.life - age) / 1.5);
+      const flick = 0.75 + 0.25 * Math.sin(time * 31 + f.seed * 40) * Math.sin(time * 17.3 + f.seed * 13);
+      U.uFlares.value[i++].set(f.x, f.y, f.z, fade * flick);
+    }
+    U.uFlareN.value = i;
+  }
+  U.uExcite.value = excitement;
+  U.uTifoOn.value += (tifo - U.uTifoOn.value) * 0.04;
+  U.uSkyTop.value.copy(atmo.skyTop);
+  U.uSkyHorizon.value.copy(atmo.skyHorizon);
+  U.uSunDir.value.copy(atmo.sun.position).negate().normalize();
+  U.uSunColor.value.copy(atmo.sun.color);
+  const fog = atmo.sun.parent instanceof THREE.Scene ? (atmo.sun.parent.fog as THREE.Fog | null) : null;
+  if (fog) U.uFog.value.copy(fog.color);
+  U.uHaze.value = atmo.haze;
+  // Crowd light: sky + a share of the sun + floodlights.
+  const flood = SHARED.uFlood.value;
+  c.copy(atmo.hemi.color).multiplyScalar(atmo.hemi.intensity * 0.55);
+  c2.copy(atmo.sun.color).multiplyScalar(atmo.sun.intensity * 0.22);
+  c.add(c2);
+  c2.copy(SHARED.uFloodColor.value).multiplyScalar(flood * 0.6);
+  c.add(c2);
+  U.uLight.value.copy(c);
+  return flood;
+}
+
+/** Lamp glows: one instanced, camera-facing quad per floodlight bank (one draw for all). */
+export function lampGlows(spots: THREE.Vector3[], size = 1): { mesh: THREE.InstancedMesh; update(flood: number): void } {
   const glowMat = new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
@@ -2031,64 +2116,11 @@ export function createStadium(homeColor: number, awayColor: number, club: Stadiu
   const glows = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), glowMat, spots.length);
   spots.forEach((sp, i) => glows.setMatrixAt(i, new THREE.Matrix4().makeTranslation(sp.x, sp.y, sp.z)));
   glows.frustumCulled = false;
-  group.add(glows);
-
-  group.add(adBoards());
-  group.add(crowdFlags(path, homeColor, awayColor, club));
-  group.add(banners(path, homeColor, awayColor, club));
-  group.add(bakeStatic(pitchside(homeColor, awayColor)));
-  const shafts = lightShafts(spots);
-  group.add(shafts);
-  const fan = fanBanners(path, homeColor);
-  group.add(fan.group);
-
-  const c = new THREE.Color();
-  const c2 = new THREE.Color();
   return {
-    group,
-    setFanBanner: (photo) => fan.set(photo),
-    setNearStand: (show) => {
-      nearStand.visible = show;
-      paddockGroup.visible = !show;
-    },
-    update(time, excitement, atmo, tifo = 0, terraces) {
-      U.uTime.value = time;
-      if (terraces) {
-        U.uChant.value.set(terraces.home, terraces.away, terraces.beat, terraces.arms);
-        // The flares burning now (and their flicker).
-        let i = 0;
-        for (const f of terraces.pyro) {
-          if (i >= MAX_FLARES) break;
-          const age = terraces.t - f.born;
-          if (f.smoke || age < 0) continue;
-          const fade = Math.min(1, age / 0.6, (f.life - age) / 1.5);
-          const flick = 0.75 + 0.25 * Math.sin(time * 31 + f.seed * 40) * Math.sin(time * 17.3 + f.seed * 13);
-          U.uFlares.value[i++].set(f.x, f.y, f.z, fade * flick);
-        }
-        U.uFlareN.value = i;
-      }
-      U.uExcite.value = excitement;
-      U.uTifoOn.value += (tifo - U.uTifoOn.value) * 0.04;
-      U.uSkyTop.value.copy(atmo.skyTop);
-      U.uSkyHorizon.value.copy(atmo.skyHorizon);
-      U.uSunDir.value.copy(atmo.sun.position).negate().normalize();
-      U.uSunColor.value.copy(atmo.sun.color);
-      const fog = atmo.sun.parent instanceof THREE.Scene ? (atmo.sun.parent.fog as THREE.Fog | null) : null;
-      if (fog) U.uFog.value.copy(fog.color);
-      U.uHaze.value = atmo.haze;
-      // Crowd light: sky + a share of the sun + floodlights.
-      const flood = SHARED.uFlood.value;
-      c.copy(atmo.hemi.color).multiplyScalar(atmo.hemi.intensity * 0.55);
-      c2.copy(atmo.sun.color).multiplyScalar(atmo.sun.intensity * 0.22);
-      c.add(c2);
-      c2.copy(SHARED.uFloodColor.value).multiplyScalar(flood * 0.6);
-      c.add(c2);
-      U.uLight.value.copy(c);
-      roofLight.color.setRGB(0.25 + flood * 1.4, 0.24 + flood * 1.35, 0.22 + flood * 1.2);
-      // The beams are invisible until dusk: don't spend fill on them.
-      shafts.visible = flood > 0.02;
+    mesh: glows,
+    update(flood) {
       glowMat.uniforms.uOpacity.value = 0.12 + flood * 0.88;
-      glowMat.uniforms.uScale.value = 16 + flood * 18;
+      glowMat.uniforms.uScale.value = (16 + flood * 18) * size;
     },
   };
 }
