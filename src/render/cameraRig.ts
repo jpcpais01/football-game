@@ -3,6 +3,9 @@ import { PITCH } from '../sim/constants';
 import type { Match } from '../sim/match';
 import { clamp, lerp } from '../sim/vec';
 
+const CAM_PITCH_DEG = 21;
+const LOOK_OFFSET = 3.5;
+
 export const CAMERA_PRESETS = { close: 33, normal: 40, far: 48 } as const;
 export type CameraPreset = keyof typeof CAMERA_PRESETS;
 
@@ -66,6 +69,21 @@ export class CameraRig {
     }
     goalX = clamp(goalX, -PITCH.halfL + 10, PITCH.halfL - 10);
     goalZ = clamp(goalZ, -PITCH.halfW + 6, PITCH.halfW - 6);
+    const pixel = this.pixelHeight > 0;
+    if (pixel) {
+      // Pixel art: a locked broadcast framing (no dolly, no zoom, no shake) so the pixel
+      // grid stays perfectly stable and the camera only pans left and right. The forward
+      // position is chosen so the near touchline sits at the bottom of the screen.
+      this.dist = this.baseDist;
+      const pitch = (CAM_PITCH_DEG * Math.PI) / 180;
+      const bottom = pitch + (this.camera.fov * Math.PI) / 360;
+      const h = Math.sin(pitch) * this.dist;
+      const back = Math.cos(pitch) * this.dist;
+      goalZ = PITCH.halfW + 1.5 + h / Math.tan(bottom) - back + LOOK_OFFSET;
+      this.tz = goalZ;
+      this.vz = 0;
+      this.shake = 0;
+    }
 
     // Critically damped follow.
     const w = 2.6;
@@ -78,14 +96,15 @@ export class CameraRig {
     const speed = b.vel.len();
     const air = Math.max(0, b.pos.y - 2) * 0.6;
     const wantDist = (match.phase === 'goal' ? this.baseDist * 0.78 : this.baseDist) + Math.min(5, speed * 0.12 + air);
-    this.dist += ((this.distOverride || wantDist) - this.dist) * k * 0.3;
+    if (!pixel) this.dist += ((this.distOverride || wantDist) - this.dist) * k * 0.3;
+    else if (this.distOverride) this.dist = this.distOverride;
     this.shake *= Math.exp(-dt * 6);
     this.place(time);
   }
 
   private place(time: number): void {
     // A little lower than a tactical cam so the stands and sky are part of the picture.
-    const pitch = (21 * Math.PI) / 180;
+    const pitch = (CAM_PITCH_DEG * Math.PI) / 180;
     const cam = this.camera;
     const sx = Math.sin(time * 41) * this.shake * 0.25;
     const sy = Math.cos(time * 37) * this.shake * 0.2;
@@ -104,7 +123,7 @@ export class CameraRig {
       tz = szp;
     }
     cam.position.set(tx + sx, Math.sin(pitch) * this.dist + sy, tz + Math.cos(pitch) * this.dist);
-    this.look.set(tx, 0, tz - 3.5);
+    this.look.set(tx, 0, tz - LOOK_OFFSET);
     cam.lookAt(this.look);
   }
 }
