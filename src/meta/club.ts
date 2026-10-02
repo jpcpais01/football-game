@@ -4,7 +4,7 @@ import { TEAMS, type Kit, type TeamInfo } from '../sim/teams';
 import { type Crest, defaultCrest } from './crest';
 import type { MatchSetup, TeamSetup } from '../sim/match';
 import { Rng, clamp } from '../sim/vec';
-import { type Card, type Position, type Rarity, generateCard, overall, ratingIn, roleOf, toSim, sellValue } from './cards';
+import { type Card, type Position, type Rarity, type SimPlayer, generateCard, overall, ratingIn, roleOf, toSim, sellValue } from './cards';
 import { FORMATIONS, SLOT_BOUNDS, formationById, type FSlot } from './formations';
 
 const KEY = 'gamenight-club-v1';
@@ -429,6 +429,20 @@ export class Club {
 
   matchSetup(seed: number): MatchSetup {
     return { teams: [this.teamSetup(), this.opponent(seed)] };
+  }
+
+  /** The dugouts: our best seven off the bench (a keeper first) and theirs, seven of a level
+   * with today's opponent. Only drawn, never played. */
+  benchSetup(seed: number): [SimPlayer[], SimPlayer[]] {
+    const rng = new Rng(seed ^ 0xbe4c);
+    const POS: Position[] = ['GK', 'CB', 'LB', 'CM', 'CAM', 'RW', 'ST'];
+    const rest = this.bench();
+    const gk = rest.find((c) => c.position === 'GK') ?? generateCard(rng, 'common', 'GK', 50);
+    const ours = [gk, ...rest.filter((c) => c !== gk)].slice(0, 7);
+    while (ours.length < 7) ours.push(generateCard(rng, 'common', POS[ours.length], 50));
+    const level = this.opponentLevel(seed);
+    const theirs = POS.map((pos) => generateCard(rng, 'common', pos, clamp(Math.round(level - 3 + rng.gauss() * 3), 45, 92)));
+    return [ours.map((c) => toSim(c, c.position)), theirs.map((c) => toSim(c, c.position))];
   }
 
   /** Walked off: booked as a 0-3 defeat, no coins. */

@@ -20,6 +20,7 @@ import { PixelPass } from './render/pixelPass';
 import { PALETTES } from './render/palettes';
 import { Particles } from './render/particles';
 import { Officials } from './render/officials';
+import { Benches } from './render/bench';
 import { SHARED } from './render/look';
 import { Controls } from './ui/controls';
 import { Hud } from './ui/hud';
@@ -120,8 +121,11 @@ function rebuildStadium(): void {
 const goals = createGoals();
 scene.add(goals.group);
 const officials = new Officials();
-const playersView = new PlayersView(match, officials.all);
+const benches = new Benches(22 + officials.all.length);
+benches.reset(club.benchSetup(Date.now() & 0xffff));
+const playersView = new PlayersView(match, [...officials.all, ...benches.all]);
 playersView.officials = officials;
+playersView.bench = benches;
 scene.add(playersView.group);
 const ballView = new BallView();
 scene.add(ballView.group);
@@ -412,6 +416,7 @@ function newMatch(seed = Date.now() & 0xffff): void {
   matchSeed = seed;
   match = new Match(seed, club.matchSetup(seed));
   officials.reset();
+  benches.reset(club.benchSetup(seed));
   playersView.applyColors(match);
   hud.setTeams(match);
   acc = 0;
@@ -842,6 +847,7 @@ function frame(now: number): void {
   handleEvents(now / 1000);
 
   officials.update(match, running ? dt : 0);
+  benches.update(match, running ? dt : 0);
   rig.cinematic = !playing || match.phase === 'halftime' || match.phase === 'fulltime';
   // A 4-second shot of the scoring side's fans going wild after each goal.
   rig.crowdShot = CROWD_SHOT || (playing && match.phase === 'goal' && match.phaseT >= GOAL_SEQ.crowd && match.phaseT < GOAL_SEQ.back && match.scorer ? (match.scorer.team === 0 ? -1 : 1) : 0);

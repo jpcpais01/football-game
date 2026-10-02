@@ -3,6 +3,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { PITCH } from '../sim/constants';
 import type { Atmosphere } from './atmosphere';
 import { SHARED, litMaterial } from './look';
+import { DUGOUT } from './bench';
 import type { Terraces } from '../ui/terraces';
 
 /**
@@ -1375,7 +1376,7 @@ export function windCloth<T extends THREE.Material>(mat: T, amp: number, pin: Cl
   return mat;
 }
 
-/** Corner flags and the two dugouts on the far touchline. */
+/** Corner flags and the two dugouts on the far touchline (the substitutes are in render/bench). */
 export function pitchside(home: number, away: number): THREE.Group {
   const g = new THREE.Group();
   const pole = litMaterial({ color: 0xf2f0e8, roughness: 0.5 });
@@ -1396,38 +1397,28 @@ export function pitchside(home: number, away: number): THREE.Group {
   const shell = litMaterial({ color: 0x2b3038, roughness: 0.6 });
   const roofGlass = new THREE.MeshStandardMaterial({ color: 0x9fb4c8, roughness: 0.2, metalness: 0.1, transparent: true, opacity: 0.35 });
   const bench = litMaterial({ color: 0x46505c, roughness: 0.7 });
-  const zLine = -(PITCH.halfW + 2.6);
-  [-1, 1].forEach((side, ti) => {
+  const zLine = DUGOUT.z;
+  [-1, 1].forEach((side) => {
     const dg = new THREE.Group();
-    const back = new THREE.Mesh(new THREE.BoxGeometry(7, 1.9, 0.12), shell);
-    back.position.set(0, 0.95, -0.9);
+    // Tall enough for a 1.95 m keeper to stand up under the roof.
+    const back = new THREE.Mesh(new THREE.BoxGeometry(7, 2.3, 0.12), shell);
+    back.position.set(0, 1.15, -0.9);
     dg.add(back);
     for (const ex of [-3.5, 3.5]) {
-      const end = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.9, 1.8), roofGlass);
-      end.position.set(ex, 0.95, 0);
+      const end = new THREE.Mesh(new THREE.BoxGeometry(0.1, 2.3, 1.8), roofGlass);
+      end.position.set(ex, 1.15, 0);
       dg.add(end);
     }
     const roof = new THREE.Mesh(new THREE.BoxGeometry(7.1, 0.08, 1.9), roofGlass);
-    roof.position.set(0, 1.95, 0);
+    roof.position.set(0, 2.35, 0);
     dg.add(roof);
     const seat = new THREE.Mesh(new THREE.BoxGeometry(6.6, 0.45, 0.5), bench);
     seat.position.set(0, 0.22, -0.55);
     dg.add(seat);
-    // Substitutes in tracksuits.
-    const suit = litMaterial({ color: ti === 0 ? home : 0x23345e, roughness: 0.8 });
-    const skin = litMaterial({ color: 0xc68a5c, roughness: 0.6 });
-    for (let i = 0; i < 6; i++) {
-      const x = -2.7 + i * 1.08;
-      const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.2, 0.45, 3, 8), suit);
-      body.position.set(x, 0.75, -0.55);
-      dg.add(body);
-      const head = new THREE.Mesh(new THREE.SphereGeometry(0.11, 10, 8), skin);
-      head.position.set(x, 1.2, -0.5);
-      dg.add(head);
-    }
-    dg.position.set(side * 9, 0, zLine);
+    dg.position.set(side * DUGOUT.x, 0, zLine);
     g.add(dg);
   });
+  void home;
   void away;
   return g;
 }

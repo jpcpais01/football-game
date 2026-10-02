@@ -9,6 +9,7 @@ import { clamp, lerp, smoothstep } from '../sim/vec';
 import { PYLONS, blobMaterial, litMaterial } from './look';
 import { divePose, type DivePose } from '../sim/keeperPose';
 import type { Officials } from './officials';
+import type { Benches } from './bench';
 
 /**
  * Players: shaped, kitted figures (collars, trim, numbers, faces, hair) built from a few
@@ -485,6 +486,8 @@ export class PlayersView {
   private list: Player[];
   private extra: Player[];
   officials: Officials | null = null;
+  /** The substitutes' benches (their sitting, squatting and reactions). */
+  bench: Benches | null = null;
   private lastTime = 0;
 
   constructor(match: Match, extra: Player[] = []) {
@@ -1596,6 +1599,40 @@ export class PlayersView {
         }
       } else if (match.phase === 'goal' && match.scorer && match.scorer.team === p.team && match.phaseT > 1.2) {
         armOutL = armOutR = 0.3 + 0.2 * Math.sin(time * 9 + p.id);
+      }
+
+      // Substitutes: sat on the bench, squatting at the line, reacting (see render/bench).
+      const bp = this.bench?.pose(p, this.body[id].leg, h * this.bodyScale[id]);
+      if (bp) {
+        const k = bp.legs;
+        hipY = lerp(hipY, bp.hipY, k);
+        hipL = lerp(hipL, bp.hipL, k);
+        hipR = lerp(hipR, bp.hipR, k);
+        kneeL = lerp(kneeL, bp.kneeL, k);
+        kneeR = lerp(kneeR, bp.kneeR, k);
+        legOutL = lerp(legOutL, bp.legOutL, k);
+        legOutR = lerp(legOutR, bp.legOutR, k);
+        legYawL = lerp(legYawL, bp.legYawL, k);
+        legYawR = lerp(legYawR, bp.legYawR, k);
+        ankleL += bp.ankleL;
+        ankleR += bp.ankleR;
+        leanF *= 1 - k;
+        leanS *= 1 - k;
+        const a = bp.arms;
+        armL = lerp(armL, bp.armL, a);
+        armR = lerp(armR, bp.armR, a);
+        elbowL = lerp(elbowL, bp.elbowL, a);
+        elbowR = lerp(elbowR, bp.elbowR, a);
+        armOutL = lerp(armOutL, bp.armOutL, a);
+        armOutR = lerp(armOutR, bp.armOutR, a);
+        armRotL = lerp(armRotL, bp.armRotL, a);
+        armRotR = lerp(armRotR, bp.armRotR, a);
+        flexExtra += bp.flex;
+        sideExtra += bp.side;
+        twist += bp.twist;
+        headPitch += bp.headPitch;
+        lift += bp.lift;
+        if (!bp.look) headLook = false;
       }
 
       // Officials' signals: the referee points for a restart, linesmen raise the flag.
