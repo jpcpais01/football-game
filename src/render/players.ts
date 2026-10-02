@@ -3,6 +3,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { GOAL_SEQ, PLAYER } from '../sim/constants';
 import type { Match } from '../sim/match';
 import { Player } from '../sim/player';
+import { bodyShape, type BodyShape } from '../sim/body';
 import type { Kit } from '../sim/teams';
 import { clamp, lerp, smoothstep } from '../sim/vec';
 import { PYLONS, blobMaterial, litMaterial } from './look';
@@ -41,6 +42,9 @@ interface Part {
 const THIGH = 0.43;
 const SHIN = 0.42;
 const HIP_Y = 0.94;
+/** Base standing height in skeleton units: hips, waist, torso to the head joint, head. */
+const HEAD_TOP = 0.24;
+const BASE_HEIGHT = HIP_Y + 0.04 + 0.6 + HEAD_TOP;
 const HAIR_PARTS: PartName[] = ['hairShort', 'hairCurly', 'hairBun'];
 /** Too small to show in the sun's shadow map (~4-8 cm per texel). */
 const NO_SHADOW = new Set<PartName>(['hand', 'neck', 'boot', 'flag', ...HAIR_PARTS]);
@@ -472,6 +476,11 @@ export class PlayersView {
   private sS: Float32Array;
   private spS: Float32Array;
   private headYaw: Float32Array;
+  /** Per player: body shape (see sim/body), hip height in the skeleton, and the overall
+   * scale that keeps him at his real height whatever his proportions. */
+  private body: BodyShape[] = [];
+  private hipBase: Float32Array;
+  private bodyScale: Float32Array;
   /** Everyone drawn: the 22 players plus the match officials. */
   private list: Player[];
   private extra: Player[];
@@ -487,6 +496,8 @@ export class PlayersView {
     this.sS = new Float32Array(this.n);
     this.spS = new Float32Array(this.n);
     this.headYaw = new Float32Array(this.n);
+    this.hipBase = new Float32Array(this.n).fill(HIP_Y);
+    this.bodyScale = new Float32Array(this.n).fill(1);
     const geos = buildGeometries();
     const per: Record<PartName, number> = {
       torso: 1,
@@ -593,6 +604,13 @@ export class PlayersView {
   applyColors(match: Match): void {
     // A new match has new Player objects: always draw the current ones.
     this.list = [...match.players, ...this.extra];
+    for (const p of this.list) {
+      const b = bodyShape(p.attrs.height, p.attrs.weight, p.attrs.strength, p.id * 7 + p.index + (p.name ? p.name.length * 13 : 0));
+      this.body[p.id] = b;
+      const hip = (THIGH + SHIN) * b.leg + (HIP_Y - THIGH - SHIN);
+      this.hipBase[p.id] = hip;
+      this.bodyScale[p.id] = BASE_HEIGHT / (hip + 0.04 + 0.6 * b.torsoL + (b.neckLen - 1) * 0.08 + HEAD_TOP);
+    }
     const c = new THREE.Color();
     const set = (name: PartName, p: Player, hex: number) => {
       const part = this.parts[name];
@@ -808,7 +826,8 @@ export class PlayersView {
       // Upper-arm rotation about its own length (+ = forearm swings outward).
       let armRotL = 0;
       let armRotR = 0;
-      let hipY = HIP_Y - (0.012 + 0.05 * s) * Math.abs(cosP) * moveAmt;
+      const hip0 = this.hipBase[id];
+      let hipY = hip0 - (0.012 + 0.05 * s) * Math.abs(cosP) * moveAmt;
       // Hips rotate and drop with each stride; the shoulders counter-rotate.
       let pelvisYaw = -0.1 * s * sinP * moveAmt;
       let pelvisRoll = 0.05 * (0.3 + s) * sinP * moveAmt;
@@ -1245,7 +1264,7 @@ export class PlayersView {
           const lie = smoothstep(0.42, 0.56, pr) * (1 - smoothstep(0.74, 0.86, pr));
           const rise = smoothstep(0.72, 0.86, pr) * (1 - smoothstep(0.9, 1.0, pr));
           const reach = smoothstep(0.015, 0.19, pr) * (1 - smoothstep(0.74, 0.9, pr));
-          hipY = HIP_Y - dip * 0.14 - rise * 0.38;
+          hipY = hip0 - dip * 0.14 - rise * 0.38;
           // Near (push) leg drives straight; the far leg trails, bent.
           const nearL = side > 0;
           const push = { hip: 0.1 * fly, knee: lerp(0.9 * dip + 0.15, 0.08, fly) };
@@ -1509,29 +1528,30 @@ export class PlayersView {
       this.e.set(0, Math.PI / 2 - facing, 0, 'YXZ');
       R.makeRotationFromEuler(this.e);
       R.setPosition(x, 0, z);
-      this.s.set(h, h, h);
+      const bs = this.body[id];
+      const sc = h * this.bodyScale[id];
+      this.s.set(sc, sc, sc);
       R.scale(this.s);
       // Whole-body tilt about the ground point: lean into turns / accelerations.
       this.chain(R, R, 0, lift, 0, leanF, 0, leanS + roll);
 
       const P = this.chain(this.pelvis, R, 0, hipY, 0, 0, pelvisYaw, pelvisRoll);
-      const build = p.look.build;
-      this.put('pelvis', id, P, build, 1, 1);
+      this.put('pelvis', id, P, bs.torsoW, 1, bs.torsoD);
       // Torso mesh sits at the waist unrotated; the shader bends it through the spine.
       const T = this.chain(this.j3, P, 0, 0.04, 0, 0, 0, 0);
-      this.put('torso', id, T, build, 1, 1);
+      this.put('torso', id, T, bs.torsoW, bs.torsoL, bs.torsoD);
       const flex = spineFlex + 0.04;
       const tw = twist - pelvisYaw;
       const side = spineSide - pelvisRoll;
       bend.setXYZ(id, flex, tw, side);
       const C = this.chain(this.chest, T, 0, 0, 0, flex, tw, side);
-      this.chain(this.j1, C, 0, 0.58, 0, 0, 0, 0);
-      this.put('neck', id, this.j1);
+      this.chain(this.j1, C, 0, 0.58 * bs.torsoL, 0, 0, 0, 0);
+      this.put('neck', id, this.j1, bs.neck, bs.neckLen, bs.neck);
 
       // Head: level gaze (counter the body's pitch and roll), turned toward the ball.
       const headLevel = -(leanF + flex) * 0.75;
       const headRoll = -(leanS + roll * 0.2 + side) * 0.6;
-      this.chain(this.j1, C, 0, 0.6, 0, headPitch + headLevel, this.headYaw[id], headRoll);
+      this.chain(this.j1, C, 0, 0.6 * bs.torsoL + (bs.neckLen - 1) * 0.08, 0, headPitch + headLevel, this.headYaw[id], headRoll);
       this.put('head', id, this.j1);
       const style = p.look.hairStyle;
       const parts = this.parts;
@@ -1549,12 +1569,12 @@ export class PlayersView {
         const swing = sd === 0 ? armL : armR;
         const out = sd === 0 ? armOutL : armOutR;
         const elbow = sd === 0 ? elbowL : elbowR;
-        this.chain(this.j1, C, sideSign * 0.198 * build, 0.5, 0, -swing, 0, sideSign * out);
-        this.put('upperArm', id * 2 + sd, this.j1);
-        this.chain(this.j2, this.j1, 0, -0.29, 0, -elbow, sideSign * (sd === 0 ? armRotL : armRotR), 0);
-        this.put('forearm', id * 2 + sd, this.j2);
+        this.chain(this.j1, C, sideSign * 0.198 * bs.shoulder, 0.5 * bs.torsoL, 0, -swing, 0, sideSign * out);
+        this.put('upperArm', id * 2 + sd, this.j1, bs.arm, bs.armLen, bs.arm);
+        this.chain(this.j2, this.j1, 0, -0.29 * bs.armLen, 0, -elbow, sideSign * (sd === 0 ? armRotL : armRotR), 0);
+        this.put('forearm', id * 2 + sd, this.j2, 0.5 + 0.5 * bs.arm, bs.armLen, 0.5 + 0.5 * bs.arm);
         // Hand at the wrist, relaxed with the palm toward the body; keeper gloves are bigger.
-        this.chain(this.j3, this.j2, 0, -0.245, 0, 0.1, 0, sideSign * -0.08);
+        this.chain(this.j3, this.j2, 0, -0.245 * bs.armLen, 0, 0.1, 0, sideSign * -0.08);
         const g = p.role === 'GK' ? 1.25 : 1;
         this.put('hand', id * 2 + sd, this.j3, g, g, g);
         if (sd === 1) {
@@ -1570,17 +1590,17 @@ export class PlayersView {
         const knee = sd === 0 ? kneeL : kneeR;
         const out = sd === 0 ? legOutL : legOutR;
         const yaw = sd === 0 ? legYawL : legYawR;
-        this.chain(this.j1, P, sideSign * 0.092, -0.03, 0, -hip, yaw, sideSign * out);
-        this.put('shortsLeg', id * 2 + sd, this.j1);
-        this.put('thigh', id * 2 + sd, this.j1);
+        this.chain(this.j1, P, sideSign * 0.092 * (1 + (bs.torsoW - 1) * 0.6), -0.03, 0, -hip, yaw, sideSign * out);
+        this.put('shortsLeg', id * 2 + sd, this.j1, bs.thigh, 1, bs.thigh);
+        this.put('thigh', id * 2 + sd, this.j1, bs.thigh, bs.leg, bs.thigh);
         const soft = knee * 0.22;
         kneeBend.setXYZ(id * 2 + sd, soft, 0, 0);
         this.chain(this.j2, this.j1, 0, 0, 0, soft, 0, 0);
-        this.chain(this.j2, this.j2, 0, -THIGH, 0, knee - soft, 0, 0);
-        this.put('shin', id * 2 + sd, this.j2);
+        this.chain(this.j2, this.j2, 0, -THIGH * bs.leg, 0, knee - soft, 0, 0);
+        this.put('shin', id * 2 + sd, this.j2, bs.calf, bs.leg, bs.calf);
         // Keep the foot roughly level with the ground.
         const ankle = clamp(hip - knee, -1.2, 0.6) + (knee > 0.8 ? -0.35 : 0) + (sd === 0 ? ankleL : ankleR);
-        this.chain(this.j3, this.j2, 0, -SHIN, 0, ankle, 0, 0);
+        this.chain(this.j3, this.j2, 0, -SHIN * bs.leg, 0, ankle, 0, 0);
         this.put('boot', id * 2 + sd, this.j3);
       }
 

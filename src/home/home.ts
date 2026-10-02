@@ -2,7 +2,7 @@ import { PATCH_NOTES } from './patchNotes';
 import './home.css';
 import type { Club } from '../meta/club';
 import { FREE_PACK_HOURS } from '../meta/club';
-import { type Card, STAT_LABEL, type StatKey, overall, sellValue, traitsOf, RARITY_LABEL } from '../meta/cards';
+import { type Card, STAT_LABEL, type StatKey, overall, sellValue, traitsOf, RARITY_LABEL, bodyName } from '../meta/cards';
 import type { TeamInfo } from '../sim/teams';
 import type { GameAudio } from '../ui/audio';
 import { avatarSVG, cardHTML, crestSVG, esc } from './cardView';
@@ -335,7 +335,7 @@ export class HomeUI {
           <div class="pd-head">
             <h3>${esc(c.name)}</h3>
             <div class="pd-sub">${c.nation} · ${c.position} · ${RARITY_LABEL[c.rarity]} · #${c.number}</div>
-            <div class="pd-body"><span><b>${c.height}</b> cm</span><span><b>${c.weight}</b> kg</span><span>Foot <b>${c.foot === 'L' ? 'Left' : 'Right'}</b></span></div>
+            <div class="pd-body"><span><b>${c.height}</b> cm</span><span><b>${c.weight}</b> kg</span><span><b>${bodyName(c)}</b></span><span>Foot <b>${c.foot === 'L' ? 'Left' : 'Right'}</b></span></div>
             ${traits.length ? `<div class="traits">${traits.map((t) => `<em>${t}</em>`).join('')}</div>` : ''}
           </div>
           <div class="pd-stats">

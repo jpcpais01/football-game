@@ -1,6 +1,7 @@
 // Player cards: the club's collection. Stats are 1..99 (FIFA style) plus a real body
 // (height / weight), and every one of them feeds the simulation (see toSim()).
 
+import { BODY_NAMES, bodyType } from '../sim/body';
 import type { Attributes, Role } from '../sim/player';
 import { HAIR_COLORS, SKIN_TONES } from '../sim/teams';
 import { Rng, clamp } from '../sim/vec';
@@ -212,6 +213,11 @@ export interface SimPlayer {
 }
 
 /** A card playing in a slot: technique suffers out of position, the body doesn't. */
+/** The player's body type, as it shows on the pitch (see sim/body). */
+export function bodyName(c: Card): string {
+  return BODY_NAMES[bodyType(c.height / 100, c.weight, toSim(c, c.position).attrs.strength)];
+}
+
 export function toSim(c: Card, slot: Position): SimPlayer {
   const s = c.stats;
   const f = fitFactor(c.position, slot);

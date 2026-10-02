@@ -1,4 +1,4 @@
-import { type Card, faceStats, overall, ratingIn, roleOf, fitFactor } from '../meta/cards';
+import { type Card, faceStats, overall, ratingIn, roleOf, fitFactor, bodyName } from '../meta/cards';
 import { FORMATIONS } from '../meta/formations';
 import { esc, tokenHTML } from './cardView';
 import type { HomeUI } from './home';
@@ -137,7 +137,7 @@ export class SquadScreen {
           <div class="ro-ovr"><b>${r}</b><span>${p.position}</span></div>
           <div class="ro-main">
             <div class="ro-name">${p.nation} ${esc(p.name)} ${starter ? '<em>XI</em>' : ''} ${slotPos && fit < 1 ? `<i class="fitw ${fit >= 0.85 ? 'ok' : 'bad'}">${fit >= 0.85 ? 'Close fit' : 'Out of position'}</i>` : ''}</div>
-            <div class="ro-stats">${fs.map(([k, v]) => `<span class="${v >= 80 ? 'hi' : v < 55 ? 'lo' : ''}">${k} <b>${v}</b></span>`).join('')}<span class="body">${p.height}cm · ${p.weight}kg</span></div>
+            <div class="ro-stats">${fs.map(([k, v]) => `<span class="${v >= 80 ? 'hi' : v < 55 ? 'lo' : ''}">${k} <b>${v}</b></span>`).join('')}<span class="body">${p.height}cm · ${p.weight}kg · ${bodyName(p)}</span></div>
           </div>
         </div>`;
       })

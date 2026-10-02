@@ -1,5 +1,6 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.58', note: 'Five body types — lean, athletic, muscular, stocky, tall & lanky — read from each player’s height, weight and strength. Proportions, limb thickness and length now differ; everyone still stands at his real height. Shown in the squad.' },
   { v: '0.56', note: 'The crowd peaks when your team has the ball within 20 m of goal: at least half its roar, full roar when the player is running at goal, fast. Patch notes on the home screen.' },
   { v: '0.55', note: 'Corner camera frames the whole box and goal, taker at the edge. In attack the camera leans toward the goal. Rainy nights a little gentler, fewer puddles.' },
   { v: '0.54', note: 'The crowd builds as the ball nears goal and erupts on goals; groans for near misses. Songs suit the score. Confetti showers that stay on the pitch for a while.' },
