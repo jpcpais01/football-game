@@ -418,8 +418,10 @@ export class Match {
         let plan: KickPlan | null = null;
         // Commands stay queued until the ball arrives (e.g. press Pass while it's coming).
         const exp = this.time + HUMAN_BUFFER;
-        if (ev.btn === Btn.A) plan = { type: ev.hold > 0.22 ? 'lob' : 'pass', dirX: ax, dirZ: az, power: 0, targetId: -1, expires: exp };
-        else if (ev.btn === Btn.B) plan = { type: 'through', dirX: ax, dirZ: az, power: ev.hold > 0.22 ? 1 : 0, targetId: -1, expires: exp };
+        // Hold = pass weight; slide the finger up while holding = lofted.
+        const weight = clamp(ev.hold / 0.6, 0, 1);
+        if (ev.btn === Btn.A) plan = { type: ev.swipeUp ? 'lob' : 'pass', dirX: ax, dirZ: az, power: weight, targetId: -1, expires: exp };
+        else if (ev.btn === Btn.B) plan = { type: 'through', dirX: ax, dirZ: az, power: weight, lofted: !!ev.swipeUp, targetId: -1, expires: exp };
         else if (ev.btn === Btn.C) plan = { type: 'shot', dirX: ax, dirZ: az, power: clamp(ev.hold / 0.85, 0.08, 1.15), targetId: -1, expires: exp };
         if (plan) {
           plan.aimed = m > 0.12;
@@ -754,6 +756,7 @@ export class Match {
       p.startAction(kind, dur, plan.dirX, plan.dirZ);
       p.kickType = plan.type;
       p.kickPower = plan.power;
+      p.kickLofted = plan.type === 'lob' || plan.type === 'cross' || plan.type === 'clear' || !!plan.lofted;
       p.kickRel = angleDiff(p.facing, Math.atan2(plan.dirZ, plan.dirX));
     }
 
@@ -898,10 +901,12 @@ export class Match {
         let tx = receiver.pos.x;
         let tz = receiver.pos.z;
         const through = plan.type === 'through';
-        const lofted = plan.type === 'lob' || plan.type === 'cross' || (through && plan.power > 0) || fromHands || setPieceKind === 'goalkick';
+        const lofted = plan.type === 'lob' || plan.type === 'cross' || (through && !!plan.lofted) || fromHands || setPieceKind === 'goalkick';
+        // Pass weight: AI plays a normal weight; a human tap is soft, a full hold is firm.
+        const weightK = 0.8 + 0.4 * (plan.aimed === undefined ? 0.5 : plan.power);
         if (through) {
           // Into space ahead of the receiver, toward goal.
-          const lead = 7 + this.rng.next() * 3;
+          const lead = (6 + this.rng.next() * 3) * (0.75 + 0.5 * (plan.aimed === undefined ? 0.5 : plan.power));
           const runX = team.dir * 0.85 + receiver.vel.x * 0.05;
           const runZ = (plan.dirZ * 0.4 + receiver.vel.z * 0.05) * 0.6;
           const n = Math.hypot(runX, runZ);
@@ -925,11 +930,11 @@ export class Match {
               const angle = setPieceKind === 'goalkick' ? 34 : fromHands && this.setPiece?.kind === 'throw' ? 18 : clamp(16 + dd * 0.45, 20, 38);
               r = solveLofted(b.pos, ax, az, angle, 25, 0);
             } else {
-              r = solveGroundPass(b.pos, ax, az, clamp(5.5 + dd * 0.14, 6, 11));
+              r = solveGroundPass(b.pos, ax, az, clamp(5.5 + dd * 0.14, 6, 11) * weightK);
             }
           }
         } else if (!lofted) {
-          r = solveGroundPass(b.pos, tx, tz, 3.2);
+          r = solveGroundPass(b.pos, tx, tz, 3.2 * weightK);
         } else {
           r = solveLofted(b.pos, tx, tz, 32, 25, 0);
         }

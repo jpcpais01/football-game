@@ -14,6 +14,8 @@ export interface ButtonEvent {
   kind: 'down' | 'up';
   /** For 'up': how long the button was held (s). */
   hold: number;
+  /** For 'up': the finger slid upward while holding (FIFA-Mobile style lofted pass). */
+  swipeUp?: boolean;
 }
 
 export interface InputState {
@@ -23,9 +25,11 @@ export interface InputState {
   sprint: boolean;
   held: [boolean, boolean, boolean];
   holdTime: [number, number, number];
+  /** Live: finger currently slid up on a held button. */
+  swipe: [boolean, boolean, boolean];
   events: ButtonEvent[];
 }
 
 export function makeInput(): InputState {
-  return { moveX: 0, moveY: 0, sprint: false, held: [false, false, false], holdTime: [0, 0, 0], events: [] };
+  return { moveX: 0, moveY: 0, sprint: false, held: [false, false, false], holdTime: [0, 0, 0], swipe: [false, false, false], events: [] };
 }

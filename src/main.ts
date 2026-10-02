@@ -162,14 +162,16 @@ function updateCharge(alpha: number): void {
     return;
   }
   const hold = inp.holdTime[btn];
-  // Shoot: full power at 0.85 s, over-hit beyond (red). Pass/Through: past the tick = lofted.
+  // Shoot: full power at 0.85 s, over-hit beyond (red).
   const shot = btn === 2;
-  const p = shot ? Math.min(1.15, hold / 0.85) / 1.15 : Math.min(1, hold / 0.5);
+  // Pass / Through: the bar is the pass weight (full at 0.6 s); blue once slid up (lofted).
+  const p = shot ? Math.min(1.15, hold / 0.85) / 1.15 : Math.min(1, hold / 0.6);
   chargeFill.style.transform = `scaleX(${p.toFixed(3)})`;
   charge.classList.toggle('shot', shot);
   charge.classList.toggle('over', shot && hold > 0.85);
-  charge.classList.toggle('lofted', !shot && hold > 0.22);
-  chargeTick.style.left = `${shot ? (1 / 1.15) * 100 : (0.22 / 0.5) * 100}%`;
+  charge.classList.toggle('lofted', !shot && inp.swipe[btn]);
+  chargeTick.style.display = shot ? '' : 'none';
+  chargeTick.style.left = `${(1 / 1.15) * 100}%`;
   const c = match.controlled;
   headPos.set(c.prevPos.x + (c.pos.x - c.prevPos.x) * alpha, 2.45 * c.look.height, c.prevPos.z + (c.pos.z - c.prevPos.z) * alpha);
   headPos.project(rig.camera);

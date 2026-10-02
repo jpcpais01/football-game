@@ -757,7 +757,7 @@ export class PlayersView {
           const type = p.kickType;
           const power = Math.min(1.15, p.kickPower);
           const shot = type === 'shot';
-          const lofted = type === 'lob' || type === 'cross' || type === 'clear' || (type === 'through' && power > 0);
+          const lofted = p.kickLofted && !shot;
           const ground = !shot && !lofted;
           const back = ground ? -0.5 : shot ? -(0.7 + 0.35 * Math.min(1, power)) : -1.0;
           const fwd = ground ? 0.75 : shot ? 1.15 + 0.35 * power : 1.45;

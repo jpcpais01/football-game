@@ -237,7 +237,7 @@ it('a lofted pass from the wing becomes a cross into the box', () => {
     const lines: string[] = [];
     m.log = (s) => lines.push(s);
     m.step(input);
-    input.events.push({ btn: 0, kind: 'down', hold: 0 }, { btn: 0, kind: 'up', hold: 0.4 });
+    input.events.push({ btn: 0, kind: 'down', hold: 0 }, { btn: 0, kind: 'up', hold: 0.4, swipeUp: true });
     let maxH = 0;
     for (let i = 0; i < 120 * 3; i++) {
       m.step(input);

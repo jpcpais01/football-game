@@ -24,6 +24,7 @@ export class Controls {
   private sprintEl: HTMLElement;
   private btnPointer: number[] = [-1, -1, -1];
   private btnDownAt: number[] = [0, 0, 0];
+  private btnStartY: number[] = [0, 0, 0];
   private sprintPointer = -1;
   mode: 'attack' | 'defend' = 'attack';
   private keys = new Set<string>();
@@ -50,7 +51,14 @@ export class Controls {
     this.resetJoyPosition();
 
     zone.addEventListener('pointerdown', (e) => this.joyStart(e));
-    window.addEventListener('pointermove', (e) => this.joyMove(e), { passive: false });
+    window.addEventListener(
+      'pointermove',
+      (e) => {
+        this.joyMove(e);
+        this.buttonSwipe(e);
+      },
+      { passive: false },
+    );
     window.addEventListener('pointerup', (e) => this.pointerEnd(e));
     window.addEventListener('pointercancel', (e) => this.pointerEnd(e));
 
@@ -60,6 +68,7 @@ export class Controls {
         if (!this.enabled) return;
         el.setPointerCapture?.(e.pointerId);
         this.btnPointer[i] = e.pointerId;
+        this.btnStartY[i] = e.clientY;
         this.press(i as Btn);
       });
     });
@@ -118,6 +127,18 @@ export class Controls {
     c.classList.toggle('charging', p > 0);
   }
 
+  /** Sliding up on Pass / Through while holding = lofted ball (FIFA-Mobile style). */
+  private buttonSwipe(e: PointerEvent): void {
+    for (let i = 0; i < 2; i++) {
+      if (this.btnPointer[i] !== e.pointerId) continue;
+      const up = this.btnStartY[i] - e.clientY > 26;
+      if (up !== this.input.swipe[i]) {
+        this.input.swipe[i] = up;
+        this.btnEls[i].classList.toggle('swipe', up);
+      }
+    }
+  }
+
   private press(i: Btn): void {
     const inp = this.input;
     if (inp.held[i]) return;
@@ -133,9 +154,10 @@ export class Controls {
     if (!inp.held[i]) return;
     inp.held[i] = false;
     const hold = (performance.now() - this.btnDownAt[i]) / 1000;
-    inp.events.push({ btn: i, kind: 'up', hold });
+    inp.events.push({ btn: i, kind: 'up', hold, swipeUp: inp.swipe[i] });
     inp.holdTime[i] = 0;
-    this.btnEls[i].classList.remove('down');
+    inp.swipe[i] = false;
+    this.btnEls[i].classList.remove('down', 'swipe');
   }
 
   private releaseAll(): void {
@@ -219,6 +241,16 @@ export class Controls {
 
   private key(e: KeyboardEvent, down: boolean): void {
     if (e.repeat) return;
+    // U / O: lofted pass / lofted through ball (the keyboard version of sliding up).
+    if (e.code === 'KeyU' || e.code === 'KeyO') {
+      e.preventDefault();
+      const b = e.code === 'KeyU' ? Btn.A : Btn.B;
+      if (down) {
+        this.press(b);
+        this.input.swipe[b] = true;
+      } else this.release(b);
+      return;
+    }
     const map: Record<string, Btn> = { KeyJ: Btn.A, KeyK: Btn.B, KeyL: Btn.C, Space: Btn.C };
     if (e.code in map) {
       e.preventDefault();

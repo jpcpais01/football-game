@@ -11,9 +11,11 @@ A mobile-first football game (PWA). Stylized look, realistic feel.
   slower), stamina. The ball is never glued to the foot. Dribbling is a series of real touches,
   and first touch, passes and shots carry errors from skill, body shape, speed and pressure.
 - **Controls (FIFA Mobile style):** joystick on the left. Buttons on the right:
-  - Attack: **Pass** (hold for a lofted pass), **Through**, **Shoot** (hold for power), **Sprint**.
+  - Attack: **Pass** and **Through** (hold = pass weight, slide up while holding = lofted),
+    **Shoot** (hold for power), **Sprint**.
   - Defence: **Switch**, **Press** (hold), **Tackle** (double-tap to slide).
-  - Keyboard: WASD/arrows, Shift to sprint, J / K / L for the three buttons.
+  - Keyboard: WASD/arrows, Shift to sprint, J / K / L for the three buttons, U / O for lofted pass /
+    lofted through ball.
 
 ## Develop
 

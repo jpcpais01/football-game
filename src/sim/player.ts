@@ -23,7 +23,9 @@ export interface KickPlan {
   dirZ: number;
   /** False when the stick was idle: the game picks the best option instead of a direction. */
   aimed?: boolean;
-  power: number; // 0..1 for shots
+  power: number; // 0..1: shot power, or pass weight
+  /** Lofted (chipped / clipped) instead of along the ground. */
+  lofted?: boolean;
   targetId: number; // receiver, -1 for none
   expires: number; // sim time
 }
@@ -58,6 +60,7 @@ export class Player {
   /** The strike in progress (for body mechanics): type, power, target angle relative to the body. */
   kickType: KickPlan['type'] = 'pass';
   kickPower = 0;
+  kickLofted = false;
   kickRel = 0;
   /** Throw-in (two hands) rather than a keeper's one-arm throw. */
   throwIn = false;
