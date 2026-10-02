@@ -85,6 +85,19 @@ html, body {
   text-transform: uppercase; color: var(--ink-dim);
 }
 .caption.show { animation: caption 3.2s ease forwards; }
+/* A referee's call: smaller than a goal, still unmissable. */
+.caption.small, .caption.yellow { top: 22%; }
+.caption.small .c-title, .caption.yellow .c-title { font-size: clamp(34px, 6.5vw, 64px); }
+.caption.yellow .c-title::before {
+  content: ''; display: inline-block; width: 0.42em; height: 0.6em; margin-right: 0.22em; vertical-align: -0.04em;
+  background: #ffd447; border-radius: 0.05em; transform: rotate(-8deg); box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+}
+/* Debug: award the human team a foul where the ball is. */
+.debug-foul {
+  position: absolute; top: calc(10px + var(--safe-t)); right: calc(60px + var(--safe-r));
+  height: 34px; padding: 0 10px; border: 0; border-radius: 4px; background: rgba(200, 57, 59, 0.55);
+  color: var(--ink); font-family: var(--font); font-weight: 800; font-size: 12px; letter-spacing: 0.12em; cursor: pointer;
+}
 @keyframes caption {
   0% { opacity: 0; transform: scale(1.12); }
   10% { opacity: 1; transform: scale(1); }

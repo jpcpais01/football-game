@@ -150,6 +150,12 @@ pauseBtn.className = 'pause-btn';
 pauseBtn.setAttribute('aria-label', 'Pause');
 pauseBtn.innerHTML = '<span></span><span></span>';
 ui.appendChild(pauseBtn);
+// Debug (temporary): a foul for us where the ball is right now.
+const foulBtn = document.createElement('button');
+foulBtn.className = 'debug-foul';
+foulBtn.textContent = 'FOUL';
+foulBtn.addEventListener('click', () => match.debugFoul());
+ui.appendChild(foulBtn);
 
 const pauseMenu = document.createElement('div');
 pauseMenu.className = 'menu pause hidden';
@@ -220,7 +226,7 @@ let playing = false;
 let paused = false;
 controls.setVisible(false);
 hud.setVisible(false);
-pauseBtn.style.display = 'none';
+pauseBtn.style.display = foulBtn.style.display = 'none';
 
 async function enterFullscreen(): Promise<void> {
   try {
@@ -261,7 +267,7 @@ function startGame(): void {
   menu.classList.add('hidden');
   controls.setVisible(true);
   hud.setVisible(true);
-  pauseBtn.style.display = '';
+  pauseBtn.style.display = foulBtn.style.display = '';
 }
 
 menu.querySelector('.play')!.addEventListener('click', startGame);
@@ -407,6 +413,18 @@ function handleEvents(now: number): void {
       hud.showCaption('GOAL', `${scorer ? '#' + (scorer.index + 1) + ' · ' : ''}${team.info.name}`, 3.2, now);
     }
     if (e.save > 0.5) audio.crowdGasp();
+    // Referee's calls.
+    const f = match.lastFoul;
+    if (e.foul === 2) hud.showCaption('ADVANTAGE', 'Play on', 1.8, now, 'small');
+    else if (e.foul === 1 && f) {
+      if (f.penalty) {
+        hud.showCaption('PENALTY', match.teams[f.victim.team].info.name, 3, now);
+        audio.crowdGasp();
+      } else if (f.yellow) hud.showCaption('YELLOW CARD', `#${f.offender.index + 1} · ${match.teams[f.offender.team].info.name}`, 2.6, now, 'yellow');
+      else hud.showCaption('FOUL', `Free kick · ${match.teams[f.victim.team].info.name}`, 2, now, 'small');
+    }
+    // Booked while advantage was played: show the card now.
+    if (e.card && e.foul === 2 && f) hud.showCaption('YELLOW CARD', `#${f.offender.index + 1} · ${match.teams[f.offender.team].info.name} · advantage`, 2.6, now, 'yellow');
     audio.setExcitement(match.excitement);
   }
   if (e.net > 0) goals.impact(e.netX, e.netY, e.netZ, e.net, simTime);
@@ -430,7 +448,7 @@ function showEndMenu(): void {
   playing = false;
   hud.setVisible(false);
   controls.setVisible(false);
-  pauseBtn.style.display = 'none';
+  pauseBtn.style.display = foulBtn.style.display = 'none';
   const [h, a] = match.teams;
   (menu.querySelector('.kicker') as HTMLElement).textContent = 'Full time';
   (menu.querySelector('.sub') as HTMLElement).innerHTML = `${h.info.short} ${h.score} <span>–</span> ${a.score} ${a.info.short}`;

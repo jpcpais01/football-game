@@ -203,6 +203,38 @@ export function solveShot(from: V3, tx: number, ty: number, tz: number, speed: n
   return { vel, spin: spin.clone(), time };
 }
 
+/** Height of a struck ball when it has travelled `dist` metres horizontally (-1 if it lands first). */
+export function heightAlong(from: V3, vel: V3, spin: V3, dist: number): number {
+  const b = loadScratch(from, vel.x, vel.y, vel.z, spin);
+  b.onGround = false;
+  const h = Math.hypot(vel.x, vel.z) || 1;
+  const fx = vel.x / h;
+  const fz = vel.z / h;
+  for (let t = 0; t < 3; t += DT) {
+    b.step(DT);
+    if ((b.pos.x - from.x) * fx + (b.pos.z - from.z) * fz >= dist) return b.pos.y;
+    if (b.vel.y < 0 && b.pos.y <= 0.12) return -1;
+  }
+  return -1;
+}
+
+/**
+ * Direct free kick: the lowest shot at (tx, tz) that still clears the wall (`wallTop` high,
+ * `wallDist` away) and dips under the bar, with the given pace, curl and topspin. A low,
+ * fast shot is the hardest for the keeper, so we take the lowest that gets over.
+ */
+export function solveFreeKick(from: V3, tx: number, tz: number, wallDist: number, wallTop: number, speed: number, curl: number, topspin: number): KickResult {
+  let r = solveShot(from, tx, 2.2, tz, speed, topspin, curl);
+  for (let ty = 1.15; ty <= 2.21; ty += 0.15) {
+    const c = solveShot(from, tx, ty, tz, speed, topspin, curl);
+    if (heightAlong(from, c.vel, c.spin, wallDist) >= wallTop) {
+      r = c;
+      break;
+    }
+  }
+  return r;
+}
+
 /** Time for a ball with given state to come within `radius` of (x, z) horizontally, or -1. */
 export function predictBallAt(src: Ball, maxT: number, cb: (b: Ball, t: number) => boolean): number {
   const b = scratch;
