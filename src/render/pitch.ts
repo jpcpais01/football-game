@@ -122,7 +122,10 @@ export function createPitch(): THREE.Mesh {
           reflectedLight.directDiffuse *= 1.0 - sh * 0.94;
           reflectedLight.directSpecular *= 1.0 - sh * 0.94;
           reflectedLight.indirectDiffuse += diffuseColor.rgb * uShadeTint * sh * 0.28;
-          reflectedLight.indirectDiffuse += diffuseColor.rgb * uFloodColor * uFlood * 0.5;
+          // Floodlight pools: a touch brighter through the middle, falling off to the corners.
+          vec2 q = vGrassWorld.xz / vec2(HL, HW);
+          float pool = 1.12 - 0.3 * smoothstep(0.35, 1.25, length(q * vec2(0.85, 1.0)));
+          reflectedLight.indirectDiffuse += diffuseColor.rgb * uFloodColor * uFlood * 0.5 * pool;
         }`,
       );
   };

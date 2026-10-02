@@ -391,6 +391,161 @@ function flags(home: number, away: number): THREE.InstancedMesh {
   return mesh;
 }
 
+/** Soft volumetric beams from each floodlight bank, visible as dusk falls. */
+function lightShafts(): THREE.Group {
+  const g = new THREE.Group();
+  const mat = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending,
+    fog: false,
+    uniforms: { uFlood: SHARED.uFlood },
+    vertexShader: /* glsl */ `
+      varying float vAlong;
+      varying vec3 vN;
+      varying vec3 vV;
+      void main() {
+        vAlong = uv.y;
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vN = normalize(mat3(modelMatrix) * normal);
+        vV = normalize(cameraPosition - wp.xyz);
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform float uFlood;
+      varying float vAlong;
+      varying vec3 vN;
+      varying vec3 vV;
+      void main() {
+        // Bright at the lamp, fading toward the pitch; soft edges (no hard cone outline).
+        float soft = pow(abs(dot(normalize(vN), normalize(vV))), 1.6);
+        float a = pow(vAlong, 2.2) * soft * uFlood * uFlood * 0.07;
+        gl_FragColor = vec4(vec3(1.0, 0.96, 0.86) * a, 1.0);
+      }
+    `,
+  });
+  for (const [px, pz] of PYLONS) {
+    const target = new THREE.Vector3(px * 0.25, 0, pz * 0.25);
+    const from = new THREE.Vector3(px, 43, pz);
+    const len = from.distanceTo(target);
+    const geo = new THREE.ConeGeometry(20, len, 24, 1, true);
+    geo.translate(0, -len / 2, 0); // apex at the origin
+    const m = new THREE.Mesh(geo, mat);
+    m.position.copy(from);
+    m.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), target.clone().sub(from).normalize());
+    m.frustumCulled = false;
+    m.renderOrder = 6;
+    g.add(m);
+  }
+  return g;
+}
+
+/** Hand-painted supporters' banners hung on the stand fronts. */
+function banners(home: number, away: number): THREE.Group {
+  const g = new THREE.Group();
+  const hex = (c: number) => '#' + c.toString(16).padStart(6, '0');
+  const make = (text: string, bg: string, fg: string, w: number) => {
+    const cv = document.createElement('canvas');
+    cv.width = 512;
+    cv.height = 96;
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const draw = () => {
+      const c = cv.getContext('2d')!;
+      c.fillStyle = bg;
+      c.fillRect(0, 0, 512, 96);
+      c.fillStyle = fg;
+      c.fillRect(0, 6, 512, 6);
+      c.fillRect(0, 84, 512, 6);
+      c.font = '800 60px "Barlow Condensed", "Arial Narrow", sans-serif';
+      c.textAlign = 'center';
+      c.textBaseline = 'middle';
+      c.fillText(text, 256, 50);
+      tex.needsUpdate = true;
+    };
+    draw();
+    void document.fonts?.ready.then(draw);
+    const mat = litMaterial({ roughness: 0.9 });
+    mat.map = tex;
+    mat.side = THREE.DoubleSide;
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, w * 0.1875), mat);
+    return m;
+  };
+  const spots: [string, string, string, number, number, number, number, number][] = [
+    ['ROSSONERI ULTRAS', hex(home), '#f3eee2', 16, -38, 2.6, -(PITCH.halfW + 7.85), 0],
+    ['GAMENIGHT', '#14123a', '#ffd447', 12, 0, 2.6, -(PITCH.halfW + 7.85), 0],
+    ['ATLANTIC 1903', hex(away), '#23345e', 14, 36, 2.6, -(PITCH.halfW + 7.85), 0],
+    ['CURVA ROSSA', hex(home), '#ffffff', 14, -(PITCH.halfL + 8.85), 2.2, 18, Math.PI / 2],
+    ['ROVERS TILL I DIE', '#23345e', hex(away), 15, PITCH.halfL + 8.85, 2.2, -16, -Math.PI / 2],
+  ];
+  for (const [text, bg, fg, w, x, y, z, ry] of spots) {
+    const m = make(text, bg, fg, w);
+    m.position.set(x, y, z);
+    m.rotation.y = ry;
+    g.add(m);
+  }
+  return g;
+}
+
+/** Corner flags and the two dugouts on the far touchline. */
+function pitchside(home: number, away: number): THREE.Group {
+  const g = new THREE.Group();
+  const pole = litMaterial({ color: 0xf2f0e8, roughness: 0.5 });
+  const flagMat = litMaterial({ color: 0xffd447, roughness: 0.8 });
+  flagMat.side = THREE.DoubleSide;
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      const p = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 1.6, 6), pole);
+      p.position.set(sx * PITCH.halfL, 0.8, sz * PITCH.halfW);
+      p.castShadow = true;
+      g.add(p);
+      const f = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.3), flagMat);
+      f.position.set(sx * PITCH.halfL + 0.2, 1.45, sz * PITCH.halfW);
+      f.castShadow = true;
+      g.add(f);
+    }
+  }
+  const shell = litMaterial({ color: 0x2b3038, roughness: 0.6 });
+  const roofGlass = new THREE.MeshStandardMaterial({ color: 0x9fb4c8, roughness: 0.2, metalness: 0.1, transparent: true, opacity: 0.35 });
+  const bench = litMaterial({ color: 0x46505c, roughness: 0.7 });
+  const zLine = -(PITCH.halfW + 2.6);
+  [-1, 1].forEach((side, ti) => {
+    const dg = new THREE.Group();
+    const back = new THREE.Mesh(new THREE.BoxGeometry(7, 1.9, 0.12), shell);
+    back.position.set(0, 0.95, -0.9);
+    dg.add(back);
+    for (const ex of [-3.5, 3.5]) {
+      const end = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.9, 1.8), roofGlass);
+      end.position.set(ex, 0.95, 0);
+      dg.add(end);
+    }
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(7.1, 0.08, 1.9), roofGlass);
+    roof.position.set(0, 1.95, 0);
+    dg.add(roof);
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(6.6, 0.45, 0.5), bench);
+    seat.position.set(0, 0.22, -0.55);
+    dg.add(seat);
+    // Substitutes in tracksuits.
+    const suit = litMaterial({ color: ti === 0 ? home : 0x23345e, roughness: 0.8 });
+    const skin = litMaterial({ color: 0xc68a5c, roughness: 0.6 });
+    for (let i = 0; i < 6; i++) {
+      const x = -2.7 + i * 1.08;
+      const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.2, 0.45, 3, 8), suit);
+      body.position.set(x, 0.75, -0.55);
+      dg.add(body);
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.11, 10, 8), skin);
+      head.position.set(x, 1.2, -0.5);
+      dg.add(head);
+    }
+    dg.position.set(side * 9, 0, zLine);
+    g.add(dg);
+  });
+  void away;
+  return g;
+}
+
 function sky(): THREE.Mesh {
   const geo = new THREE.SphereGeometry(700, 32, 16);
   const mat = new THREE.ShaderMaterial({
@@ -401,7 +556,7 @@ function sky(): THREE.Mesh {
     vertexShader: `varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
     fragmentShader: /* glsl */ `
       uniform vec3 uSkyTop, uSkyHorizon, uSunDir, uSunColor;
-      uniform float uTime;
+      uniform float uTime, uFlood;
       varying vec3 vDir;
       float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
       float noise(vec2 p) {
@@ -421,6 +576,11 @@ function sky(): THREE.Mesh {
         cl *= smoothstep(0.02, 0.12, d.y) * (1.0 - smoothstep(0.25, 0.6, d.y));
         vec3 cloudCol = mix(uSkyHorizon * 1.05, uSunColor, pow(s, 3.0) * 0.6);
         c = mix(c, cloudCol, cl * 0.55);
+        // Stars come out as it gets dark.
+        vec2 sg = floor(vec2(atan(d.z, d.x) * 95.0, d.y * 130.0));
+        float star = step(0.9965, hash(sg)) * smoothstep(0.1, 0.35, d.y) * (1.0 - cl);
+        float tw = 0.55 + 0.45 * sin(uTime * 2.3 + hash(sg + 1.7) * 30.0);
+        c += vec3(0.92, 0.94, 1.0) * star * tw * uFlood * uFlood * 1.2;
         gl_FragColor = vec4(c, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -505,6 +665,9 @@ export function createStadium(homeColor: number, awayColor: number): Stadium {
 
   group.add(adBoards());
   group.add(flags(homeColor, awayColor));
+  group.add(banners(homeColor, awayColor));
+  group.add(pitchside(homeColor, awayColor));
+  group.add(lightShafts());
 
   const c = new THREE.Color();
   const c2 = new THREE.Color();

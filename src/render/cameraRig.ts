@@ -18,6 +18,9 @@ export class CameraRig {
   private look = new THREE.Vector3();
   /** Debug: fixed camera distance (e.g. ?zoom=10 for a close-up). */
   distOverride = 0;
+  /** Low-res pixel height when the pixel-art look is on (0 = off): the camera then moves in
+   * whole-pixel steps so the picture doesn't shimmer as it pans. */
+  pixelHeight = 0;
   /** Base distance from the play; set by the camera setting. */
   baseDist: number = CAMERA_PRESETS.normal;
 
@@ -82,8 +85,16 @@ export class CameraRig {
     const cam = this.camera;
     const sx = Math.sin(time * 41) * this.shake * 0.25;
     const sy = Math.cos(time * 37) * this.shake * 0.2;
-    cam.position.set(this.tx + sx, Math.sin(pitch) * this.dist + sy, this.tz + Math.cos(pitch) * this.dist);
-    this.look.set(this.tx, 0, this.tz - 3.5);
+    let tx = this.tx;
+    let tz = this.tz;
+    if (this.pixelHeight > 0) {
+      const unit = (2 * this.dist * Math.tan((cam.fov * Math.PI) / 360)) / this.pixelHeight;
+      tx = Math.round(tx / unit) * unit;
+      const unitZ = unit / Math.sin(pitch);
+      tz = Math.round(tz / unitZ) * unitZ;
+    }
+    cam.position.set(tx + sx, Math.sin(pitch) * this.dist + sy, tz + Math.cos(pitch) * this.dist);
+    this.look.set(tx, 0, tz - 3.5);
     cam.lookAt(this.look);
   }
 }

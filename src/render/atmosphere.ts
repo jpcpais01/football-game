@@ -23,11 +23,11 @@ export class Atmosphere {
   private sunA = new THREE.Color(0xffe6c2);
   private sunB = new THREE.Color(0xffab6b);
   private topA = new THREE.Color(0x86acd4);
-  private topB = new THREE.Color(0x3f5585);
+  private topB = new THREE.Color(0x26305e);
   private horA = new THREE.Color(0xf3dcb6);
-  private horB = new THREE.Color(0xf2a06e);
+  private horB = new THREE.Color(0xe08a62);
   private fogA = new THREE.Color(COLORS.fog);
-  private fogB = new THREE.Color(0x9c8f9a);
+  private fogB = new THREE.Color(0x6f6a86);
   private hemiSkyA = new THREE.Color(COLORS.hemiSky);
   private hemiSkyB = new THREE.Color(0x8d9cc7);
 

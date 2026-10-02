@@ -11,6 +11,7 @@ import { PlayersView } from './render/players';
 import { BallView } from './render/ballView';
 import { CAMERA_PRESETS, CameraRig, type CameraPreset } from './render/cameraRig';
 import { Atmosphere } from './render/atmosphere';
+import { PixelPass } from './render/pixelPass';
 import { SHARED } from './render/look';
 import { Controls } from './ui/controls';
 import { Hud } from './ui/hud';
@@ -72,6 +73,17 @@ try {
   /* storage unavailable: keep the default */
 }
 rig.baseDist = CAMERA_PRESETS[cameraPreset];
+
+// Graphics: the pixel-art look (default) or full-resolution HD.
+type Graphics = 'pixel' | 'hd';
+let graphics: Graphics = params.get('gfx') === 'hd' ? 'hd' : 'pixel';
+try {
+  const saved = localStorage.getItem('graphics');
+  if (!params.has('gfx') && (saved === 'pixel' || saved === 'hd')) graphics = saved;
+} catch {
+  /* keep default */
+}
+const pixelPass = new PixelPass();
 if (params.has('zoom')) rig.distOverride = Number(params.get('zoom')) || 10;
 const FIXED_DPR = params.has('dpr');
 if (FIXED_DPR) renderer.setPixelRatio((dpr = Number(params.get('dpr')) || 1));
@@ -117,6 +129,7 @@ pauseMenu.innerHTML = `
     <h2>Paused</h2>
     <button class="resume">Resume</button>
     <button class="restart ghost">Restart match</button>
+    <button class="graphics ghost">Graphics: Pixel</button>
     <button class="camera ghost">Camera: Normal</button>
     <button class="sound ghost">Sound: on</button>
   </div>`;
@@ -224,12 +237,27 @@ pauseMenu.querySelector('.restart')!.addEventListener('click', () => {
   newMatch();
   setPaused(false);
 });
+const graphicsBtn = pauseMenu.querySelector('.graphics') as HTMLButtonElement;
+const applyGraphics = () => {
+  graphicsBtn.textContent = `Graphics: ${graphics === 'pixel' ? 'Pixel' : 'HD'}`;
+  rig.pixelHeight = graphics === 'pixel' ? pixelPass.pixelHeight : 0;
+};
+graphicsBtn.addEventListener('click', () => {
+  graphics = graphics === 'pixel' ? 'hd' : 'pixel';
+  applyGraphics();
+  try {
+    localStorage.setItem('graphics', graphics);
+  } catch {
+    /* ignore */
+  }
+});
 const cameraBtn = pauseMenu.querySelector('.camera') as HTMLButtonElement;
 const cameraLabel = () => (cameraBtn.textContent = `Camera: ${cameraPreset[0].toUpperCase()}${cameraPreset.slice(1)}`);
 cameraLabel();
 cameraBtn.addEventListener('click', () => {
   cameraPreset = CAMERA_ORDER[(CAMERA_ORDER.indexOf(cameraPreset) + 1) % CAMERA_ORDER.length];
   rig.baseDist = CAMERA_PRESETS[cameraPreset];
+
   cameraLabel();
   try {
     localStorage.setItem('camera', cameraPreset);
@@ -270,6 +298,10 @@ function onResize(): void {
   const h = window.innerHeight;
   renderer.setSize(w, h);
   rig.setAspect(w / h);
+  // ~240-320 px tall: chunky enough to read as pixel art, players still ~10 px tall.
+  pixelPass.height = Math.round(Math.min(320, Math.max(240, h * 0.72)));
+  pixelPass.resize(w, h);
+  applyGraphics();
   rotate.classList.toggle('show', h > w && matchMedia('(pointer: coarse)').matches);
 }
 window.addEventListener('resize', onResize);
@@ -415,7 +447,8 @@ function frame(now: number): void {
   if (playing) hud.update(match, now / 1000);
   updateCharge(alpha);
 
-  renderer.render(scene, rig.camera);
+  if (graphics === 'pixel') pixelPass.render(renderer, scene, rig.camera, SHARED.uFlood.value);
+  else renderer.render(scene, rig.camera);
   cpuAvg += (performance.now() - t0 - cpuAvg) * 0.05;
   adaptQuality(frameMs, now);
 
