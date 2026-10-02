@@ -288,7 +288,7 @@ function showcase(dt: number): void {
     const running = i % 3 === 1;
     p.pos.set(-5.6 + i * 1.6, 0, 5 + (i % 2) * 1.2);
     p.prevPos.copy(p.pos);
-    p.facing = running ? 0 : Math.PI / 2 - 0.5 + i * 0.15;
+    p.facing = running ? 0 : i % 2 === 0 ? -Math.PI / 2 + 0.3 : Math.PI / 2 - 0.3;
     p.prevFacing = p.facing;
     p.vel.set(running ? 7 : 0, 0, 0);
     p.stridePhase += running ? dt * 10 : 0;
