@@ -6,7 +6,6 @@ import { clamp, lerp } from '../sim/vec';
 const CAM_PITCH_DEG = 21;
 /** Pixel art looks down more steeply: a cleaner, more readable top-down-ish framing. */
 const PIXEL_PITCH_DEG = 30;
-const LOOK_OFFSET = 3.5;
 
 export const CAMERA_PRESETS = { close: 33, normal: 40, far: 48 } as const;
 export type CameraPreset = keyof typeof CAMERA_PRESETS;
@@ -18,6 +17,11 @@ export class CameraRig {
   private tz = 0;
   private vx = 0;
   private vz = 0;
+  /** Framing aim after the dead zone and safe frame (the spring chases it). */
+  private aimX = 0;
+  private aimZ = 0;
+  private leadX = 0;
+  private leadZ = 0;
   private dist = 40;
   private shake = 0;
   private look = new THREE.Vector3();
@@ -38,7 +42,7 @@ export class CameraRig {
     return this.tx;
   }
   get focusZ(): number {
-    return this.tz - 4;
+    return this.tz;
   }
 
   constructor(aspect: number) {
@@ -57,45 +61,100 @@ export class CameraRig {
     this.camera.updateProjectionMatrix();
   }
 
+  /**
+   * Framing, the way a broadcast operator does it:
+   * - The subject is the ball, led into the direction of play (more picture ahead of the
+   *   attack than behind it), pulled partway toward the player you control.
+   * - A dead zone: small touches and jinks don't move the camera; it only follows once the
+   *   subject drifts out of a box around the centre.
+   * - Composition: the subject sits a little above centre, because the joystick and buttons
+   *   cover the bottom of the screen.
+   * - Safe frame: whatever the composition says, the ball and the active player are both
+   *   kept inside the picture (the ball wins if they can't both fit).
+   * - A critically damped spring that stiffens with the ball's speed, so long balls are
+   *   followed without lag but the camera stays calm in slow build-up.
+   * The pixel look keeps a fixed distance (no dolly or zoom) so its pixel grid stays stable.
+   */
   update(match: Match, alpha: number, dt: number, time: number): void {
+    if (dt <= 0) return this.place(time);
+    const pixel = this.pixelHeight > 0;
+    const cam = this.camera;
     const b = match.ball;
     const bx = lerp(b.prevPos.x, b.pos.x, alpha);
     const bz = lerp(b.prevPos.z, b.pos.z, alpha);
-    let goalX = bx + clamp(b.vel.x * 0.35, -9, 9);
-    let goalZ = bz * 0.6 + clamp(b.vel.z * 0.15, -4, 4);
-    const att = match.attackingTeam();
-    if (att >= 0) goalX += match.teams[att].dir * 4;
-    if (match.phase === 'goal' && match.scorer) {
-      goalX = match.scorer.pos.x * 0.8;
-      goalZ = match.scorer.pos.z * 0.7;
-    }
-    goalX = clamp(goalX, -PITCH.halfL + 10, PITCH.halfL - 10);
-    goalZ = clamp(goalZ, -PITCH.halfW + 6, PITCH.halfW - 6);
-    const pixel = this.pixelHeight > 0;
-    if (pixel) {
-      // Pixel art: no dolly or zoom (the pixel grid stays stable; the snap below keeps
-      // panning smooth), and the picture is centred vertically on the active player.
-      this.dist = this.baseDist;
-      const c = match.phase === 'goal' && match.scorer ? match.scorer : match.controlled;
-      const cz = lerp(c.prevPos.z, c.pos.z, alpha);
-      goalZ = clamp(cz, -PITCH.halfW + 6, PITCH.halfW - 6) + LOOK_OFFSET;
-    }
+    const goal = match.phase === 'goal' && match.scorer;
+    const c = goal ? match.scorer! : match.controlled;
+    const cx = lerp(c.prevPos.x, c.pos.x, alpha);
+    const cz = lerp(c.prevPos.z, c.pos.z, alpha);
 
-    // Critically damped follow.
-    const w = 2.6;
-    const k = 1 - Math.exp(-dt * 6);
-    this.vx += ((goalX - this.tx) * w * w - 2 * w * this.vx) * dt;
-    this.vz += ((goalZ - this.tz) * w * w - 2 * w * this.vz) * dt;
+    // Visible ground half-extents around the look point.
+    const pitch = this.pitch();
+    const tanV = Math.tan((cam.fov * Math.PI) / 360);
+    const halfX = this.dist * tanV * cam.aspect;
+    const halfZ = (this.dist * tanV) / Math.sin(pitch + 0.15);
+
+    // Lead: where play is going, smoothed so it doesn't flick on every touch.
+    const att = match.attackingTeam();
+    const live = match.phase === 'play';
+    const wantLX = live ? clamp(b.vel.x * 0.4, -9, 9) + (att >= 0 ? match.teams[att].dir * 3.5 : 0) : 0;
+    const wantLZ = live ? clamp(b.vel.z * 0.25, -4, 4) : 0;
+    const kl = 1 - Math.exp(-dt * 1.8);
+    this.leadX += (wantLX - this.leadX) * kl;
+    this.leadZ += (wantLZ - this.leadZ) * kl;
+
+    // Subject: the led ball, pulled toward the active player (less when he's far from it).
+    const cd = Math.hypot(cx - bx, cz - bz);
+    const wc = goal ? 1 : 0.4 * (1 - clamp((cd - 8) / 22, 0, 1));
+    let sx = bx + this.leadX + (cx - bx - this.leadX) * wc;
+    let sz = bz + this.leadZ + (cz - bz - this.leadZ) * wc;
+    // Composition: subject above centre (controls cover the bottom).
+    sz += halfZ * 0.12;
+
+    // Dead zone around the current aim.
+    const dzx = halfX * 0.12;
+    const dzz = halfZ * 0.1;
+    const ex = sx - this.aimX;
+    const ez = sz - this.aimZ;
+    if (Math.abs(ex) > dzx) this.aimX += ex - Math.sign(ex) * dzx;
+    if (Math.abs(ez) > dzz) this.aimZ += ez - Math.sign(ez) * dzz;
+
+    // Safe frame: the active player, then the ball (applied last so it wins).
+    this.aimX = this.keepIn(this.aimX, cx, halfX * 0.78, halfX * 0.78);
+    this.aimZ = this.keepIn(this.aimZ, cz, halfZ * 0.72, halfZ * 0.5);
+    this.aimX = this.keepIn(this.aimX, bx, halfX * 0.82, halfX * 0.82);
+    this.aimZ = this.keepIn(this.aimZ, bz, halfZ * 0.78, halfZ * 0.55);
+
+    // Don't show more than a little beyond the pitch.
+    const mx = Math.max(0, PITCH.halfL + 8 - halfX);
+    this.aimX = clamp(this.aimX, -mx, mx);
+    this.aimZ = clamp(this.aimZ, -PITCH.halfW + halfZ * 0.55 - 6, PITCH.halfW - halfZ * 0.45 + 4);
+    sx = this.aimX;
+    sz = this.aimZ;
+
+    // Critically damped follow, stiffer when the ball is travelling.
+    const w = 2.3 + Math.min(2.2, b.vel.len() * 0.1);
+    this.vx += ((sx - this.tx) * w * w - 2 * w * this.vx) * dt;
+    this.vz += ((sz - this.tz) * w * w - 2 * w * this.vz) * dt;
     this.tx += this.vx * dt;
     this.tz += this.vz * dt;
+    // Never lose the ball, whatever the spring is doing.
+    this.tx = this.keepIn(this.tx, bx, halfX * 0.92, halfX * 0.92);
+    this.tz = this.keepIn(this.tz, bz, halfZ * 0.9, halfZ * 0.75);
 
-    const speed = b.vel.len();
+    const k = 1 - Math.exp(-dt * 6);
     const air = Math.max(0, b.pos.y - 2) * 0.6;
-    const wantDist = (match.phase === 'goal' ? this.baseDist * 0.78 : this.baseDist) + Math.min(5, speed * 0.12 + air);
+    const wantDist = (goal ? this.baseDist * 0.78 : this.baseDist) + Math.min(5, b.vel.len() * 0.12 + air);
     if (!pixel) this.dist += ((this.distOverride || wantDist) - this.dist) * k * 0.3;
-    else if (this.distOverride) this.dist = this.distOverride;
+    else this.dist = this.distOverride || this.baseDist;
     this.shake *= Math.exp(-dt * 6);
     this.place(time);
+  }
+
+  /** Move `aim` the least so that point p lies within [aim - far, aim + near] (z: + is nearer the camera). */
+  private keepIn(aim: number, p: number, far: number, near: number): number {
+    if (p < aim - far) return p + far;
+    if (p > aim + near) return p - near;
+    return aim;
   }
 
   private pitch(): number {
@@ -123,7 +182,7 @@ export class CameraRig {
       tz = szp;
     }
     cam.position.set(tx + sx, Math.sin(pitch) * this.dist + sy, tz + Math.cos(pitch) * this.dist);
-    this.look.set(tx, 0, tz - LOOK_OFFSET);
+    this.look.set(tx, 0, tz);
     cam.lookAt(this.look);
   }
 }
