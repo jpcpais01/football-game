@@ -641,7 +641,7 @@ export class AI {
       if (m.owner && m.owner.team !== p.team) return this.press(p, m.owner);
       const ip = this.intercept[p.id];
       this.moveTo(p, ip.x, ip.z, true, true);
-      p.burst = m.ballDist(p) < 2.5 && !m.passTarget;
+      p.burst = m.ballDist(p) < 2.5;
       return;
     }
     // Second defender: cover goal-side of the ball if close.

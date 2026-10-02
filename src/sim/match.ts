@@ -849,7 +849,7 @@ export class Match {
             const floor = gap > 3 ? PLAYER.jogSpeed + 2.2 : gap > 1 ? PLAYER.jogSpeed + (bs < 3 ? 1 : 0) : bs < 1.5 ? 2.5 : 1.2;
             speed = Math.max(floor, need);
             stickW *= clamp((ip.slack - 0.15) / 0.5, 0, 1);
-            c.burst = gap < 2.5 && (!this.passTarget || this.passTarget.team === c.team);
+            c.burst = gap < 2.5;
             // Arrive, don't overrun: no faster than he can pull up in what's left, plus however
             // fast the spot itself is running away (a ball going away is chased down).
             // Except for a ball cutting across in front of him that he's late for (it gets to
@@ -1902,8 +1902,6 @@ export class Match {
       const d = this.ballDist(p);
       if (d < PLAYER.reach || d > 2.4) continue;
       if (p !== this.controlled && this.passTarget !== p && this.ai.chaser[p.team] !== p) continue;
-      // Loose balls and passes to us; cutting out the other side's pass is left as it was.
-      if (this.passTarget && this.passTarget.team !== p.team) continue;
       if (!this.wantsBall(p)) continue;
       if (!sampled) {
         sampled = true;
