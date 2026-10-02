@@ -840,6 +840,10 @@ export class PlayersView {
       let lift = 0;
       let headPitch = 0;
       let headLook = true;
+      // Celebrations: an extra spin about the vertical, and a shift along the facing that
+      // keeps a flip turning about the body's middle rather than the feet.
+      let yawExtra = 0;
+      let fwdShift = 0;
 
       // Side-steps and backpedalling: when moving across or against the way the body faces
       // (keepers on their line, defenders jockeying) the legs shuffle instead of striding.
@@ -1408,8 +1412,121 @@ export class PlayersView {
           armOutL = armOutR = -0.05;
         }
       }
-      // Goal celebration.
-      if (match.phase === 'goal' && match.scorer === p && match.phaseT > 0.4 && match.phaseT < GOAL_SEQ.cut) {
+      // Goal celebration: the one picked with the buttons, or the classic.
+      const cel = match.phase === 'goal' && match.scorer === p && match.celebration && match.phaseT >= match.celebration.at && match.phaseT < GOAL_SEQ.cut ? match.celebration : null;
+      if (cel) {
+        const u = match.phaseT - cel.at;
+        headLook = false;
+        switch (cel.kind) {
+          case 'slide': {
+            // Down onto both knees at full tilt and skidding at the camera: leaning back, arms
+            // flung wide, head back. Stopped, a roar with pumped fists; then up, soaking it in.
+            const knees = smoothstep(0.7, 0.88, u) * (1 - smoothstep(3.7, 4.2, u));
+            const skid = smoothstep(0.82, 1.15, u) * (1 - smoothstep(2.4, 2.8, u));
+            const roar = smoothstep(2.4, 2.75, u) * (1 - smoothstep(3.6, 4.0, u));
+            const pump = Math.max(0, Math.sin((u - 2.5) * 10)) * roar;
+            const fin = smoothstep(3.9, 4.4, u);
+            hipY = lerp(hipY, 0.5, knees);
+            hipL = lerp(hipL, 0.14, knees);
+            hipR = lerp(hipR, 0.06, knees);
+            kneeL = lerp(kneeL, 1.62, knees);
+            kneeR = lerp(kneeR, 1.56, knees);
+            legOutL = lerp(legOutL, 0.15, knees);
+            legOutR = lerp(legOutR, 0.15, knees);
+            leanF = lerp(leanF, -0.1, knees);
+            leanS *= 1 - knees;
+            flexExtra += -0.5 * skid + 0.3 * roar + 0.06 * pump - 0.18 * fin;
+            headPitch += -0.5 * skid - 0.25 * roar - 0.2 * fin;
+            const armUp = (a: number) => lerp(lerp(lerp(a, -0.55, skid), 0.3 + 0.4 * pump, roar), 0.15, fin);
+            armL = armUp(armL);
+            armR = armUp(armR);
+            armOutL = armOutR = lerp(lerp(lerp(armOutL, 1.3, skid), 0.38, roar), 1.35, fin);
+            elbowL = elbowR = lerp(lerp(lerp(elbowL, 0.55, skid), 2.05 - 0.55 * pump, roar), 0.15, fin);
+            break;
+          }
+          case 'plane': {
+            // The aeroplane: arms out like wings (a little wobble in them), banked into the turn.
+            const k = smoothstep(0, 0.35, u);
+            const bank = cel.turn * 0.36 * k * (1 - smoothstep(2.8, 3.3, u));
+            const fin = smoothstep(3.6, 4.1, u);
+            const wob = Math.sin(time * 6.5) * 0.07 * k * (1 - fin);
+            roll += bank;
+            armOutL = lerp(lerp(armOutL, 1.5 + wob, k), 0.5, fin);
+            armOutR = lerp(lerp(armOutR, 1.5 - wob, k), 0.5, fin);
+            armL = lerp(lerp(armL, 0.05, k), -2.75, fin);
+            armR = lerp(lerp(armR, 0.05, k), -2.75, fin);
+            elbowL = elbowR = lerp(lerp(elbowL, 0.05, k), 0.15, fin);
+            flexExtra -= 0.12 * k + 0.12 * fin;
+            headPitch -= 0.12 * k + 0.25 * fin;
+            break;
+          }
+          case 'siu': {
+            // A crouch, a leap with a half turn, and the landing: feet wide, arms flung down
+            // and back, chest out, head back.
+            const load = smoothstep(0.28, 0.45, u) * (1 - smoothstep(0.45, 0.52, u));
+            const a = clamp((u - 0.45) / 0.6, 0, 1);
+            const air = a > 0 && a < 1 ? Math.sin(Math.PI * a) : 0;
+            const land = smoothstep(1.0, 1.06, u) * (1 - smoothstep(1.06, 1.35, u));
+            const pose = smoothstep(1.02, 1.22, u);
+            if (u >= 0.45) yawExtra = Math.PI * cel.turn * (1 - smoothstep(0.47, 0.98, u));
+            lift += 0.6 * air;
+            kneeL += 0.8 * load + 0.7 * air + 0.5 * land;
+            kneeR += 0.8 * load + 0.7 * air + 0.5 * land;
+            hipL += 0.45 * load + 0.4 * air;
+            hipR += 0.45 * load + 0.25 * air;
+            hipY -= 0.18 * load + 0.12 * land + 0.11 * pose;
+            armL = lerp(lerp(armL, 0.9, load), -2.4, air);
+            armR = lerp(lerp(armR, 0.9, load), -2.4, air);
+            armOutL = armOutR = lerp(armOutL, 0.35, air);
+            legOutL = lerp(legOutL, 0.3, pose);
+            legOutR = lerp(legOutR, 0.3, pose);
+            hipL = lerp(hipL, 0.3, pose);
+            hipR = lerp(hipR, 0.3, pose);
+            kneeL = lerp(kneeL, 0.5, pose) + 0.4 * land;
+            kneeR = lerp(kneeR, 0.5, pose) + 0.4 * land;
+            armL = lerp(armL, 0.5, pose);
+            armR = lerp(armR, 0.5, pose);
+            armOutL = lerp(armOutL, 0.8, pose);
+            armOutR = lerp(armOutR, 0.8, pose);
+            elbowL = elbowR = lerp(elbowL, 0.08, pose);
+            flexExtra += 0.3 * load - 0.38 * pose;
+            headPitch -= 0.42 * pose;
+            break;
+          }
+          case 'flip': {
+            // A standing backflip: load, arms swung up, tucked over, landed, arms to the sky.
+            const load = smoothstep(0.55, 0.85, u) * (1 - smoothstep(0.85, 0.92, u));
+            const k = clamp((u - 0.85) / 0.75, 0, 1);
+            const flying = k > 0 && k < 1;
+            const tuck = smoothstep(0.1, 0.32, k) * (1 - smoothstep(0.68, 0.9, k));
+            const land = smoothstep(1.56, 1.62, u) * (1 - smoothstep(1.62, 1.95, u));
+            const sky = smoothstep(1.8, 2.25, u);
+            if (flying) {
+              const th = -Math.PI * 2 * k * k * (3 - 2 * k);
+              const c = 0.95;
+              lift = c + 0.8 * Math.sin(Math.PI * k) - c * Math.cos(th);
+              fwdShift = -c * Math.sin(th) * h;
+              leanF = th;
+              leanS = 0;
+              roll = 0;
+            }
+            hipL = lerp(hipL + 0.65 * load + 0.5 * land, 1.85, tuck);
+            hipR = lerp(hipR + 0.65 * load + 0.5 * land, 1.85, tuck);
+            kneeL = lerp(kneeL + 1.0 * load + 0.9 * land, 2.15, tuck);
+            kneeR = lerp(kneeR + 1.0 * load + 0.9 * land, 2.15, tuck);
+            hipY -= 0.28 * load + 0.25 * land;
+            const swing = flying ? 1 - tuck : 0;
+            const arm = (a: number) => lerp(lerp(lerp(lerp(a, 1.0, load), -2.8, swing), -1.0, tuck), -1.2, land);
+            armL = lerp(arm(armL), -2.75 + 0.12 * Math.sin(time * 11), sky);
+            armR = lerp(arm(armR), -2.75 + 0.12 * Math.sin(time * 11 + 1.3), sky);
+            armOutL = armOutR = lerp(lerp(armOutL, 0.12, tuck), 0.45, sky);
+            elbowL = elbowR = lerp(lerp(elbowL, 1.3, tuck), 0.12, sky);
+            flexExtra += 0.35 * load + 0.4 * tuck + 0.2 * land - 0.2 * sky;
+            headPitch += 0.25 * tuck - 0.35 * sky;
+            break;
+          }
+        }
+      } else if (match.phase === 'goal' && match.scorer === p && match.phaseT > 0.4 && match.phaseT < GOAL_SEQ.cut) {
         const u = match.phaseT - GOAL_SEQ.front;
         if (u < 0.3) {
           // The run: arms flung up.
@@ -1525,9 +1642,9 @@ export class PlayersView {
 
       // ---------------- skeleton
       const R = this.root;
-      this.e.set(0, Math.PI / 2 - facing, 0, 'YXZ');
+      this.e.set(0, Math.PI / 2 - facing - yawExtra, 0, 'YXZ');
       R.makeRotationFromEuler(this.e);
-      R.setPosition(x, 0, z);
+      R.setPosition(x + Math.cos(facing) * fwdShift, 0, z + Math.sin(facing) * fwdShift);
       const bs = this.body[id];
       const sc = h * this.bodyScale[id];
       this.s.set(sc, sc, sc);

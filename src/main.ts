@@ -3,7 +3,7 @@ import '@fontsource/barlow-condensed/latin-800.css';
 import './style.css';
 import * as THREE from 'three';
 import { DT, GOAL_SEQ, MATCH, PITCH } from './sim/constants';
-import { Match } from './sim/match';
+import { CELEBRATIONS, Match } from './sim/match';
 import { createPitch } from './render/pitch';
 import { TurfMarks } from './render/turfMarks';
 import { createStadium } from './render/stadium';
@@ -807,7 +807,12 @@ function frame(now: number): void {
   const running = !paused;
   if (running) {
     controls.update(dt);
-    controls.setMode(match.humanAttacking() ? 'attack' : 'defend');
+    // After your goal the buttons pick the celebration (and show which, while it plays).
+    const cel = match.celebration;
+    const mine = match.phase === 'goal' && match.scorer?.team === match.humanTeam && !match.autoPlay;
+    if (match.celebrationOpen) controls.setMode('celebrate');
+    else if (mine && cel && match.phaseT < cel.at + 1.6) controls.setMode('celebrate', CELEBRATIONS.indexOf(cel.kind));
+    else controls.setMode(match.humanAttacking() ? 'attack' : 'defend');
     acc += dt;
     let steps = 0;
     if (SHOWCASE) {

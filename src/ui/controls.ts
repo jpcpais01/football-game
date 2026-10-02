@@ -9,7 +9,10 @@ import { Btn, type InputState, makeInput } from '../sim/input';
 const LABELS = {
   attack: ['PASS', 'THROUGH', 'SHOOT', 'SPRINT'],
   defend: ['TACKLE', 'SWITCH', 'PRESS', 'SPRINT<br><small>▼ TACKLE · ◀ SLIDE</small>'],
+  // After your goal (same order as CELEBRATIONS in the match).
+  celebrate: ['KNEE<br>SLIDE', 'AERO<br>PLANE', 'SIUU', 'BACK<br>FLIP'],
 };
+type Mode = keyof typeof LABELS;
 
 export class Controls {
   readonly input: InputState = makeInput();
@@ -30,7 +33,9 @@ export class Controls {
   private sprintStartY = 0;
   /** Sprint swipe this press: 0 none, 1 tackle (slid down), 2 slide tackle (slid left). */
   private sprintSwipe = 0;
-  mode: 'attack' | 'defend' = 'attack';
+  mode: Mode = 'attack';
+  /** The celebration picked (0-3: Pass, Through, Shoot, Sprint), -1 = none yet. */
+  private picked = -1;
   private keys = new Set<string>();
   private keySprint = false;
   enabled = true;
@@ -97,16 +102,20 @@ export class Controls {
     if (!v) this.releaseAll();
   }
 
-  setMode(mode: 'attack' | 'defend'): void {
-    if (mode === this.mode) return;
+  setMode(mode: Mode, picked = -1): void {
+    if (mode === this.mode && picked === this.picked) return;
     this.mode = mode;
+    this.picked = picked;
     const labels = LABELS[mode];
-    this.btnEls.forEach((el, i) => {
-      (el.querySelector('span') as HTMLElement).textContent = labels[i];
+    const all = [...this.btnEls, this.sprintEl];
+    all.forEach((el, i) => {
+      (el.querySelector('span') as HTMLElement).innerHTML = labels[i];
       el.classList.toggle('defend', mode === 'defend');
+      el.classList.toggle('celebrate', mode === 'celebrate');
+      el.classList.toggle('picked', mode === 'celebrate' && picked === i);
+      el.classList.toggle('faded', mode === 'celebrate' && picked >= 0 && picked !== i);
     });
-    (this.sprintEl.querySelector('span') as HTMLElement).innerHTML = labels[3];
-    this.sprintEl.classList.toggle('defend', mode === 'defend');
+    this.root.classList.toggle('celebrating', mode === 'celebrate');
   }
 
   /** Per-frame: hold timers and the shot power ring. */
