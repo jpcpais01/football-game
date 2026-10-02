@@ -225,6 +225,7 @@ pauseMenu.innerHTML = `
     <button class="palette ghost">Palette</button>
     <button class="camera ghost">Camera: Normal</button>
     <button class="sound ghost">Sound: on</button>
+    <button class="smooth ghost">Smoothing: on</button>
     <label class="fine wide"><span>Pixels</span><input class="fine-in" type="range" min="0" max="${FINENESS.length - 1}" step="1"><em>Chunky ‹ › Fine</em></label>
     <button class="stats ghost wide">FPS counter: off</button>
     <button class="fan ghost wide">Your banner: add photo</button>
@@ -511,6 +512,28 @@ fineIn.addEventListener('input', () => {
     /* ignore */
   }
 });
+// Smoothing: each art pixel picks the most typical of 4 samples (no shimmer), or takes 1.
+const smoothBtn = pauseMenu.querySelector('.smooth') as HTMLButtonElement;
+let smoothing = true;
+try {
+  smoothing = localStorage.getItem('smoothing') !== 'off';
+} catch {
+  /* keep default */
+}
+const applySmoothing = () => {
+  pixelPass.setSupersample(smoothing ? 2 : 1);
+  smoothBtn.textContent = `Smoothing: ${smoothing ? 'on' : 'off'}`;
+};
+applySmoothing();
+smoothBtn.addEventListener('click', () => {
+  smoothing = !smoothing;
+  applySmoothing();
+  try {
+    localStorage.setItem('smoothing', smoothing ? 'on' : 'off');
+  } catch {
+    /* ignore */
+  }
+});
 const soundBtn = pauseMenu.querySelector('.sound') as HTMLButtonElement;
 soundBtn.addEventListener('click', () => {
   audio.setMuted(!audio.muted);
@@ -586,8 +609,7 @@ let frameAvg = 16.7;
 let rafAvg = 16.7;
 let lastRaf = performance.now();
 let targetMs = 16.7;
-/** Seconds the frame time has stayed comfortably inside the budget (for supersampling). */
-let headroom = 0;
+
 let perfCheckAt = performance.now() + 3000;
 let fpsFrames = 0;
 let fpsT = performance.now();
@@ -667,17 +689,8 @@ function adaptQuality(frameMs: number, now: number): void {
   if (FIXED_DPR) return;
   frameAvg += (frameMs - frameAvg) * 0.05;
   if (now < perfCheckAt) return;
-  if (pixelLook()) {
-    // Pixel look: the resolution is the art. Supersampling is the one knob: it comes on
-    // after ~6 s of frames comfortably on time, and goes off as soon as frames run late.
-    if (!playing || paused) return void (perfCheckAt = now + 1000);
-    const late = frameAvg > targetMs * 1.18;
-    headroom = frameAvg < targetMs * 1.06 ? headroom + 1 : 0;
-    if (late && pixelPass.ss > 1) pixelPass.setSupersample(1), (headroom = 0), (perfCheckAt = now + 5000);
-    else if (headroom >= 6 && pixelPass.ss < 2) pixelPass.setSupersample(2), (headroom = 0), (perfCheckAt = now + 4000);
-    else perfCheckAt = now + 1000;
-    return;
-  }
+  // Pixel look: the resolution is the art, and smoothing is the player's choice (pause menu).
+  if (pixelLook()) return;
   if (frameAvg > 19.5 && dpr > 0.75) {
     dpr = Math.max(0.75, dpr - 0.15);
     renderer.setPixelRatio(dpr);
@@ -727,13 +740,12 @@ function frame(now: number): void {
     void Promise.race([compiled, timeout]).then(() => requestAnimationFrame(() => boot.__bootDone?.()));
   }
   requestAnimationFrame(frame);
-  // Frame pacing. A football game needs 60 fps, not 90 or 120: on high-refresh screens
-  // every other refresh is skipped (half the GPU, CPU, heat and battery). Behind the menus
-  // the stadium is ambience (30 fps); the pause screen barely moves (15 fps).
+  // Frame pacing: matches up to 120 fps (above that, refreshes are skipped). Behind the
+  // menus the stadium is ambience (30 fps); the pause screen barely moves (15 fps).
   rafAvg += (Math.min(50, now - lastRaf) - rafAvg) * 0.1;
   lastRaf = now;
   const menus = !playing;
-  targetMs = paused ? 1000 / 15 : menus ? 1000 / 30 : Math.max(1000 / 60, rafAvg);
+  targetMs = paused ? 1000 / 15 : menus ? 1000 / 30 : Math.max(1000 / 120, rafAvg);
   if (now - last < targetMs - rafAvg * 0.5) return;
   const t0 = performance.now();
   const frameMs = now - last;
