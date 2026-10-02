@@ -928,6 +928,9 @@ export class PlayersView {
           // and a high one takes him off the ground.
           const vol = shot ? smoothstep(0.45, 0.95, p.kickHeight) : 0;
           const halfV = shot ? smoothstep(0.18, 0.4, p.kickHeight) * (1 - vol) : 0;
+          // Reaching for it: how far, and how much of that is out to the side.
+          const st = p.kickStretch;
+          const sideFrac = clamp(Math.abs(p.kickBallL) / Math.max(0.3, Math.hypot(p.kickBallF, p.kickBallL)), 0, 1);
           const tc = Math.max(0.05, p.kickContact);
           const tf = Math.max(tc + 0.05, p.actionDur);
           const t = p.actionT;
@@ -946,7 +949,7 @@ export class PlayersView {
           // bent); an instep strike folds the knee right up.
           const backLift = ground ? -(0.12 + 0.4 * big) : -(0.2 + 0.65 * big) * (1 - 0.4 * vol);
           const heel = (ground ? 0.55 + 0.35 * big : 1.55 + 0.6 * big) * (1 - 0.35 * vol);
-          const contactHip = (ground ? 0.4 : 0.32) + 1.05 * vol + 0.08 * halfV;
+          const contactHip = (ground ? 0.4 : 0.32) + 1.05 * vol + 0.08 * halfV + 0.3 * st * (1 - sideFrac);
           const followHip = (ground ? 0.7 : lofted ? 1.55 : finesse ? 0.95 : 0.95 + 0.75 * big) + 0.4 * vol;
           let kHip: number;
           let kKnee: number;
@@ -977,7 +980,7 @@ export class PlayersView {
           const swingPhase = smoothstep(0.5, 1, u);
           const across = tgt * 0.45 * swingPhase * (1 - v * 0.5);
           // A volley swings round from the side rather than straight through.
-          const kOutVol = 0.35 * vol * swingPhase * (1 - smoothstep(0.5, 1, v));
+          const kOutVol = (0.35 * vol + 0.45 * st * sideFrac) * swingPhase * (1 - smoothstep(0.5, 1, v));
 
           // ---- standing leg: reaches on the last stride, plants, takes the load, the body
           // passes over it; a big strike lifts it off the ground for a moment.
@@ -995,6 +998,8 @@ export class PlayersView {
             pHip = lerp(0.14, -0.38, ease(smoothstep(0, 0.85, v)));
             pKnee = lerp(shot ? 0.48 : 0.36, 0.3, v);
           }
+          // Stretching: the standing leg sinks and takes the load.
+          pKnee += 0.5 * st * smoothstep(0.4, 1, u) * (1 - smoothstep(0.4, 1, v));
           const hop =
             (shot && power > 0.55 ? Math.sin(Math.PI * smoothstep(0.08, 0.62, v)) * (0.05 + 0.05 * big) : 0) +
             // A high volley: both feet off as he swings through.
@@ -1020,7 +1025,7 @@ export class PlayersView {
           // and back through the strike; the kicking-side arm counters the leg.
           const wind = smoothstep(0, 0.55, u) * (1 - smoothstep(0.1, 0.9, v));
           const thru = smoothstep(0.6, 1, u) * (1 - outK);
-          const oppOut = lerp(0.15, (ground ? 0.75 : 1.2) * (0.7 + 0.3 * big), wind);
+          const oppOut = lerp(0.15, (ground ? 0.75 : 1.2) * (0.7 + 0.3 * big) + 0.45 * st, Math.max(wind, st * swingPhase));
           const oppSwing = lerp(0.35 * wind, -0.35, thru);
           const sameSwing = lerp(-0.55 * wind * big, 0.55 * big, thru);
           const keep = 1 - inK * (1 - outK);
@@ -1044,6 +1049,11 @@ export class PlayersView {
           const overBall = ground ? 0.12 : lofted ? -0.26 : finesse ? 0.06 : power > 1 ? -0.2 : 0.22;
           flexExtra += (-0.08 * big * smoothstep(0.1, 0.5, u) * (1 - swingPhase) + overBall * swingPhase * (1 - outK) + (shot && !finesse ? 0.12 * Math.sin(Math.PI * v) : 0)) * inK;
           sideExtra += -p.kickLeg * (0.08 + 0.16 * big + 0.4 * vol) * Math.max(atContact, wind * 0.6) * inK;
+          // Stretch: hips drop, the trunk counter-leans for balance as the leg reaches.
+          const reachK = st * swingPhase * (1 - outK);
+          hipY -= 0.13 * reachK;
+          sideExtra += -p.kickLeg * 0.22 * sideFrac * reachK;
+          leanF -= 0.1 * (1 - sideFrac) * reachK;
           // Volley: lean back and let the kicking hip come up; half-volley: head over it.
           leanF -= 0.2 * vol * swingPhase * (1 - outK);
           flexExtra += 0.14 * halfV * swingPhase * (1 - outK);
@@ -1070,7 +1080,7 @@ export class PlayersView {
           // same curve as the sim's tackling leg, so contact happens where you see it.
           const load = smoothstep(0, 0.2, pr) * (1 - smoothstep(0.75, 1, pr));
           const reach = smoothstep(0.12, 0.42, pr) * (1 - smoothstep(0.62, 0.9, pr));
-          const right = p.id % 3 !== 0; // most are right-footed
+          const right = p.kickLeg > 0; // the leg on the ball's side
           const side = right ? -1 : 1; // tackling leg's side (left = +)
           const tHip = 1.05;
           const tKnee = 0.18;
@@ -1102,49 +1112,66 @@ export class PlayersView {
           break;
         }
         case 'slide': {
-          // Slide tackle: down onto the hip and thigh of the tucked leg, the leading leg
-          // straight out just above the grass, the trailing leg folded under, torso back,
-          // the hand on the tucked side to the turf and the other arm up for balance; then
-          // roll forward over the tucked knee and up.
-          const down = smoothstep(0.02, 0.16, pr);
-          const rise = smoothstep(0.64, 0.9, pr);
+          // Shaped by the slide itself: he drops as he commits, lower and further back the
+          // faster he went in; the lead leg (the ball side) reaches along the grass and aims
+          // at the ball; the hip meets the turf with a small damped bounce; the support hand
+          // goes down a beat after; and he gets up as the slide dies, not on a timer.
+          const speedNow = Math.hypot(p.vel.x, p.vel.z);
+          const entry = clamp((p.slideV0 - 6) / 2.5, 0, 1);
+          const vary = Math.sin(p.id * 12.9898) * 0.5; // a little of each player's own style
+          const down = smoothstep(0, 0.13, pr);
+          const landT = Math.max(0, pr - 0.12);
+          const bounce = landT > 0 ? Math.exp(-landT * 9) * Math.sin(landT * 26) : 0;
+          const rise = smoothstep(0.42, 0.85, pr) * (1 - smoothstep(0.7, 2.4, speedNow));
           const lying = down * (1 - rise);
-          const kneel = rise * (1 - smoothstep(0.9, 1, pr));
-          const reach = smoothstep(0.04, 0.14, pr) * (1 - smoothstep(0.6, 0.76, pr));
-          const right = p.id % 3 !== 0;
+          const kneel = rise * (1 - smoothstep(0.88, 1, pr));
+          const reach = smoothstep(0.03, 0.12, pr) * (1 - smoothstep(0.6, 0.78, pr));
+          // The ball in his frame: the lead leg aims at it.
+          const cf = Math.cos(facing);
+          const sf = Math.sin(facing);
+          const rbx = ball.pos.x - x;
+          const rbz = ball.pos.z - z;
+          const bF = rbx * cf + rbz * sf;
+          const bL = -rbx * sf + rbz * cf;
+          const aim = Math.hypot(bF, bL) < 2.5 ? clamp(Math.atan2(bL, Math.max(0.4, bF)), -0.5, 0.5) * reach : 0;
+          const right = p.kickLeg > 0;
           const tuck = right ? 1 : -1; // the folded leg's side (left = +)
-          hipY = lerp(hipY, 0.24, lying) + 0.3 * kneel;
-          leanF = lerp(leanF, -0.95, lying) + 0.45 * kneel;
-          roll += tuck * 0.3 * lying;
-          flexExtra += 0.2 * lying;
+          hipY = lerp(hipY, 0.27 - 0.05 * entry + 0.04 * bounce, lying) + 0.3 * kneel;
+          leanF = lerp(leanF, -(0.78 + 0.25 * entry + 0.08 * vary), lying) + 0.06 * bounce * lying + 0.45 * kneel;
+          roll += tuck * (0.22 + 0.12 * entry + 0.05 * vary) * lying;
+          flexExtra += (0.18 + 0.06 * vary) * lying;
           // (Hip angles are relative to the pelvis, which leans back with the torso: the lead
           // leg ends up level along the grass, the tucked thigh pointing forward.)
-          const lead = { hip: lerp(0.35, 0.62, reach), knee: lerp(0.5, 0.05, reach) };
-          const fold = { hip: 0.5, knee: 2.0 };
+          const lead = { hip: lerp(0.3, 0.6 + 0.05 * entry, reach), knee: lerp(0.55, 0.06, reach) };
+          const fold = { hip: 0.48 + 0.06 * vary, knee: 1.95 };
           const up = { hip: 1.15, knee: 1.9 };
+          const supp = smoothstep(0.08, 0.26, pr) * (1 - rise); // the support hand lands a beat later
+          const freeArm = -1.0 - 0.25 * entry - 0.3 * bounce;
           if (right) {
             hipR = lerp(lerp(hipR, lead.hip, lying), up.hip * 0.6, kneel);
             kneeR = lerp(lerp(kneeR, lead.knee, lying), 0.9, kneel);
+            legYawR -= aim;
             hipL = lerp(lerp(hipL, fold.hip, lying), up.hip, kneel);
             kneeL = lerp(lerp(kneeL, fold.knee, lying), up.knee, kneel);
             legOutL = lerp(legOutL, 0.28, lying);
-            armL = lerp(armL, 0.75, lying);
-            armOutL = lerp(armOutL, 0.45, lying);
-            elbowL = lerp(elbowL, 0.15, lying);
-            armR = lerp(armR, -1.1, lying);
-            armOutR = lerp(armOutR, 0.85, lying);
+            armL = lerp(armL, 0.75, supp);
+            armOutL = lerp(armOutL, 0.45, supp);
+            elbowL = lerp(elbowL, 0.15, supp);
+            armR = lerp(armR, freeArm, lying);
+            armOutR = lerp(armOutR, 0.8 + 0.1 * vary, lying);
             elbowR = lerp(elbowR, 0.5, lying);
           } else {
             hipL = lerp(lerp(hipL, lead.hip, lying), up.hip * 0.6, kneel);
             kneeL = lerp(lerp(kneeL, lead.knee, lying), 0.9, kneel);
+            legYawL += aim;
             hipR = lerp(lerp(hipR, fold.hip, lying), up.hip, kneel);
             kneeR = lerp(lerp(kneeR, fold.knee, lying), up.knee, kneel);
             legOutR = lerp(legOutR, 0.28, lying);
-            armR = lerp(armR, 0.75, lying);
-            armOutR = lerp(armOutR, 0.45, lying);
-            elbowR = lerp(elbowR, 0.15, lying);
-            armL = lerp(armL, -1.1, lying);
-            armOutL = lerp(armOutL, 0.85, lying);
+            armR = lerp(armR, 0.75, supp);
+            armOutR = lerp(armOutR, 0.45, supp);
+            elbowR = lerp(elbowR, 0.15, supp);
+            armL = lerp(armL, freeArm, lying);
+            armOutL = lerp(armOutL, 0.8 + 0.1 * vary, lying);
             elbowL = lerp(elbowL, 0.5, lying);
           }
           break;

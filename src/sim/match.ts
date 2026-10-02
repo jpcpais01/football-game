@@ -1013,6 +1013,9 @@ export class Match {
 
   startTackle(p: Player, dx: number, dz: number, slide: boolean): void {
     p.facing = Math.atan2(dz, dx);
+    // Tackle with the leg on the ball's side (same convention as strikes).
+    const side = -Math.sin(p.facing) * (this.ball.pos.x - p.pos.x) + Math.cos(p.facing) * (this.ball.pos.z - p.pos.z);
+    p.kickLeg = side >= 0 ? 1 : -1;
     if (slide) p.startAction('slide', 1.0, dx, dz);
     else p.startAction('tackle', 0.42, dx, dz);
   }
@@ -1170,6 +1173,29 @@ export class Match {
       p.kickLofted = plan.type === 'lob' || plan.type === 'cross' || plan.type === 'clear' || !!plan.lofted;
       p.kickRel = angleDiff(p.facing, Math.atan2(plan.dirZ, plan.dirX));
       p.kickHeight = this.heldBy === p ? 0 : this.ballAt(timing.contact, tmpK).y;
+      // How far he has to reach: the ball at contact against where his hips will be. Beyond
+      // a comfortable foot reach (~0.5 m) he lunges for it through the wind-up.
+      p.kickVX = p.vel.x;
+      p.kickVZ = p.vel.z;
+      p.lungeX = p.lungeZ = 0;
+      p.kickStretch = p.kickBallF = p.kickBallL = 0;
+      if (kind === 'kick' && this.heldBy !== p) {
+        const hx = p.pos.x + p.vel.x * 0.8 * timing.contact;
+        const hz = p.pos.z + p.vel.z * 0.8 * timing.contact;
+        const rx = tmpK.x - hx;
+        const rz = tmpK.z - hz;
+        const r = Math.hypot(rx, rz);
+        const cf = Math.cos(p.facing);
+        const sf = Math.sin(p.facing);
+        p.kickBallF = rx * cf + rz * sf;
+        p.kickBallL = -rx * sf + rz * cf;
+        p.kickStretch = clamp((r - 0.5) / 0.7, 0, 1);
+        if (r > 0.5) {
+          const l = Math.min(3.5, (r - 0.5) / Math.max(0.1, timing.contact));
+          p.lungeX = (rx / r) * l;
+          p.lungeZ = (rz / r) * l;
+        }
+      }
     }
 
     if ((p.action === 'kick' || p.action === 'throw') && !p.actionDone && p.actionT >= p.kickContact) {

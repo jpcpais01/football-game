@@ -79,6 +79,16 @@ export class Player {
   kickWeak = false;
   /** Height of the ball at the moment of the strike (first-time volleys and half-volleys). */
   kickHeight = 0;
+  /** Reaching for the ball: 0 = it's at his foot, 1 = a full stretch. */
+  kickStretch = 0;
+  /** Where the ball will be at contact, in his frame (m): forward, and to his left. */
+  kickBallF = 0;
+  kickBallL = 0;
+  /** Running velocity when the strike started, and the lunge toward the ball (m/s). */
+  kickVX = 0;
+  kickVZ = 0;
+  lungeX = 0;
+  lungeZ = 0;
   /** Preferred foot: 1 = right, -1 = left. */
   foot = 1;
   /** Throw-in (two hands) rather than a keeper's one-arm throw. */
@@ -186,8 +196,12 @@ export class Player {
         const blend = k * k;
         tx = this.vel.x * 0.97 * (1 - blend) + this.moveX * this.wantSpeed * blend;
         tz = this.vel.z * 0.97 * (1 - blend) + this.moveZ * this.wantSpeed * blend;
-      } else if (a === 'kick' || a === 'header' || a === 'throw') {
-        // Strike on the run: the plant foot brakes the body.
+      } else if (a === 'kick') {
+        // Strike on the run: the plant foot brakes the body; reaching for a ball that's
+        // beyond the foot, he lunges toward it through the wind-up.
+        tx = this.kickVX * 0.8 + this.lungeX;
+        tz = this.kickVZ * 0.8 + this.lungeZ;
+      } else if (a === 'header' || a === 'throw') {
         const keep = a === 'throw' ? 0.4 : 0.8;
         tx = this.vel.x * keep;
         tz = this.vel.z * keep;
