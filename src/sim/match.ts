@@ -317,7 +317,7 @@ export class Match {
     if (this.phase === 'play') this.checkOutOfPlay();
 
     // Ownership persistence.
-    if (this.owner && this.ballDist(this.owner) > 2.4) this.owner = null;
+    if (this.owner && this.ballDist(this.owner) > 3) this.owner = null;
     if (this.owner) this.possTeam = this.owner.team;
     if (this.heldBy) this.possTeam = this.heldBy.team;
 
@@ -411,28 +411,22 @@ export class Match {
       const mz = -input.moveY / m;
       c.moveX = mx;
       c.moveZ = mz;
+      c.touchX = mx;
+      c.touchZ = mz;
       const walk = Math.min(1, m / 0.85);
       c.wantSpeed = input.sprint ? c.topSpeed : PLAYER.jogSpeed * (0.35 + 0.65 * walk);
       if (this.owner === c && !input.sprint) c.wantSpeed *= PLAYER.dribbleSpeedFactor;
-      // Dribbling assist: if the ball is roughly where we're heading, track it so the
-      // next touch happens naturally instead of running past it.
-      if (this.owner === c) {
-        const b = this.ball;
-        const bx = b.pos.x + b.vel.x * 0.15 - c.pos.x;
-        const bz = b.pos.z + b.vel.z * 0.15 - c.pos.z;
-        const bd = Math.hypot(bx, bz);
-        if (bd > 0.45 && (bx * mx + bz * mz) / bd > 0.3) {
-          const nx = mx * 0.35 + (bx / bd) * 0.65;
-          const nz = mz * 0.35 + (bz / bd) * 0.65;
-          const n = Math.hypot(nx, nz);
-          c.moveX = nx / n;
-          c.moveZ = nz / n;
-        }
-      }
+      // Dribbling: the stick sets where the next touch goes; between touches the player
+      // runs onto the ball so turns become real cuts instead of running off without it.
+      if (this.owner === c || (c.plan && this.owner === null && this.ballDist(c) < 3)) this.trackBall(c, mx, mz);
     } else {
       c.moveX = 0;
       c.moveZ = 0;
       c.wantSpeed = 0;
+      if (this.owner === c || (c.plan && this.owner === null && this.ballDist(c) < 3)) {
+        this.trackBall(c, Math.cos(c.facing), Math.sin(c.facing));
+        if (this.ballDist(c) >= 0.55) c.wantSpeed = Math.max(c.wantSpeed, Math.min(PLAYER.jogSpeed, this.ballDist(c) * 3));
+      }
     }
 
     if (!attacking && this.pressHeld) {
@@ -464,6 +458,30 @@ export class Match {
         }
       }
     }
+  }
+
+  /** Steer a ball-carrier onto the ball when it isn't at his feet. */
+  private trackBall(c: Player, mx: number, mz: number): void {
+    const b = this.ball;
+    c.touchX = mx;
+    c.touchZ = mz;
+    const gap = this.ballDist(c);
+    if (gap < 0.55) return;
+    const look = clamp(gap / Math.max(1, c.speed + 1), 0.05, 0.4);
+    const bx = b.pos.x + b.vel.x * look - c.pos.x;
+    const bz = b.pos.z + b.vel.z * look - c.pos.z;
+    const bd = Math.hypot(bx, bz);
+    if (bd < 0.01) return;
+    // Mostly toward the ball, a little toward the stick so the body is set for the next touch.
+    const w = gap > 1.2 ? 0.85 : 0.65;
+    const nx = mx * (1 - w) + (bx / bd) * w;
+    const nz = mz * (1 - w) + (bz / bd) * w;
+    const n = Math.hypot(nx, nz) || 1;
+    c.moveX = nx / n;
+    c.moveZ = nz / n;
+    // If the ball is running away, chase it at least at its pace.
+    const bs = Math.hypot(b.vel.x, b.vel.z);
+    if (gap > 1.0) c.wantSpeed = Math.max(c.wantSpeed, Math.min(c.topSpeed, bs + 1.2));
   }
 
   private manualSwitch(): void {
@@ -547,13 +565,16 @@ export class Match {
 
   // ------------------------------------------------------------------ actions
 
-  private kickable(p: Player): boolean {
+  /** Can the strike start now, i.e. will the ball be at the foot when the swing lands? */
+  private kickable(p: Player, contactIn = 0.12): boolean {
     const b = this.ball;
     if (this.heldBy === p) return true;
     if (this.heldBy) return false;
     if (b.pos.y > 1.0) return false;
-    const d = this.ballDist(p);
-    if (d > PLAYER.reach + 0.1) return false;
+    const fx = b.pos.x + b.vel.x * contactIn - (p.pos.x + p.vel.x * 0.8 * contactIn);
+    const fz = b.pos.z + b.vel.z * contactIn - (p.pos.z + p.vel.z * 0.8 * contactIn);
+    const d = Math.hypot(fx, fz);
+    if (d > PLAYER.reach) return false;
     if (this.setPiece && this.setPiece.taker !== p) return false;
     return true;
   }
@@ -563,10 +584,11 @@ export class Match {
     if (p.plan && this.time > p.plan.expires) p.plan = null;
 
     // Start a kick when the ball arrives in range.
-    if (p.plan && !p.isBusy() && p.touchCooldown <= 0 && this.kickable(p)) {
+    const planDur = p.plan ? (p.plan.type === 'shot' ? 0.3 : p.plan.type === 'lob' || p.plan.type === 'cross' || p.plan.type === 'clear' ? 0.27 : 0.2) : 0;
+    if (p.plan && !p.isBusy() && (p.touchCooldown <= 0 || p.sinceTouch > 0.12) && this.kickable(p, planDur * 0.55)) {
       if (this.setPiece && (this.setPiece.taker !== p || this.setPiece.t < 0.7)) return;
       const plan = p.plan;
-      const dur = plan.type === 'shot' ? 0.3 : plan.type === 'lob' || plan.type === 'cross' || plan.type === 'clear' ? 0.27 : 0.2;
+      const dur = planDur;
       const kind = this.heldBy === p ? 'throw' : 'kick';
       // Strike with the foot on the side of the ball.
       const side = -Math.sin(p.facing) * (this.ball.pos.x - p.pos.x) + Math.cos(p.facing) * (this.ball.pos.z - p.pos.z);
@@ -869,7 +891,7 @@ export class Match {
   /** Direction the player wants to take the ball (from stick or AI). */
   private dribbleDir(p: Player, out: V3): boolean {
     if (p.wantSpeed > 0.3 && (p.moveX !== 0 || p.moveZ !== 0)) {
-      out.set(p.moveX, 0, p.moveZ);
+      out.set(p.touchX, 0, p.touchZ);
       return true;
     }
     out.set(Math.cos(p.facing), 0, Math.sin(p.facing));
@@ -892,8 +914,13 @@ export class Match {
     const ctrl = p.attrs.control;
     if (moving) {
       const sprint = p.sprinting && ps > PLAYER.jogSpeed;
-      const target = Math.max(ps, p.wantSpeed * 0.7);
-      const touchSpeed = target * (sprint ? 1.42 : 1.2) + (sprint ? 1.6 : 0.8);
+      // Push the ball so the player meets it again on a later stride: the ball must cover
+      // what the player covers in T seconds while grass and air slow it down.
+      const target = Math.max(ps, Math.min(p.wantSpeed, ps + 2.5) * 0.85);
+      const T = sprint ? 1.15 : target > 4 ? 0.8 : 0.6;
+      const vEst = target + 1;
+      const decel = BALL.rollDecel + 0.025 * vEst * vEst;
+      const touchSpeed = target + (decel * T) / 2 + 0.35;
       // Changing direction at speed makes touches less precise.
       const ballYaw = ps > 0.5 ? Math.atan2(p.vel.z, p.vel.x) : Math.atan2(dz, dx);
       const turn = Math.abs(angleDiff(ballYaw, Math.atan2(dz, dx)));

@@ -39,6 +39,9 @@ export class Player {
   moveX = 0;
   moveZ = 0;
   wantSpeed = 0;
+  /** Where the carrier wants his next touch to go (stick / AI intent), separate from the run line. */
+  touchX = 1;
+  touchZ = 0;
   /** If set, the body turns toward this point instead of the run direction (jockey, receive). */
   lookAt: V3 | null = null;
   readonly lookTarget = new V3();
@@ -114,9 +117,10 @@ export class Player {
       this.actionT += dt;
       const a = this.action;
       if (a === 'kick' || a === 'header' || a === 'throw') {
-        // Plant and strike: keep a little momentum.
-        tx = this.vel.x * 0.55;
-        tz = this.vel.z * 0.55;
+        // Strike on the run: plant foot costs some momentum.
+        const keep = a === 'throw' ? 0.4 : 0.8;
+        tx = this.vel.x * keep;
+        tz = this.vel.z * keep;
       } else if (a === 'tackle') {
         const p = this.actionT / this.actionDur;
         const lunge = p < 0.45 ? 4.5 : 0.5;

@@ -479,6 +479,8 @@ export class AI {
       mx = p.plan.dirX;
       mz = p.plan.dirZ;
     }
+    p.touchX = mx;
+    p.touchZ = mz;
     // Stay with the ball: steer toward it when it's ahead of us.
     const tbx = b.x + m.ball.vel.x * 0.15 - p.pos.x;
     const tbz = b.z + m.ball.vel.z * 0.15 - p.pos.z;
@@ -884,9 +886,10 @@ export class AI {
       this.keeperDiveT[k.team] = m.time;
       const s = Math.sign(dz);
       k.startAction('dive', 1.25, 0, s);
-      const need = Math.abs(dz) - 0.4;
-      const tt = Math.max(0.18, ct);
-      const lat = clamp(need / tt, 2, 6.5 + k.attrs.keeping * 1.5);
+      // Aim the forearms (not the fingertips) at the ball.
+      const need = Math.abs(dz) - 1.0;
+      const tt = Math.max(0.2, ct - react * 0.5);
+      const lat = clamp(need / tt, 1.5, 6 + k.attrs.keeping * 2);
       k.vel.set(-own * 0.6, 0, s * lat);
       this.diveHeight[k.id] = clamp(cy, 0.2, 2.3);
     }
@@ -909,13 +912,14 @@ export class AI {
     if (diving) {
       // Capsule from hips toward the hands along the dive.
       const s = k.actionDirZ;
-      const p = clamp(k.actionT / 0.35, 0, 1);
-      const hipY = 0.35 + (this.diveHeight[k.id] - 0.35) * 0.5 * p;
-      const handY = this.diveHeight[k.id] * p + 1.2 * (1 - p);
+      const p = clamp(k.actionT / 0.3, 0, 1);
+      const dh = this.diveHeight[k.id];
+      const hipY = 0.9 + (dh * 0.8 - 0.9) * p;
+      const handY = 1.4 + (dh - 1.4) * p;
       const ax = k.pos.x;
       const az = k.pos.z;
       const bx = k.pos.x;
-      const bz = k.pos.z + s * (0.5 + 1.25 * p);
+      const bz = k.pos.z + s * (0.6 + 1.2 * p);
       const lx = bx - ax;
       const ly = handY - hipY;
       const lz = bz - az;
@@ -925,7 +929,7 @@ export class AI {
       const cy = hipY + ly * t;
       const cz = az + lz * t;
       const d = Math.hypot(b.pos.x - cx, b.pos.y - cy, b.pos.z - cz);
-      hit = d < 0.42;
+      hit = d < 0.45;
       edge = t;
     } else {
       const d = dist2D(k.pos.x, k.pos.z, b.pos.x, b.pos.z);

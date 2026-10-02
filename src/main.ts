@@ -272,8 +272,10 @@ function adaptQuality(frameMs: number, now: number): void {
   }
 }
 
+let cpuAvg = 0;
 function frame(now: number): void {
   requestAnimationFrame(frame);
+  const t0 = performance.now();
   const frameMs = now - last;
   const dt = Math.min(0.1, frameMs / 1000);
   last = now;
@@ -306,13 +308,14 @@ function frame(now: number): void {
   if (playing) hud.update(match, now / 1000);
 
   renderer.render(scene, rig.camera);
+  cpuAvg += (performance.now() - t0 - cpuAvg) * 0.05;
   adaptQuality(frameMs, now);
 
   if (DEBUG) {
     fpsFrames++;
     if (now - fpsT > 500) {
       const info = renderer.info.render;
-      fpsEl.textContent = `${Math.round((fpsFrames * 1000) / (now - fpsT))} fps · ${info.calls} calls · ${(info.triangles / 1000).toFixed(0)}k tris · dpr ${dpr.toFixed(2)}`;
+      fpsEl.textContent = `${Math.round((fpsFrames * 1000) / (now - fpsT))} fps · ${info.calls} calls · ${(info.triangles / 1000).toFixed(0)}k tris · dpr ${dpr.toFixed(2)} · cpu ${cpuAvg.toFixed(2)}ms`;
       fpsFrames = 0;
       fpsT = now;
     }
