@@ -6,6 +6,7 @@ import { DT, MATCH } from './sim/constants';
 import { Match } from './sim/match';
 import { createPitch } from './render/pitch';
 import { createStadium } from './render/stadium';
+import { clearFanBanner, loadFanBanner, pickFanBanner } from './ui/fanBanner';
 import { createGoals } from './render/goals';
 import { PlayersView } from './render/players';
 import { BallView } from './render/ballView';
@@ -123,6 +124,7 @@ menu.innerHTML = `
     <h1>GameNight</h1>
     <p class="sub">${match.teams[0].info.name} <span>vs</span> ${match.teams[1].info.name}</p>
     <button class="play">Kick off</button>
+    <button class="fan ghost">Your banner</button>
     <p class="hint">Landscape · joystick to move · Pass / Through / Shoot</p>
   </div>`;
 ui.appendChild(menu);
@@ -160,6 +162,7 @@ pauseMenu.innerHTML = `
     <button class="graphics ghost">Graphics: Pixel</button>
     <button class="camera ghost">Camera: Normal</button>
     <button class="sound ghost">Sound: on</button>
+    <button class="fan ghost wide">Your banner: add photo</button>
   </div>`;
 ui.appendChild(pauseMenu);
 
@@ -312,6 +315,30 @@ const soundBtn = pauseMenu.querySelector('.sound') as HTMLButtonElement;
 soundBtn.addEventListener('click', () => {
   audio.setMuted(!audio.muted);
   soundBtn.textContent = `Sound: ${audio.muted ? 'off' : 'on'}`;
+});
+
+// "Your banner": a photo the fans hold up in the stands (kept on this device).
+let hasFanBanner = false;
+const fanBtns = [menu.querySelector('.fan') as HTMLButtonElement, pauseMenu.querySelector('.fan') as HTMLButtonElement];
+const setFanBanner = (photo: HTMLCanvasElement | null) => {
+  hasFanBanner = photo !== null;
+  stadium.setFanBanner(photo);
+  fanBtns[0].textContent = hasFanBanner ? 'Change your banner' : 'Your banner';
+  fanBtns[1].textContent = hasFanBanner ? 'Your banner: remove' : 'Your banner: add photo';
+};
+void loadFanBanner().then((photo) => photo && setFanBanner(photo));
+fanBtns[0].addEventListener('click', async () => {
+  const photo = await pickFanBanner();
+  if (photo) setFanBanner(photo);
+});
+fanBtns[1].addEventListener('click', async () => {
+  if (hasFanBanner) {
+    clearFanBanner();
+    setFanBanner(null);
+  } else {
+    const photo = await pickFanBanner();
+    if (photo) setFanBanner(photo);
+  }
 });
 
 function setPaused(p: boolean): void {

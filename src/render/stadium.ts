@@ -20,6 +20,8 @@ export interface Stadium {
   group: THREE.Group;
   /** `tifo` 0..1: the ultras' card display (kick-off of each half). */
   update(time: number, excitement: number, atmo: Atmosphere, tifo?: number): void;
+  /** The player's own photo, held up by fans in the stands (null = take it down). */
+  setFanBanner(photo: CanvasImageSource | null): void;
 }
 
 const U = {
@@ -1029,6 +1031,64 @@ function banners(path: PathPt[], home: number, away: number): THREE.Group {
   return g;
 }
 
+/**
+ * The player's photo as a fan-made banner held up on two poles: a big one in the middle of
+ * the ultras' end (right in the goal crowd shot) and a smaller one in the far stand.
+ */
+function fanBanners(path: PathPt[], home: number): { group: THREE.Group; set(photo: CanvasImageSource | null): void } {
+  const group = new THREE.Group();
+  group.visible = false;
+  const cv = document.createElement('canvas');
+  cv.width = 680;
+  cv.height = 360;
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  const mat = windCloth(litMaterial({ roughness: 0.85 }), 0.07, null);
+  mat.map = tex;
+  mat.side = THREE.DoubleSide;
+  const poleMat = litMaterial({ color: 0x2a2a2e, roughness: 0.6 });
+  const hold = (p: PathPt, o: number, w: number) => {
+    const h = w / 2;
+    const tierH = LOWER[0][1] + ((o - LOWER[0][0]) / (LOWER[1][0] - LOWER[0][0])) * (LOWER[1][1] - LOWER[0][1]);
+    const g = new THREE.Group();
+    const cloth = new THREE.Mesh(new THREE.PlaneGeometry(w, h, 20, 10), mat);
+    cloth.position.y = 1.6 + h / 2;
+    g.add(cloth);
+    for (const sx of [-1, 1]) {
+      const pole = new THREE.Mesh(new THREE.BoxGeometry(0.08, h + 1.9, 0.08), poleMat);
+      pole.position.set((sx * w) / 2, (h + 1.9) / 2, 0.02);
+      g.add(pole);
+    }
+    g.position.copy(at(p, o, tierH));
+    // Facing the pitch, leaning back a little with the rake.
+    g.rotation.set(-0.12, Math.atan2(-p.nx, -p.nz), 0, 'YXZ');
+    group.add(g);
+  };
+  const end = path.filter((p) => p.zone === 1 && p.nx === -1);
+  hold(end[Math.floor(end.length / 2)], 6.5, 10);
+  const far = path.filter((p) => p.zone === 0 && p.nz === -1);
+  hold(far[Math.floor(far.length * 0.38)], 4, 8);
+  const hex = '#' + home.toString(16).padStart(6, '0');
+  return {
+    group,
+    set(photo) {
+      group.visible = photo !== null;
+      if (!photo) return;
+      const g = cv.getContext('2d')!;
+      // Painted cloth border in the club colour with white stitching, photo inside.
+      g.fillStyle = hex;
+      g.fillRect(0, 0, 680, 360);
+      g.drawImage(photo, 20, 20, 640, 320);
+      g.strokeStyle = '#f3eee2';
+      g.lineWidth = 4;
+      g.setLineDash([14, 8]);
+      g.strokeRect(9, 9, 662, 342);
+      tex.needsUpdate = true;
+    },
+  };
+}
+
 export function createStadium(homeColor: number, awayColor: number): Stadium {
   const group = new THREE.Group();
   group.add(sky());
@@ -1120,11 +1180,14 @@ export function createStadium(homeColor: number, awayColor: number): Stadium {
   group.add(banners(path, homeColor, awayColor));
   group.add(pitchside(homeColor, awayColor));
   group.add(lightShafts(spots));
+  const fan = fanBanners(path, homeColor);
+  group.add(fan.group);
 
   const c = new THREE.Color();
   const c2 = new THREE.Color();
   return {
     group,
+    setFanBanner: (photo) => fan.set(photo),
     update(time, excitement, atmo, tifo = 0) {
       U.uTime.value = time;
       U.uExcite.value = excitement;
