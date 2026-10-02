@@ -91,3 +91,47 @@ it('defender can win the ball with press + tackle', () => {
   console.log('defending: won the ball in', wins, '/ 12');
   expect(wins).toBeGreaterThan(3);
 });
+
+it('idle stick: active player goes and gets a loose ball', () => {
+  const m = new Match(77);
+  const input = makeInput();
+  m.phase = 'play';
+  m.setPiece = null;
+  for (const p of m.players) { p.pos.x = p.team === 0 ? -48 : 48; p.pos.z = (p.index - 5) * 5; p.prevPos.copy(p.pos); }
+  const c = m.teams[0].players[6];
+  c.pos.set(-10, 0, 5); c.prevPos.copy(c.pos);
+  m.setControlled(c);
+  m.ball.reset(2, -6);
+  m.ball.kick(-2, 0, 1, 0, 0, 0);
+  let t = -1;
+  for (let i = 0; i < 120 * 5; i++) {
+    m.step(input);
+    m.takeEvents();
+    if (m.owner === c) { t = i / 120; break; }
+  }
+  console.log('loose ball collected after', t.toFixed(2), 's');
+  expect(t).toBeGreaterThan(0);
+  expect(t).toBeLessThan(3);
+});
+
+it('idle stick: active player closes down the carrier', () => {
+  const m = new Match(78);
+  const input = makeInput();
+  m.phase = 'play';
+  m.setPiece = null;
+  for (const p of m.players) { p.pos.x = p.team === 0 ? -48 : 48; p.pos.z = (p.index - 5) * 5; p.prevPos.copy(p.pos); }
+  const att = m.teams[1].players[9];
+  att.pos.set(0, 0, 0); att.prevPos.copy(att.pos);
+  m.ball.reset(-0.6, 0); m.owner = att;
+  const def = m.teams[0].players[2];
+  def.pos.set(-15, 0, 6); def.prevPos.copy(def.pos);
+  m.setControlled(def);
+  let minD = 99;
+  for (let i = 0; i < 120 * 3; i++) {
+    m.step(input);
+    m.takeEvents();
+    if (m.controlled === def) minD = Math.min(minD, m.ballDist(def));
+  }
+  console.log('closest approach to the ball', minD.toFixed(2), 'm');
+  expect(minD).toBeLessThan(2.5);
+});

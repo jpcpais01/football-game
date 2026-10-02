@@ -180,7 +180,9 @@ export class AI {
         const hi = this.intercept[ch.id];
         const ct = ci.t >= 0 ? ci.t : 9;
         const ht = hi.t >= 0 ? hi.t : 9;
-        if (ct > ht + 0.9 && m.switchT > 0.8 && m.ballDist(c) > 7) m.setControlled(ch);
+        // Switch sooner when the stick is idle (the player is waiting for the game to help).
+        const idle = m.noInputT > 0.25;
+        if (m.switchT > 0.6 && ((idle && ct > ht + 0.4 && m.ballDist(c) > 4) || (ct > ht + 0.9 && m.ballDist(c) > 7))) m.setControlled(ch);
       }
     }
 

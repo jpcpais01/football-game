@@ -186,7 +186,8 @@ export class Player {
         let lx = dvx - along * fx;
         let lz = dvz - along * fz;
         // Acceleration fades out near top speed; braking needs steps.
-        const aMax = along > 0 ? (accel * Math.max(0.12, 1 - sp / (top + 0.6)) + 0.5) * dt : PLAYER.brake * dt;
+        // Explosive first steps, fading near top speed (sprint-start curve).
+        const aMax = along > 0 ? (accel * Math.max(0.1, 1 - Math.pow(sp / (top + 0.4), 1.6)) + 0.6) * dt : PLAYER.brake * dt;
         along = clamp(along, -aMax, aMax);
         const lat = Math.sqrt(lx * lx + lz * lz);
         // Turning harder at speed: lateral grip limit (centripetal accel).
