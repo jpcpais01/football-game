@@ -44,6 +44,10 @@ export class CameraRig {
   private cineLook = new THREE.Vector3();
   /** Third-person shot behind a dead-ball taker (0 = broadcast view, 1 = behind him). */
   private pov = 0;
+  /** The over-the-shoulder dead-ball view is (partly) on: the camera looks along the pitch. */
+  get povActive(): boolean {
+    return this.pov > 0;
+  }
   private povPos = new THREE.Vector3();
   private povLook = new THREE.Vector3();
   private baseFov = 30;

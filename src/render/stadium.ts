@@ -26,6 +26,8 @@ import { SHARED, litMaterial } from './look';
 
 export interface Stadium {
   group: THREE.Group;
+  /** Show the near stand (behind the broadcast camera) instead of its low paddock. */
+  setNearStand(show: boolean): void;
   /** `tifo` 0..1: the ultras' card display (kick-off of each half). */
   update(time: number, excitement: number, atmo: Atmosphere, tifo?: number): void;
   /** The player's own photo, held up by fans in the stands (null = take it down). */
@@ -112,6 +114,29 @@ function bowlPath(): PathPt[] {
   arc(cx, -cz, 1.5 * P, 2 * P, (a) => (a > 1.78 * P ? 2 : 0));
   line(BOWL_X, -cz, BOWL_X, cz, 1, 0, 2);
   arc(cx, cz, 2 * P, 2.3 * P, () => 2);
+  return pts;
+}
+
+/**
+ * The near side, normally behind the broadcast camera: from where the bowl stops in the
+ * near-right corner, along the near touchline, round to where it stops in the near-left.
+ */
+function nearPath(): PathPt[] {
+  const pts: PathPt[] = [];
+  const cx = BOWL_X - BOWL_R;
+  const cz = BOWL_Z - BOWL_R;
+  const P = Math.PI;
+  const arc = (ox: number, a0: number, a1: number) => {
+    const n = Math.ceil(Math.abs(a1 - a0) / 0.12);
+    for (let i = 0; i <= n; i++) {
+      const a = a0 + ((a1 - a0) * i) / n;
+      pts.push({ x: ox + Math.cos(a) * BOWL_R, z: cz + Math.sin(a) * BOWL_R, nx: Math.cos(a), nz: Math.sin(a), zone: 0 });
+    }
+  };
+  arc(cx, 0.3 * P, 0.5 * P);
+  const n = Math.ceil((2 * cx) / 4);
+  for (let i = 1; i < n; i++) pts.push({ x: cx - (2 * cx * i) / n, z: BOWL_Z, nx: 0, nz: 1, zone: 0 });
+  arc(-cx, 0.5 * P, 0.7 * P);
   return pts;
 }
 
@@ -1743,7 +1768,48 @@ export function createStadium(homeColor: number, awayColor: number, club: Stadiu
     [concrete, [ringStrip(near, [0, 1.2], [0.4, 1.2]), ringStrip(near, [11, 5.6], [11, 7.4]), caps([near[0], near[near.length - 1]], [[0, 0], [0, 1.2], [0.4, 1.2], [11, 5.6], [11, 7.4], [12, 7.4], [12, 0]])]],
     [paddockCrowd, [ringStrip(near, [0.4, 1.2], [11, 5.6])]],
   ]);
-  for (const [mat, geos] of paddock) group.add(new THREE.Mesh(mergeGeometries(geos)!, mat));
+  const paddockGroup = new THREE.Group();
+  for (const [mat, geos] of paddock) paddockGroup.add(new THREE.Mesh(mergeGeometries(geos)!, mat));
+  group.add(paddockGroup);
+
+  // The near stand: the broadcast camera sits in front of it, so it's only built into the
+  // picture when the camera turns round (the over-the-shoulder view at free kicks and
+  // penalties). The same profile as the ends - tiers, boxes, roof - closing the ground.
+  const nearStand = new THREE.Group();
+  nearStand.visible = false;
+  {
+    const np = nearPath();
+    const nb = new Map<THREE.Material, THREE.BufferGeometry[]>();
+    const ns = (a: [number, number], b: [number, number], mat: THREE.Material) => {
+      const list = nb.get(mat) ?? [];
+      list.push(ringStrip(np, a, b));
+      nb.set(mat, list);
+    };
+    ns([0, 0], [0, 1.4], ribbon);
+    ns([0, 1.4], LOWER[0], concrete);
+    ns(LOWER[0], LOWER[1], lowerCrowd);
+    ns(LOWER[1], [22, 11.5], concrete);
+    ns([22, 11.5], [22, 14.5], glass);
+    ns([22, 14.5], [21, 14.5], concrete);
+    ns([21, 14.5], [21, 15.8], ribbon);
+    ns([21, 15.8], UPPER[0], concrete);
+    ns(UPPER[0], UPPER[1], upperCrowd);
+    ns(UPPER[1], [38, 32.5], darkConcrete);
+    ns([38, 32.5], ROOF_BACK, darkConcrete);
+    ns(ROOF_BACK, [roofPanelO, roofAt(ROOF_BACK, ROOF_EDGE, ROOF_H, roofPanelO)], roofMat);
+    ns([roofPanelO, roofAt(ROOF_BACK, ROOF_EDGE, ROOF_H, roofPanelO)], [ROOF_EDGE, ROOF_H], panels);
+    ns([ROOF_EDGE, ROOF_H - 2.2], [ROOF_EDGE, ROOF_H], fascia);
+    ns([ROOF_EDGE + 0.3, ROOF_H - 2.25], [ROOF_EDGE + 3, ROOF_H - 2.05], roofLight);
+    for (const [mat, geos] of nb) nearStand.add(new THREE.Mesh(mergeGeometries(geos)!, mat));
+    nearStand.add(
+      alongRoof(np, 2, lampGeo, lampMat, (p, m) => {
+        at(p, ROOF_EDGE + 1.2, ROOF_H - 2.7, tmpA);
+        const e = new THREE.Euler(-0.75, Math.atan2(-p.nx, -p.nz), 0, 'YXZ');
+        m.compose(tmpA, q.setFromEuler(e), new THREE.Vector3(1, 1, 1));
+      }),
+    );
+  }
+  group.add(nearStand);
 
   const spots = lampSpots();
   // Lamp glows: one instanced, camera-facing quad per bank (one draw for all of them).
@@ -1793,6 +1859,10 @@ export function createStadium(homeColor: number, awayColor: number, club: Stadiu
   return {
     group,
     setFanBanner: (photo) => fan.set(photo),
+    setNearStand: (show) => {
+      nearStand.visible = show;
+      paddockGroup.visible = !show;
+    },
     update(time, excitement, atmo, tifo = 0) {
       U.uTime.value = time;
       U.uExcite.value = excitement;
