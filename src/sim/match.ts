@@ -89,6 +89,14 @@ export interface MatchEvents {
 
 const tmpV = new V3();
 const tmpK = new V3();
+/** How much further a player reaches stretching a leg out for a loose ball (m). */
+const STRETCH = 0.4;
+const STRETCH_DUR = 0.36;
+/** Look-ahead samples for deciding a stretch (every 0.05 s). */
+const STRETCH_N = 7;
+const stretchX = new Float32Array(STRETCH_N);
+const stretchY = new Float32Array(STRETCH_N);
+const stretchZ = new Float32Array(STRETCH_N);
 /** Tackling leg (boot and shin) radius, and the radius of a standing player's legs. */
 const TACKLE_LEG_R = 0.12;
 /** A slide sweeps more: the whole leg and the trailing knee and thigh are on the grass. */
@@ -614,6 +622,7 @@ export class Match {
     // Intents.
     this.applyHumanInput(input);
     this.ai.update();
+    this.tryStretches();
 
     // Locomotion.
     for (const p of this.players) p.move(DT);
@@ -774,6 +783,7 @@ export class Match {
     c.sprinting = input.sprint;
     c.lookAt = null;
     c.squareUp = false;
+    c.burst = false;
     if (m > 0.12) {
       const mx = input.moveX / m;
       const mz = -input.moveY / m;
@@ -839,6 +849,7 @@ export class Match {
             const floor = gap > 3 ? PLAYER.jogSpeed + 2.2 : gap > 1 ? PLAYER.jogSpeed + (bs < 3 ? 1 : 0) : bs < 1.5 ? 2.5 : 1.2;
             speed = Math.max(floor, need);
             stickW *= clamp((ip.slack - 0.15) / 0.5, 0, 1);
+            c.burst = gap < 2.5 && (!this.passTarget || this.passTarget.team === c.team);
             // Arrive, don't overrun: no faster than he can pull up in what's left, plus however
             // fast the spot itself is running away (a ball going away is chased down).
             // Except for a ball cutting across in front of him that he's late for (it gets to
@@ -1761,7 +1772,7 @@ export class Match {
       const d = this.ballDist(p);
       const headMax = p.headReach;
       const headZone = h > PLAYER.controlHeight && h < headMax;
-      const reach = headZone ? 0.6 : PLAYER.reach;
+      const reach = headZone ? 0.6 : PLAYER.reach + (h < 0.5 ? this.stretchReach(p) : 0);
       if (d > reach || h > headMax) continue;
       if (!this.wantsBall(p)) {
         // Body deflection for anyone in the way.
@@ -1871,6 +1882,74 @@ export class Match {
     this.events.kicks.push(0.08);
   }
 
+  /** Extra reach of a leg stretched out for the ball, following the stretch's extension. */
+  stretchReach(p: Player): number {
+    if (p.action !== 'stretch') return 0;
+    return STRETCH * Player.stretchExt(p.actionT, p.actionDur);
+  }
+
+  /**
+   * The last-ditch reach: a player going for a loose ball that's about to pass just beyond
+   * his feet (over the next moment, with both of them moving, it never comes within reach
+   * but does come within a leg's length) sticks a leg out for it, timed so the leg is out
+   * when the ball is closest.
+   */
+  private tryStretches(): void {
+    if (this.phase !== 'play' || this.heldBy || this.owner || this.ball.pos.y > 0.6) return;
+    let sampled = false;
+    for (const p of this.players) {
+      if (p.action !== 'none' || p.touchCooldown > 0 || p.plan || p.role === 'GK') continue;
+      const d = this.ballDist(p);
+      if (d < PLAYER.reach || d > 2.4) continue;
+      if (p !== this.controlled && this.passTarget !== p && this.ai.chaser[p.team] !== p) continue;
+      // Loose balls and passes to us; cutting out the other side's pass is left as it was.
+      if (this.passTarget && this.passTarget.team !== p.team) continue;
+      if (!this.wantsBall(p)) continue;
+      if (!sampled) {
+        sampled = true;
+        let k = 0;
+        predictBallAt(this.ball, STRETCH_N * 0.05 + 1e-6, (b, t) => {
+          if (t + 1e-6 >= (k + 1) * 0.05 && k < STRETCH_N) {
+            stretchX[k] = b.pos.x;
+            stretchY[k] = b.pos.y;
+            stretchZ[k] = b.pos.z;
+            k++;
+          }
+          return k >= STRETCH_N;
+        });
+        for (; k < STRETCH_N; k++) {
+          stretchX[k] = this.ball.pos.x;
+          stretchY[k] = this.ball.pos.y;
+          stretchZ[k] = this.ball.pos.z;
+        }
+      }
+      let best = 9;
+      let bi = -1;
+      for (let k = 0; k < STRETCH_N; k++) {
+        if (stretchY[k] > 0.5) continue;
+        const t = (k + 1) * 0.05;
+        const dk = Math.hypot(stretchX[k] - (p.pos.x + p.vel.x * t), stretchZ[k] - (p.pos.z + p.vel.z * t));
+        if (dk < best) {
+          best = dk;
+          bi = k;
+        }
+      }
+      // It'll come to him anyway, or it's beyond any leg; or the moment isn't here yet.
+      if (bi < 0 || best <= PLAYER.reach * 0.95 || best > PLAYER.reach + STRETCH * 0.9 || bi > 3) continue;
+      const t = (bi + 1) * 0.05;
+      const rx = stretchX[bi] - (p.pos.x + p.vel.x * t);
+      const rz = stretchZ[bi] - (p.pos.z + p.vel.z * t);
+      const r = Math.max(0.01, Math.hypot(rx, rz));
+      const cf = Math.cos(p.facing);
+      const sf = Math.sin(p.facing);
+      p.kickBallF = rx * cf + rz * sf;
+      p.kickBallL = -rx * sf + rz * cf;
+      // The leg on the ball's side (the good foot if it's straight ahead).
+      p.kickLeg = Math.abs(p.kickBallL) < 0.25 ? p.foot : p.kickBallL > 0 ? 1 : -1;
+      p.startAction('stretch', STRETCH_DUR, rx / r, rz / r);
+    }
+  }
+
   private controlTouch(p: Player): void {
     const b = this.ball;
     const h = b.pos.y;
@@ -1880,10 +1959,12 @@ export class Match {
     const rel = Math.sqrt(relX * relX + relY * relY + relZ * relZ);
     const q = p.attrs.control;
     const heightPen = h > 0.55 ? 0.6 : 0;
-    const err = rel * (0.045 + (1 - q) * 0.08 + heightPen * 0.05) * Math.abs(1 + this.rng.gauss() * 0.5);
+    // Taken on an outstretched leg: a toe-poke, not a cushioned touch.
+    const stretched = clamp((this.ballDist(p) - PLAYER.reach) / STRETCH, 0, 1);
+    const err = rel * (0.045 + (1 - q) * 0.08 + heightPen * 0.05) * Math.abs(1 + this.rng.gauss() * 0.5) * (1 + 1.3 * stretched);
     this.dribbleDir(p, tmpV);
     const moving = p.wantSpeed > 0.3;
-    const push = moving ? 1.0 + p.speed * 0.15 : 0.3;
+    const push = (moving ? 1.0 + p.speed * 0.15 : 0.3) * (1 - 0.6 * stretched);
     const ea = this.rng.next() * Math.PI * 2;
     b.kick(p.vel.x * 0.95 + tmpV.x * push + Math.cos(ea) * err, 0, p.vel.z * 0.95 + tmpV.z * push + Math.sin(ea) * err, 0, 0, 0);
     if (h > 0.3) {

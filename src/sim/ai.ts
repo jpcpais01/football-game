@@ -565,6 +565,7 @@ export class AI {
     const m = this.m;
     p.lookAt = null;
     p.squareUp = false;
+    p.burst = false;
     p.sprinting = false;
     switch (m.phase) {
       case 'goal':
@@ -595,6 +596,7 @@ export class AI {
       this.moveTo(p, this.tmp.x, this.tmp.z, true, false);
       // As it arrives he opens his body to it, set to take it.
       p.squareUp = m.ballDist(p) < 6;
+      p.burst = m.ballDist(p) < 2.5;
       p.sprinting = m.ballDist(p) > 6;
       return;
     }
@@ -639,6 +641,7 @@ export class AI {
       if (m.owner && m.owner.team !== p.team) return this.press(p, m.owner);
       const ip = this.intercept[p.id];
       this.moveTo(p, ip.x, ip.z, true, true);
+      p.burst = m.ballDist(p) < 2.5 && !m.passTarget;
       return;
     }
     // Second defender: cover goal-side of the ball if close.

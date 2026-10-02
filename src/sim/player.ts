@@ -22,7 +22,7 @@ export interface Attributes {
   weight: number;
 }
 
-export type ActionKind = 'none' | 'kick' | 'tackle' | 'slide' | 'dive' | 'stumble' | 'fall' | 'header' | 'throw' | 'catch' | 'celebrate';
+export type ActionKind = 'none' | 'kick' | 'tackle' | 'slide' | 'dive' | 'stumble' | 'fall' | 'header' | 'throw' | 'catch' | 'celebrate' | 'stretch';
 
 export interface KickPlan {
   type: 'pass' | 'lob' | 'through' | 'shot' | 'clear' | 'cross';
@@ -61,6 +61,8 @@ export class Player {
    * Otherwise `lookAt` is where he's watching: the body follows his run and only opens
    * toward it as he slows (the head, in the renderer, turns to the ball either way). */
   squareUp = false;
+  /** Going for a loose ball that's right there: the last couple of strides are explosive. */
+  burst = false;
   readonly lookTarget = new V3();
 
   // ---- state
@@ -170,6 +172,11 @@ export class Player {
   /** Speed a slide tackle starts with (set as he goes down). */
   slideV0 = 7.5;
 
+  /** A leg stretched out for the ball, 0..1: shoots out (~0.14 s), holds, draws back. */
+  static stretchExt(t: number, dur: number): number {
+    return smoothstep(0.03, 0.14, t) * (1 - smoothstep(dur * 0.66, dur, t));
+  }
+
   startAction(kind: ActionKind, dur: number, dirX: number, dirZ: number): void {
     this.action = kind;
     this.actionT = 0;
@@ -241,6 +248,12 @@ export class Player {
         this.vel.z *= k;
         tx = this.vel.x;
         tz = this.vel.z;
+      } else if (a === 'stretch') {
+        // Reaching a leg out for it: the body carries on and leans in behind the leg; the
+        // stride breaks for a moment.
+        const lunge = this.actionT < this.actionDur * 0.45 ? 1.8 : 0;
+        tx = this.vel.x * 0.92 + this.actionDirX * lunge;
+        tz = this.vel.z * 0.92 + this.actionDirZ * lunge;
       } else if (a === 'stumble') {
         tx = this.vel.x * 0.3;
         tz = this.vel.z * 0.3;
@@ -269,7 +282,7 @@ export class Player {
           tz *= cap / tsp;
         }
       }
-      const accel = this.accelRate;
+      const accel = this.accelRate * (this.burst ? 1.7 : 1);
       let dvx = tx - vx;
       let dvz = tz - vz;
       if (sp < 0.6) {

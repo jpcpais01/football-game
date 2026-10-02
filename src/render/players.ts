@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { GOAL_SEQ } from '../sim/constants';
+import { GOAL_SEQ, PLAYER } from '../sim/constants';
 import type { Match } from '../sim/match';
-import type { Player } from '../sim/player';
+import { Player } from '../sim/player';
 import type { Kit } from '../sim/teams';
 import { clamp, lerp, smoothstep } from '../sim/vec';
 import { PYLONS, blobMaterial, litMaterial } from './look';
@@ -1075,6 +1075,57 @@ export class PlayersView {
           headLook = false;
           // Eyes on the ball through contact, then up after it.
           headPitch = 0.38 * (1 - smoothstep(0.15, 0.6, v)) + 0.05;
+          break;
+        }
+        case 'stretch': {
+          // Reaching a leg out for a ball just beyond him: the leg on its side shoots out
+          // toward it nearly straight, toe first, skimming the grass; the standing knee sinks
+          // to give the reach and the hips drop; the trunk leans in behind a forward poke or
+          // away from a sideways one, and the arms go out for balance. Same extension curve
+          // as the sim's reach (Player.stretchExt), so the touch happens where the foot is.
+          const ext = Player.stretchExt(p.actionT, p.actionDur);
+          const fwd = Math.max(0, p.kickBallF);
+          const lat = p.kickBallL * p.kickLeg; // + = out on the leg's own side
+          const r = Math.max(0.3, Math.hypot(fwd, lat));
+          const ca = fwd / r;
+          const sa = lat / r;
+          const reachA = 0.62 + 0.25 * clamp((r - PLAYER.reach) / 0.4, 0, 1);
+          const sHip = reachA * ca;
+          const sOut = reachA * sa;
+          const right = p.kickLeg > 0;
+          if (right) {
+            hipR = lerp(hipR, sHip, ext);
+            kneeR = lerp(kneeR, 0.08, ext);
+            legOutR = lerp(legOutR, sOut, ext);
+            ankleR = -0.45 * ext;
+            hipL = lerp(hipL, 0.32, ext);
+            kneeL = lerp(kneeL, 0.75, ext);
+          } else {
+            hipL = lerp(hipL, sHip, ext);
+            kneeL = lerp(kneeL, 0.08, ext);
+            legOutL = lerp(legOutL, sOut, ext);
+            ankleL = -0.45 * ext;
+            hipR = lerp(hipR, 0.32, ext);
+            kneeR = lerp(kneeR, 0.75, ext);
+          }
+          hipY -= 0.17 * ext;
+          flexExtra += 0.18 * ca * ext;
+          sideExtra += -p.kickLeg * 0.3 * Math.abs(sa) * ext;
+          pelvisRoll += -p.kickLeg * 0.12 * ext;
+          // Arms out: the far arm wide for balance, the near one a little.
+          const farOut = 0.95 * ext;
+          const nearOut = 0.4 * ext;
+          if (right) {
+            armOutL = Math.max(armOutL, farOut);
+            armOutR = Math.max(armOutR, nearOut);
+            armL = lerp(armL, -0.25, ext);
+          } else {
+            armOutR = Math.max(armOutR, farOut);
+            armOutL = Math.max(armOutL, nearOut);
+            armR = lerp(armR, -0.25, ext);
+          }
+          headLook = false;
+          headPitch = 0.3 * ext;
           break;
         }
         case 'tackle': {
