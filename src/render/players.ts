@@ -23,6 +23,7 @@ type PartName =
   | 'hairBun'
   | 'upperArm'
   | 'forearm'
+  | 'hand'
   | 'shortsLeg'
   | 'thigh'
   | 'shin'
@@ -148,21 +149,34 @@ function buildGeometries(): Record<PartName, THREE.BufferGeometry> {
     ],
     12,
   );
-  // Forearm and hand: uv.y > ~0.68 is the hand (gloves for keepers).
+  // Forearm down to the wrist; uv.y > ~0.85 is the wrist (glove cuff for keepers).
   const forearm = lathe(
     [
       [0.0, 0.02],
       [0.044, 0.0],
       [0.046, -0.06],
       [0.037, -0.2],
-      [0.03, -0.235],
-      [0.038, -0.27],
-      [0.036, -0.32],
-      [0.0, -0.345],
+      [0.03, -0.24],
+      [0.0, -0.255],
     ],
     10,
   );
   forearm.scale(1, 1, 0.85);
+  // Hand: a relaxed, slightly cupped palm with the fingers together and a thumb.
+  // Origin at the wrist; thin across x so the palm faces the body, thumb forward (+z).
+  const hand = (() => {
+    const palm = new THREE.SphereGeometry(0.042, 10, 8);
+    palm.scale(0.62, 1.05, 1);
+    palm.translate(0, -0.045, 0.004);
+    const fingers = new THREE.CapsuleGeometry(0.024, 0.045, 3, 8);
+    fingers.scale(0.95, 1, 1.45);
+    fingers.rotateX(0.25);
+    fingers.translate(0, -0.1, 0.012);
+    const thumb = new THREE.CapsuleGeometry(0.012, 0.035, 3, 6);
+    thumb.rotateX(0.5);
+    thumb.translate(0, -0.05, 0.04);
+    return mergeGeometries([palm.toNonIndexed(), fingers.toNonIndexed(), thumb.toNonIndexed()])!;
+  })();
   const shortsLeg = lathe(
     [
       [0.092, 0.05],
@@ -203,7 +217,7 @@ function buildGeometries(): Record<PartName, THREE.BufferGeometry> {
   boot.rotateX(Math.PI / 2);
   boot.scale(0.92, 0.72, 1);
   boot.translate(0, -0.035, 0.05);
-  return { torso, pelvis, neck, head, hairShort, hairCurly, hairBun, upperArm, forearm, shortsLeg, thigh, shin, boot };
+  return { torso, pelvis, neck, head, hairShort, hairCurly, hairBun, upperArm, forearm, hand, shortsLeg, thigh, shin, boot };
 }
 
 /**
@@ -374,7 +388,7 @@ function forearmMaterial(): THREE.MeshStandardMaterial {
     vertDecl: 'attribute vec3 aAlt; varying vec3 vAlt;',
     vertBody: 'vAlt = aAlt;',
     fragDecl: 'varying vec3 vAlt;',
-    diffuseHook: 'diffuseColor.rgb = mix(diffuseColor.rgb, vAlt, smoothstep(0.66, 0.7, vUv2.y));',
+    diffuseHook: 'diffuseColor.rgb = mix(diffuseColor.rgb, vAlt, smoothstep(0.84, 0.86, vUv2.y));',
   });
 }
 
@@ -428,6 +442,7 @@ export class PlayersView {
       hairBun: 1,
       upperArm: 2,
       forearm: 2,
+      hand: 2,
       shortsLeg: 2,
       thigh: 2,
       shin: 2,
@@ -446,6 +461,7 @@ export class PlayersView {
       hairBun: hair,
       upperArm: sleeveMaterial(),
       forearm: forearmMaterial(),
+      hand: litMaterial({ groundAO: true, roughness: 0.6 }),
       shortsLeg: trimmedMaterial('diffuseColor.rgb = mix(diffuseColor.rgb, vTrim, (1.0 - smoothstep(0.015, 0.025, abs(vUv2.x - 0.25))) * 0.9 + band(vUv2.y, 0.9, 1.0) * 0.6);'),
       thigh: withBend(litMaterial({ groundAO: true, roughness: 0.62 }), 'thigh'),
       shin: trimmedMaterial('diffuseColor.rgb = mix(diffuseColor.rgb, vTrim, band(vUv2.y, 0.07, 0.11) + band(vUv2.y, 0.14, 0.17));'),
@@ -516,8 +532,21 @@ export class PlayersView {
       for (let k = 0; k < part.perPlayer; k++) ba.setXYZ(p.id * part.perPlayer + k, c.r, c.g, c.b);
       ba.needsUpdate = true;
     };
-    const boots = [0x1b1b1d, 0xf0efe9, 0x1b1b1d, 0x2a3346, 0xc8452e, 0x1b1b1d, 0x2f6b4f];
-    const soles = [0xd9d6cc, 0x2a2a2a, 0xe0b23c, 0xe8e6df, 0xf2f0ea, 0xc8452e, 0xe8e6df];
+    // Boots: a random pick per player each match, classic and modern colourways.
+    const BOOTS: [number, number][] = [
+      [0x1b1b1d, 0xe8e6df], // black / white sole
+      [0xf0efe9, 0x1b1b1d], // white / black
+      [0xe9f23a, 0x1b1b1d], // volt
+      [0xff6a2b, 0xf0efe9], // orange
+      [0xff4f9a, 0x1b1b1d], // pink
+      [0x2fd3e8, 0xf0efe9], // cyan
+      [0xd8262f, 0x1b1b1d], // red
+      [0x2457d6, 0xf0efe9], // royal blue
+      [0x29b36a, 0x1b1b1d], // green
+      [0xd9b04a, 0x1b1b1d], // gold
+      [0xb9bdc4, 0x2a2a2a], // silver
+      [0x6a3fd1, 0xe9f23a], // purple / volt
+    ];
     const num = this.parts.torso.mesh.geometry.getAttribute('aNum') as THREE.InstancedBufferAttribute;
     for (const p of match.players) {
       const kit = match.teams[p.team].info.kit;
@@ -535,6 +564,7 @@ export class PlayersView {
       attr('upperArm', 'aSkin', p, gk ? shirt : p.look.skin);
       set('forearm', p, gk ? shirt : p.look.skin);
       attr('forearm', 'aAlt', p, gk ? 0xf2f0ea : p.look.skin);
+      set('hand', p, gk ? 0xf2f0ea : p.look.skin);
       set('pelvis', p, shorts);
       set('shortsLeg', p, shorts);
       attr('shortsLeg', 'aTrim', p, gk ? shirt : kit.shirt2 === kit.shorts ? kit.shirt : kit.shirt2);
@@ -544,8 +574,9 @@ export class PlayersView {
       set('head', p, p.look.skin);
       set('thigh', p, p.look.skin);
       for (const hp of HAIR_PARTS) set(hp, p, p.look.hair);
-      set('boot', p, boots[p.id % boots.length]);
-      attr('boot', 'aTrim', p, soles[p.id % soles.length]);
+      const [boot, sole] = BOOTS[Math.floor(Math.random() * BOOTS.length)];
+      set('boot', p, boot);
+      attr('boot', 'aTrim', p, sole);
     }
     num.needsUpdate = true;
     for (const name of Object.keys(this.parts) as PartName[]) {
@@ -917,6 +948,10 @@ export class PlayersView {
         this.put('upperArm', id * 2 + sd, this.j1);
         this.chain(this.j2, this.j1, 0, -0.29, 0, -elbow, 0, 0);
         this.put('forearm', id * 2 + sd, this.j2);
+        // Hand at the wrist, relaxed with the palm toward the body; keeper gloves are bigger.
+        this.chain(this.j3, this.j2, 0, -0.245, 0, 0.1, 0, sideSign * -0.08);
+        const g = p.role === 'GK' ? 1.25 : 1;
+        this.put('hand', id * 2 + sd, this.j3, g, g, g);
       }
 
       // Legs: the thigh curves into a soft knee (shader bend), the shin takes the rest.
