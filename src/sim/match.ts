@@ -186,6 +186,8 @@ export class Match {
   scorer: Player | null = null;
   /** The scorer's celebration, once picked (by the buttons, or by the AI for its goals). */
   celebration: Celebration | null = null;
+  /** Your scorer's run, while the stick steers it (the first `GOAL_SEQ.steer` s of your goals). */
+  readonly steer = { on: false, x: 0, z: 0 };
   private sprintWas = false;
   /** Yellow cards per player id. */
   readonly cards: number[] = new Array(22).fill(0);
@@ -764,6 +766,9 @@ export class Match {
     }
     if (this.phase === 'goal') {
       const kickTeam = this.scorer ? 1 - this.scorer.team : 0;
+      // Picked mid-run (perhaps a steered one): aim it from where he actually pulls up.
+      const cel = this.celebration;
+      if (cel && this.phaseT >= cel.at && this.phaseT - DT < cel.at) this.aimCelebration();
       // The cut (camera's on the crowd): ball back on the spot, players most of the way home.
       if (this.phaseT >= GOAL_SEQ.cut && this.phaseT - DT < GOAL_SEQ.cut) {
         this.ball.reset(0, 0);
@@ -868,9 +873,18 @@ export class Match {
   }
 
   private pickCelebration(kind: CelebrationKind, at: number): void {
+    this.celebration = { kind, at, dx: 0, dz: 0, turn: 1 };
+    this.aimCelebration();
+  }
+
+  /** The celebration plays toward the camera, which stands between the scorer and the centre spot. */
+  private aimCelebration(): void {
     const s = this.scorer!;
+    const c = this.celebration!;
     const d = Math.hypot(s.pos.x, s.pos.z) || 1;
-    this.celebration = { kind, at, dx: -s.pos.x / d, dz: -s.pos.z / d, turn: s.pos.z * s.pos.x >= 0 ? 1 : -1 };
+    c.dx = -s.pos.x / d;
+    c.dz = -s.pos.z / d;
+    c.turn = s.pos.z * s.pos.x >= 0 ? 1 : -1;
   }
 
   // ------------------------------------------------------------------ human control
@@ -878,6 +892,7 @@ export class Match {
   private applyHumanInput(input: InputState): void {
     const c = this.controlled;
     if (this.autoPlay) {
+      this.steer.on = false;
       input.events.length = 0;
       return;
     }
@@ -886,6 +901,14 @@ export class Match {
     const sprintDown = input.sprint && !this.sprintWas;
     this.sprintWas = input.sprint;
     if (this.phase === 'goal') {
+      // The first moments of your goal: the stick steers the scorer's run.
+      const mv = Math.hypot(input.moveX, input.moveY);
+      const st = this.steer;
+      st.on = mv > 0.12 && this.scorer?.team === this.humanTeam && this.phaseT < GOAL_SEQ.steer;
+      if (st.on) {
+        st.x = input.moveX / mv;
+        st.z = -input.moveY / mv;
+      }
       if (this.celebrationOpen && this.phaseT > 0.25) {
         let pick: CelebrationKind | null = sprintDown ? 'flip' : null;
         for (const ev of input.events) if (ev.kind === 'down') pick = CELEBRATIONS[ev.btn];

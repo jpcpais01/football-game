@@ -1799,6 +1799,19 @@ export class AI {
     }
     // Team-mates give a flip or a leap room before they pile in.
     const room = cel && (cel.kind === 'flip' || cel.kind === 'siu') && m.phaseT < cel.at + 2.2 ? 1.6 : 0;
+    if (p === s && m.steer.on) {
+      // Your stick has him: flat out wherever it points, pulling up short of the lines.
+      let { x, z } = m.steer;
+      if (Math.abs(p.pos.x) > PITCH.halfL - 1.5 && x * p.pos.x > 0) x = 0;
+      if (Math.abs(p.pos.z) > PITCH.halfW - 1.5 && z * p.pos.z > 0) z = 0;
+      const k = Math.hypot(x, z);
+      p.moveX = k ? x / k : 0;
+      p.moveZ = k ? z / k : 0;
+      p.wantSpeed = k ? p.topSpeed : 0;
+      p.sprinting = true;
+      p.lookAt = null;
+      return;
+    }
     if (p === s) {
       if (front) {
         p.moveX = p.moveZ = 0;
