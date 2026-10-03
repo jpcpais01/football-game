@@ -43,6 +43,13 @@ const WIDE: Record<Ground, Shot[]> = {
     // The Shed, packed and bouncing.
     { kind: 'wide', dur: 5, from: [[-30, 2.5, 14], [-80, 9, 0]], to: [[-36, 3, -10], [-80, 10, 2]], fov: 40 },
   ],
+  comunale: [
+    { kind: 'wide', dur: 3, from: [[-70, 34, 52], [10, 4, -12]], to: [[-46, 30, 60], [18, 6, -18]], fov: 40 },
+    // The Tribuna under its concrete canopy, the Torre and its flag above.
+    { kind: 'wide', dur: 3, from: [[14, 3, 20], [0, 30, -70]], to: [[-8, 3, 16], [0, 36, -70]], fov: 46 },
+    // The Curva: two open tiers of ultras and their card display.
+    { kind: 'wide', dur: 5, from: [[-28, 2.5, 16], [-80, 14, 0]], to: [[-34, 3, -10], [-80, 15, 2]], fov: 44 },
+  ],
   solar: [
     { kind: 'wide', dur: 3, from: [[-70, 32, 52], [10, 6, -12]], to: [[-46, 28, 60], [18, 8, -18]], fov: 40 },
     // The main stand: the solar canopy, the hanging gardens and the sun crest.
