@@ -1,5 +1,6 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.88', note: 'Players now control high balls instead of heading them away. A dropping ball is let down onto the chest, or taken on the thigh, and cushioned to the feet, with a new pose for it. Headers are kept for duels, chances in the box, clearances and flick-ons under pressure.' },
   { v: '0.87.3', note: 'Replays reworked: the far touchline angle now runs on until a second and a half after the ball crosses the line, then the whole move plays again from behind the scorer’s shoulder. Tap to skip.' },
   { v: '0.87.2', note: 'Replays now show close control too: the foot steering the ball on a dribble plays back as it happened.' },
   { v: '0.87.1', note: 'Dribbling turns redone from scratch. The 0.85 lunge is gone and running and walking are back to normal. Now, as you turn with the ball, the leg that is mid-stride swings out toward it, one leg after the other, and still lands in step, with the feet planted.' },
