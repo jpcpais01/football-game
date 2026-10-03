@@ -710,6 +710,8 @@ export class PlayersView {
       // Parts smaller than a few shadow-map texels add nothing to the shadow but a draw.
       mesh.castShadow = !NO_SHADOW.has(name);
       mesh.receiveShadow = true;
+      // Drawn before the pitch (renderOrder -10): the grass under the players is then never shaded.
+      mesh.renderOrder = -20;
       if (name === 'torso' || name === 'thigh') mesh.customDepthMaterial = bendDepth(name);
       this.group.add(mesh);
       this.parts[name] = { name, mesh, perPlayer: per[name], order: [] };

@@ -24,6 +24,8 @@ export const PYLONS: [number, number][] = [
  * height (m) its 0..1 texels span. */
 export const STAND_EXT = { x: 130, z: 100 };
 export const STAND_HMAX = 64;
+/** Width of the baked cloud window, in cloud-space units (one is 62.5 m of ground). */
+export const CLOUD_SPAN = 24;
 /** Floodlight banks a ground can hand the pitch for its light pools (see floodLamps). */
 export const MAX_LAMPS = 12;
 
@@ -36,6 +38,8 @@ export const SHARED = {
   uStandOn: { value: 0 },
   /** Width (m) of the shadow's soft edge on the grass: wider when the sun is low. */
   uStandSoft: { value: 0.4 },
+  /** The grass's baked light over the pitch quad: r = stand shadow, g = floodlight pool (GroundLight). */
+  uGroundLight: { value: null as THREE.Texture | null },
   /** Floodlight banks (xyz) and where each is aimed (xyz of uLampAim), uLampN of them,
    * uLampNorm scaling their light to an average of 1 over the pitch (0 banks = even light). */
   uLamps: { value: Array.from({ length: MAX_LAMPS }, () => new THREE.Vector3()) },
@@ -55,6 +59,9 @@ export const SHARED = {
   uWind: { value: new THREE.Vector2(0.85, 0.35) },
   /** Strength of drifting cloud shadows on the pitch (sunny ≈ 1). */
   uClouds: { value: 0.5 },
+  /** The cloud field baked around uCloudOrigin (cloud space; see CloudField). */
+  uCloudMap: { value: null as THREE.Texture | null },
+  uCloudOrigin: { value: new THREE.Vector2(1e6, 1e6) },
   /** 0 = dry, 1 = pouring: wet, darker grass with standing water, beams through the rain. */
   uRain: { value: 0 },
   /** Sun colour for the warm rim light. */
@@ -71,7 +78,7 @@ export const COLORS = {
 /**
  * GLSL: the stands' baked shadow. `standShadow(p)`: 0 = in the sun, uStandOn = in the shade
  * of something standing higher on p's sun ray (the roofs, the stands, a pylon, a board), so
- * the grass, a player's head and a seat all agree. `standShadowGround` is the grass version,
+ * the grass, a player's head and a seat all agree. `standShadowGroundRaw` is the grass version,
  * with a soft edge.
  */
 export const STAND_MAP_GLSL = /* glsl */ `
@@ -88,8 +95,8 @@ float standShadow(vec3 wp) {
   float h = texture2D(uStandMap, uv).r * ${STAND_HMAX.toFixed(1)};
   return smoothstep(y + 0.35, y + 0.9, h) * uStandOn;
 }
-float standShadowGround(vec2 p) {
-  if (uStandOn <= 0.0) return 0.0;
+/** The grass's soft stand shadow before uStandOn (baked per sun position: see GroundLight). */
+float standShadowGroundRaw(vec2 p) {
   vec2 uv = standUv(p);
   vec2 r = uStandSoft / vec2(${(STAND_EXT.x * 2).toFixed(1)}, ${(STAND_EXT.z * 2).toFixed(1)});
   // Anything over ~0.4 m on the ray shades the grass; five taps make the penumbra.
@@ -99,7 +106,7 @@ float standShadowGround(vec2 p) {
   s += smoothstep(T0, T1, texture2D(uStandMap, uv + r * vec2(-0.6, 0.8)).r);
   s += smoothstep(T0, T1, texture2D(uStandMap, uv + r * vec2(-0.8, -0.6)).r);
   s += smoothstep(T0, T1, texture2D(uStandMap, uv + r * vec2(0.6, -0.8)).r);
-  return s / 6.0 * uStandOn;
+  return s / 6.0;
 }
 `;
 
@@ -114,10 +121,16 @@ float cNoise(vec2 p) {
   return mix(mix(cHash(i), cHash(i + vec2(1, 0)), u.x), mix(cHash(i + vec2(0, 1)), cHash(i + vec2(1, 1)), u.x), u.y);
 }
 /** Soft shadows of clouds drifting over the ground with the wind (0 = clear, 1 = shaded). */
+uniform sampler2D uCloudMap;
+uniform vec2 uCloudOrigin;
+float cloudField(vec2 q) { return cNoise(q) * 0.65 + cNoise(q * 2.3 + 7.1) * 0.35; }
 float cloudShadow(vec3 wp) {
   if (uClouds <= 0.0) return 0.0; // clear sky (rain, dusk): skip the noise
+  // The field only slides with the wind: read it from its bake (one fetch instead of eight
+  // hashes), worked out live only beyond the baked window.
   vec2 q = wp.xz * 0.016 - uWind * uTimeC * 0.012;
-  float n = cNoise(q) * 0.65 + cNoise(q * 2.3 + 7.1) * 0.35;
+  vec2 t = (q - uCloudOrigin) / ${CLOUD_SPAN.toFixed(1)} + 0.5;
+  float n = max(abs(t.x - 0.5), abs(t.y - 0.5)) < 0.499 ? texture2D(uCloudMap, t).r : cloudField(q);
   return smoothstep(0.5, 0.72, n) * uClouds;
 }
 ${STAND_MAP_GLSL}

@@ -242,7 +242,10 @@ export class Terraces {
     const ex = match.excitement;
     const rate = (0.012 + 0.05 * ex) * (match.phase === 'play' ? 1 : 0.4);
     if (this.rnd() < rate * dt && this.pyro.length < 9) this.light(this.rnd() < 0.7 ? 0 : 1, this.rnd() < 0.08, 14 + this.rnd() * 18);
-    this.pyro = this.pyro.filter((f) => t - f.born < f.life);
+    // (In place: no new array every frame.)
+    let n = 0;
+    for (const f of this.pyro) if (t - f.born < f.life) this.pyro[n++] = f;
+    this.pyro.length = n;
 
     // The songs: one end at a time, a pause between, the end whose team is pressing more
     // likely to start up; nobody sings for a while after conceding.

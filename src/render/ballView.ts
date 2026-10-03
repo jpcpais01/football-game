@@ -39,6 +39,7 @@ export class BallView {
     }
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     this.mesh = new THREE.Mesh(geo, litMaterial({ vertexColors: true, roughness: 0.45 }));
+    this.mesh.renderOrder = -20; // before the pitch (see PlayersView)
     this.mesh.castShadow = true;
     this.group.add(this.mesh);
 

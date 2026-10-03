@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { SHARED, STAND_EXT, STAND_HMAX, SUN_DIR } from './look';
+import { FLOOD_POOL_GLSL, SHARED, STAND_EXT, STAND_HMAX, STAND_MAP_GLSL, SUN_DIR } from './look';
+import { PITCH_SIZE_X, PITCH_SIZE_Z } from './pitch';
 
 /**
  * The ground's shadow on the pitch, baked rather than shadow-mapped every frame.
@@ -21,6 +22,8 @@ const REBAKE = 0.0035;
 
 export class StandShadow {
   private rt = new THREE.WebGLRenderTarget(W, H, {
+    // One channel (the height) is all that's read: a quarter of the memory and bandwidth.
+    format: THREE.RedFormat,
     depthBuffer: false,
     generateMipmaps: false,
     minFilter: THREE.LinearFilter,
@@ -61,6 +64,8 @@ export class StandShadow {
   private group: THREE.Object3D | null = null;
   private clear = new THREE.Color();
   private saved: { o: THREE.Object3D; visible: boolean; material?: THREE.Material | THREE.Material[] }[] = [];
+  /** Counts bakes (GroundLight follows it). */
+  version = 0;
 
   constructor() {
     SHARED.uStandMap.value = this.rt.texture;
@@ -74,6 +79,7 @@ export class StandShadow {
     this.uSun.value.copy(SUN_DIR);
     SHARED.uStandSun.value.copy(SUN_DIR);
     this.bake(renderer, group);
+    this.version++;
   }
 
   private bake(renderer: THREE.WebGLRenderer, group: THREE.Object3D): void {
@@ -111,5 +117,65 @@ export class StandShadow {
       if (s.material) (s.o as THREE.Mesh).material = s.material;
     }
     this.saved.length = 0;
+  }
+}
+
+/**
+ * The light on the grass that only changes with the sun or the ground: the stands' soft
+ * shadow (six taps of the stand map and five smoothsteps) and the floodlight pools (a loop
+ * over every bank), baked over the pitch quad instead of worked out for every grass pixel
+ * every frame. r = stand shadow (before uStandOn), g = floodlight pool.
+ * Re-baked when the stand map is, when the penumbra has widened a little, or for new banks.
+ */
+export class GroundLight {
+  // ~11 cm texels: well inside the 0.3-1.5 m penumbra and the 10-15 m pool ramps.
+  private rt = new THREE.WebGLRenderTarget(1120, 784, {
+    type: THREE.HalfFloatType,
+    format: THREE.RGFormat,
+    depthBuffer: false,
+    generateMipmaps: false,
+    minFilter: THREE.LinearFilter,
+    magFilter: THREE.LinearFilter,
+  });
+  private scene = new THREE.Scene();
+  private cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  private key = { version: -1, soft: -1, lamps: null as unknown, n: -1, norm: -1 };
+
+  constructor() {
+    SHARED.uGroundLight.value = this.rt.texture;
+    const mat = new THREE.ShaderMaterial({
+      depthTest: false,
+      depthWrite: false,
+      uniforms: { ...SHARED },
+      vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+      fragmentShader: /* glsl */ `
+        ${STAND_MAP_GLSL}
+        ${FLOOD_POOL_GLSL}
+        varying vec2 vUv;
+        void main() {
+          // The pitch quad's own mapping (as its noise textures).
+          vec2 p = (vUv - 0.5) * vec2(${PITCH_SIZE_X.toFixed(2)}, ${PITCH_SIZE_Z.toFixed(2)});
+          float pool = clamp(0.1 + 0.9 * floodPool(vec3(p.x, 0.0, p.y)), 0.45, 1.8);
+          gl_FragColor = vec4(standShadowGroundRaw(p), pool, 0.0, 1.0);
+        }`,
+    });
+    const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat);
+    quad.frustumCulled = false;
+    this.scene.add(quad);
+  }
+
+  update(renderer: THREE.WebGLRenderer, stands: StandShadow): void {
+    const k = this.key;
+    const soft = SHARED.uStandSoft.value;
+    if (k.version === stands.version && Math.abs(soft - k.soft) < 0.02 && k.lamps === SHARED.uLamps.value && k.n === SHARED.uLampN.value && k.norm === SHARED.uLampNorm.value) return;
+    k.version = stands.version;
+    k.soft = soft;
+    k.lamps = SHARED.uLamps.value;
+    k.n = SHARED.uLampN.value;
+    k.norm = SHARED.uLampNorm.value;
+    const prev = renderer.getRenderTarget();
+    renderer.setRenderTarget(this.rt);
+    renderer.render(this.scene, this.cam);
+    renderer.setRenderTarget(prev);
   }
 }

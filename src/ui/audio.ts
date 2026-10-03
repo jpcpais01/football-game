@@ -29,13 +29,14 @@ export class GameAudio {
   /** Must be called from a user gesture. */
   unlock(): void {
     if (this.ctx) {
-      if (this.ctx.state === 'suspended') void this.ctx.resume();
+      this.resume();
       return;
     }
     const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     if (!Ctx) return;
     const ctx = new Ctx();
     this.ctx = ctx;
+    if (this.muted) void ctx.suspend();
     const comp = ctx.createDynamicsCompressor();
     comp.threshold.value = -14;
     comp.ratio.value = 4;
@@ -149,15 +150,22 @@ export class GameAudio {
 
   setMuted(m: boolean): void {
     this.muted = m;
-    if (this.ctx) this.master.gain.setTargetAtTime(m ? 0 : 0.9, this.ctx.currentTime, 0.05);
+    clearTimeout(this.muteT);
+    if (!this.ctx) return;
+    // Muted: once the fade is done the whole audio graph stops (silence costs nothing).
+    if (m) this.muteT = setTimeout(() => this.muted && this.suspend(), 150);
+    else this.resume();
+    this.master.gain.setTargetAtTime(m ? 0 : 0.9, this.ctx.currentTime, 0.05);
   }
+  private muteT: ReturnType<typeof setTimeout> | undefined;
 
   suspend(): void {
     void this.ctx?.suspend();
   }
 
+  /** Back on (a muted game stays suspended). */
   resume(): void {
-    void this.ctx?.resume();
+    if (this.ctx?.state === 'suspended' && !this.muted) void this.ctx.resume();
   }
 
   private async load(url: string): Promise<AudioBuffer | null> {

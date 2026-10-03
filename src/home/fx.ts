@@ -85,9 +85,16 @@ export class Fx {
 
   constructor() {
     this.canvas.className = 'fx-canvas';
+    window.addEventListener('resize', () => (this.measured = false));
   }
 
+  /** The canvas size is read when an effect starts and after a resize, not every frame
+   * (reading it then forces a layout in the middle of the pack opening's animations). */
+  private measured = false;
+
   private resize(): void {
+    if (this.measured) return;
+    this.measured = true;
     const w = this.canvas.clientWidth || window.innerWidth;
     const h = this.canvas.clientHeight || window.innerHeight;
     const W = Math.round(w * DPR);
@@ -102,6 +109,7 @@ export class Fx {
     if (this.ps.length >= MAX_PARTICLES) return;
     this.ps.push({ kind: 1, vx: 0, vy: 0, life: 0, max: 1, size: 3, color: '#ffffff', rot: 0, vr: 0, drag: 1.5, grav: 0, ...p, ...(p.color ? { color: norm(p.color) } : {}) });
     if (!this.raf) {
+      this.measured = false;
       this.last = performance.now();
       this.raf = requestAnimationFrame(this.tick);
     }

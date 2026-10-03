@@ -2,12 +2,14 @@ import '@fontsource/barlow-condensed/latin-600.css';
 import '@fontsource/barlow-condensed/latin-800.css';
 import './style.css';
 import * as THREE from 'three';
+import './render/shadowChunk';
 import { DT, GOAL_SEQ, MATCH, PITCH } from './sim/constants';
 import { smoothstep } from './sim/vec';
 import { CELEBRATIONS, Match, type MatchEvents } from './sim/match';
 import { rollTimeAt } from './sim/kick';
 import { createPitch } from './render/pitch';
-import { StandShadow } from './render/standShadow';
+import { GroundLight, StandShadow } from './render/standShadow';
+import { CloudField } from './render/cloudField';
 import { TurfMarks } from './render/turfMarks';
 import { createStadium } from './render/stadium';
 import { createOldGround } from './render/oldGround';
@@ -87,6 +89,8 @@ const freeze = <T extends THREE.Object3D>(o: T): T => {
 const atmo = new Atmosphere(scene, { shadowSize: startsHD ? (coarse ? 1024 : 2048) : 512 });
 /** The ground's stands, roofs and pylons in shadow on the pitch (baked when the sun moves). */
 const standShadow = new StandShadow();
+const groundLight = new GroundLight();
+const cloudField = new CloudField();
 renderer.shadowMap.autoUpdate = false;
 let shadowTick = 0;
 // ?tod=0..1 pins the time of day (for looking at the evening without playing a match).
@@ -361,6 +365,7 @@ let aimScreen: { x: number; y: number } | null = null;
 /** Whether the reticle / charge bar are up (so idle frames don't touch the DOM). */
 let aimShown = false;
 let chargeShown = false;
+let chargeTf = '';
 
 function updateAim(): void {
   aimScreen = null;
@@ -427,7 +432,8 @@ function updateCharge(alpha: number): void {
     x = (headPos.x * 0.5 + 0.5) * window.innerWidth;
     y = (-headPos.y * 0.5 + 0.5) * window.innerHeight;
   }
-  charge.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
+  const tf = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
+  if (tf !== chargeTf) charge.style.transform = chargeTf = tf;
   if (!chargeShown) charge.classList.add('show'), (chargeShown = true);
 }
 
@@ -439,6 +445,7 @@ ui.appendChild(staminaBar);
 const staminaFill = staminaBar.firstChild as HTMLElement;
 let staminaShown = false;
 let staminaLast = -1;
+let staminaTf = '';
 
 function updateStamina(alpha: number): void {
   const c = match.controlled;
@@ -451,7 +458,8 @@ function updateStamina(alpha: number): void {
   headPos.project(rig.camera);
   const x = (headPos.x * 0.5 + 0.5) * window.innerWidth;
   const y = (-headPos.y * 0.5 + 0.5) * window.innerHeight;
-  staminaBar.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
+  const tf = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
+  if (tf !== staminaTf) staminaBar.style.transform = staminaTf = tf;
   const st = Math.round(c.stamina * 100);
   if (st !== staminaLast) {
     staminaLast = st;
@@ -1129,6 +1137,8 @@ function frame(now: number): void {
   if (crowded) terraces.update(running ? dt : 0, match);
   stadium.update(now / 1000, match.excitement, atmo, tifo, terraces, cutscene.active ? cutscene.hang : tifo);
   standShadow.update(renderer, stadium.group, SHARED.uStandOn.value > 0);
+  groundLight.update(renderer, standShadow);
+  cloudField.update(renderer);
   if (!replay.active) turfMarks.update(match, renderer);
   if (playing) hud.update(match, now / 1000);
   if (playing && !paused) minimap.update(match);

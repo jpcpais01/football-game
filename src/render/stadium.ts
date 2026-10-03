@@ -385,6 +385,8 @@ function crowdShader(o: CrowdOpts): THREE.ShaderMaterial {
 
       float gUltra, gAway;
       vec2 gSeat;
+      // Per-fragment constants of the fans' behaviour (rowCard runs up to ten times a pixel).
+      float gSinging, gSing, gOccMax, gScarfMax, gNotViking, gClubMix, gClubShare, gExcite2;
       /** Phone torch lit on the fan that was hit. */
       float gTorch;
 
@@ -405,15 +407,15 @@ function crowdShader(o: CrowdOpts): THREE.ShaderMaterial {
        * centre, hy: metres above the step. a = 1 where the card is solid.
        */
       vec4 rowCard(float u, float k, float sv, float hy) {
+        if (hy > 2.2) return vec4(0.0);
         vec2 uv = vec2(u, sv);
-        float gap = max(aisleAt(uv), vomAt(uv));
-        if (gap > 0.5 || hy > 2.2) return vec4(0.0);
+        if (max(aisleAt(uv), vomAt(uv)) > 0.5) return vec4(0.0);
         float ultra = gUltra;
         float awayEnd = gAway;
         vec2 cell = vec2(floor(u / gSeat.x), k);
         float fx = (fract(u / gSeat.x) - 0.5) * gSeat.x;
         float letter = step(0.5, letterAt(uv));
-        float occ = step(hash(cell), mix(mix(0.92, 0.86, awayEnd), 1.0, ultra) * uFill) * (1.0 - letter);
+        float occ = step(hash(cell), gOccMax) * (1.0 - letter);
 
         if (occ > 0.5) {
           // Card display: held up overhead, edge to edge, together they make the picture.
@@ -421,7 +423,7 @@ function crowdShader(o: CrowdOpts): THREE.ShaderMaterial {
             vec2 cardUv = (cell + 0.5) * gSeat;
             vec3 card = vec3(0.0);
             float on = 0.0;
-            if (uHasTifo > 0.5) {
+            if (uHasTifo > 0.5 && ultra > 0.5) {
               vec2 t = (cardUv - uTifoRect.xz) / (uTifoRect.yw - uTifoRect.xz);
               on = step(0.0, t.x) * step(t.x, 1.0) * step(0.0, t.y) * step(t.y, 1.0) * ultra;
               card = texture2D(uTifo, clamp(t, 0.0, 1.0)).rgb;
@@ -448,21 +450,21 @@ function crowdShader(o: CrowdOpts): THREE.ShaderMaterial {
           // bounces on the song's beat (rippling back up the rows), scarves go up, and for the
           // Viking clap every arm goes up between the booms.
           float ph = hash(cell + 3.3) * 6.283;
-          float sing = ultra * uChant.x + awayEnd * uChant.y;
+          float sing = gSing;
           float idle = sin(uTime * 7.5 - cell.y * 0.5 + hash(vec2(cell.y, 1.0)) * 0.6);
           float onBeat = sin((uChant.z - cell.y * 0.012 - hash(cell + 0.3) * 0.06) * 6.2832);
-          float beat = mix(idle * ultra, onBeat, step(0.05, sing));
-          float jump = max(ultra, step(0.05, sing)) * max(0.0, beat) * (0.08 + 0.1 * max(uExcite, sing)) * (1.0 - uChant.w * step(0.05, sing))
-            + (1.0 - max(ultra, awayEnd)) * max(0.0, sin(uTime * (7.0 + hash(cell + 1.1) * 3.0) + ph)) * uExcite * uExcite * 0.18;
-          float stand = max(max(ultra, awayEnd * step(0.05, sing)), clamp(uExcite * 2.4 - 1.25 - hash(cell + 6.6) * 0.5, 0.0, 1.0));
+          float beat = mix(idle * ultra, onBeat, gSinging);
+          float jump = max(ultra, gSinging) * max(0.0, beat) * (0.08 + 0.1 * max(uExcite, sing)) * gNotViking
+            + (1.0 - max(ultra, awayEnd)) * max(0.0, sin(uTime * (7.0 + hash(cell + 1.1) * 3.0) + ph)) * gExcite2 * 0.18;
+          float stand = max(max(ultra, awayEnd * gSinging), clamp(uExcite * 2.4 - 1.25 - hash(cell + 6.6) * 0.5, 0.0, 1.0));
           float tall = 0.92 + 0.14 * hash(cell + 2.9);
           float wide = 0.85 + 0.3 * hash(cell + 1.7);
           float y = (hy - jump + (1.0 - stand) * 0.44) / tall;
           float x = (fx - sin(uTime * 1.3 + ph) * 0.02) / wide;
           float ax = abs(x);
           // Scarves held up overhead: always in the ends, everywhere when it's loud.
-          float scarfUp = step(hash(cell + 5.5), max(max(max(ultra, awayEnd) * 0.75, uExcite * uExcite * 0.8), sing * 0.95)) * (1.0 - uChant.w * step(0.05, sing));
-          float armsUp = max(max(scarfUp, ultra * step(0.6, beat) * step(0.5, hash(cell + 7.7))), uChant.w * step(0.05, sing) * step(hash(cell + 2.2) * 0.25, uChant.z + 0.3));
+          float scarfUp = step(hash(cell + 5.5), gScarfMax) * gNotViking;
+          float armsUp = max(max(scarfUp, ultra * step(0.6, beat) * step(0.5, hash(cell + 7.7))), uChant.w * gSinging * step(hash(cell + 2.2) * 0.25, uChant.z + 0.3));
 
           // Which part of him (if any) the ray meets, first; he's only dressed when it's him
           // (most rows are misses, through the gaps between heads).
@@ -476,7 +478,7 @@ function crowdShader(o: CrowdOpts): THREE.ShaderMaterial {
           if (part > 0.5) {
             float sh = 0.62 + 0.38 * smoothstep(0.0, 1.7, hy);
             if (part > 4.5) return vec4(mix(vec3(0.12, 0.14, 0.2), vec3(0.3, 0.3, 0.32), hash(cell + 4.7)) * sh, 1.0);
-            vec3 club = mix(uA, uB, step(hash(cell * 0.37 + floor(cell.x / 14.0)), mix(mix(0.22, 0.95, awayEnd), 0.02, ultra)));
+            vec3 club = mix(uA, uB, step(hash(cell * 0.37 + floor(cell.x / 14.0)), gClubMix));
             if (part < 1.5) {
               vec3 sc = mix(club, vec3(0.95, 0.93, 0.88), step(0.5, fract(x * 6.0 + 0.25)));
               return vec4(sc * sh, 1.0);
@@ -490,7 +492,7 @@ function crowdShader(o: CrowdOpts): THREE.ShaderMaterial {
               return vec4(c * sh * (1.0 - 0.25 * smoothstep(0.05, 0.105, ax)), 1.0);
             }
             float h = hash(cell + 7.1);
-            float clubShare = mix(0.55, 0.85, max(ultra, awayEnd));
+            float clubShare = gClubShare;
             vec3 shirt = h < clubShare ? club * (0.78 + 0.22 * hash(cell + 2.0))
               : h < clubShare + 0.12 ? vec3(0.86, 0.84, 0.79)
               : h < clubShare + 0.22 ? vec3(0.17, 0.18, 0.21)
@@ -516,6 +518,14 @@ function crowdShader(o: CrowdOpts): THREE.ShaderMaterial {
         // Ultras stand shoulder to shoulder; the main stands sit in rows of seats.
         gSeat = mix(vec2(0.62, 0.82), vec2(0.5, 0.78), gUltra);
         gTorch = 0.0;
+        gSing = gUltra * uChant.x + gAway * uChant.y;
+        gSinging = step(0.05, gSing);
+        gNotViking = 1.0 - uChant.w * gSinging;
+        gExcite2 = uExcite * uExcite;
+        gOccMax = mix(mix(0.92, 0.86, gAway), 1.0, gUltra) * uFill;
+        gScarfMax = max(max(max(gUltra, gAway) * 0.75, gExcite2 * 0.8), gSing * 0.95);
+        gClubMix = mix(mix(0.22, 0.95, gAway), 0.02, gUltra);
+        gClubShare = mix(0.55, 0.85, max(gUltra, gAway));
 
         // The tier in section: its slope, which way is back (up the rows) and along.
         vec3 N = normalize(vNrm);
@@ -565,7 +575,7 @@ function crowdShader(o: CrowdOpts): THREE.ShaderMaterial {
           c = mix(c, stepsCol, aisle);
           c = mix(c, vec3(0.02, 0.022, 0.03), vom);
         }
-        vec3 avg = mix(uSeat, mix(uA, uB, mix(mix(0.22, 0.95, gAway), 0.02, gUltra)) * 0.75 + 0.06, mix(0.55, 0.8, max(gUltra, gAway)));
+        vec3 avg = mix(uSeat, mix(uA, uB, gClubMix) * 0.75 + 0.06, mix(0.55, 0.8, max(gUltra, gAway)));
         c = mix(c, avg, 0.05 + 0.1 * uHaze);
 
         // Rows under the roof sit in its shadow.
@@ -1296,6 +1306,8 @@ export function adBoards(boards: Board[] = BOARDS): THREE.InstancedMesh {
   });
   geo.setAttribute('aDesign', new THREE.InstancedBufferAttribute(design, 1));
   mesh.instanceMatrix.needsUpdate = true;
+  // Drawn before the pitch: the grass margin hidden behind the boards is never shaded.
+  mesh.renderOrder = -20;
   return mesh;
 }
 
@@ -1678,16 +1690,22 @@ export function sky(): THREE.Mesh {
         float s = max(dot(d, normalize(toSun)), 0.0);
         c += uSunColor * (pow(s, 6.0) * 0.25 + pow(s, 80.0) * 0.6) * (1.0 - uRain);
         // Soft streaky clouds low in the sky, lit by the sun from one side.
-        vec2 cp = d.xz / max(0.08, d.y + 0.12) * 1.4 + vec2(uTime * 0.004, 0.0);
-        float cl = smoothstep(0.55, 0.85, noise(cp * vec2(0.6, 2.2)) * 0.7 + noise(cp * 2.3) * 0.3);
-        cl *= smoothstep(0.02, 0.12, d.y) * (1.0 - smoothstep(0.25, 0.6, d.y));
+        // (Only in the band where they can show: outside it they're multiplied away.)
+        float cl = 0.0;
+        if (d.y > 0.02 && d.y < 0.6 && uRain < 1.0) {
+          vec2 cp = d.xz / max(0.08, d.y + 0.12) * 1.4 + vec2(uTime * 0.004, 0.0);
+          cl = smoothstep(0.55, 0.85, noise(cp * vec2(0.6, 2.2)) * 0.7 + noise(cp * 2.3) * 0.3);
+          cl *= smoothstep(0.02, 0.12, d.y) * (1.0 - smoothstep(0.25, 0.6, d.y));
+        }
         vec3 cloudCol = mix(uSkyHorizon * 1.05, uSunColor, pow(s, 3.0) * 0.6);
         c = mix(c, cloudCol, cl * 0.55);
         // Stars come out as it gets dark.
-        vec2 sg = floor(vec2(atan(d.z, d.x) * 95.0, d.y * 130.0));
-        float star = step(0.9965, hash(sg)) * smoothstep(0.1, 0.35, d.y) * (1.0 - cl);
-        float tw = 0.55 + 0.45 * sin(uTime * 2.3 + hash(sg + 1.7) * 30.0);
-        c += vec3(0.92, 0.94, 1.0) * star * tw * uFlood * uFlood * 1.2 * (1.0 - uRain);
+        if (uFlood > 0.0 && uRain < 1.0 && d.y > 0.1) {
+          vec2 sg = floor(vec2(atan(d.z, d.x) * 95.0, d.y * 130.0));
+          float star = step(0.9965, hash(sg)) * smoothstep(0.1, 0.35, d.y) * (1.0 - cl);
+          float tw = 0.55 + 0.45 * sin(uTime * 2.3 + hash(sg + 1.7) * 30.0);
+          c += vec3(0.92, 0.94, 1.0) * star * tw * uFlood * uFlood * 1.2 * (1.0 - uRain);
+        }
         if (uRain > 0.0) {
           // Low, heavy rain cloud rolling over, its belly lit from below by the floodlights.
           vec2 rp = d.xz / max(0.05, d.y + 0.15) * 0.9 + vec2(uTime * 0.02, uTime * 0.008);

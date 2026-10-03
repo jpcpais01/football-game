@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { PITCH } from '../sim/constants';
-import { FLOOD_POOL_GLSL, SHARED, STAND_SHADOW_GLSL } from './look';
+import { SHARED, STAND_SHADOW_GLSL } from './look';
 
 /**
  * The pitch is one quad with a procedural, physically lit grass material:
@@ -70,8 +70,10 @@ float linesDist(vec2 p) {
  *  coarse: r = wind fbm(p*0.045),      g = wet vnoise(p*0.5)
  */
 function bakeNoise(renderer: THREE.WebGLRenderer): { fine: THREE.Texture; coarse: THREE.Texture; lines: THREE.Texture } {
-  const bake = (w: number, h: number, body: string, mips = true) => {
+  // (Only the channels that are read: less memory and bandwidth for every grass pixel.)
+  const bake = (w: number, h: number, body: string, format: THREE.PixelFormat = THREE.RGBAFormat, mips = true) => {
     const rt = new THREE.WebGLRenderTarget(w, h, {
+      format,
       generateMipmaps: mips,
       minFilter: mips ? THREE.LinearMipmapLinearFilter : THREE.LinearFilter,
       magFilter: THREE.LinearFilter,
@@ -106,10 +108,10 @@ function bakeNoise(renderer: THREE.WebGLRenderer): { fine: THREE.Texture; coarse
   };
   return {
     fine: bake(2048, 1024, 'gl_FragColor = vec4(fbm(p * 0.08), vnoise(p * 7.0), fbm(p * 0.6), vnoise(p * 3.0));'),
-    coarse: bake(512, 256, 'gl_FragColor = vec4(fbm(p * 0.045), vnoise(p * 0.5), 0.0, 1.0);'),
+    coarse: bake(512, 256, 'gl_FragColor = vec4(fbm(p * 0.045), vnoise(p * 0.5), 0.0, 1.0);', THREE.RGFormat),
     // The chalk lines as a distance field (metres, up to 1): ~13 segment and arc distances
     // per pixel every frame become one texture read. A texel is 6 cm; the lines are 12 cm.
-    lines: bake(2048, 1024, 'gl_FragColor = vec4(min(linesDist(p), 1.0), 0.0, 0.0, 1.0);', false),
+    lines: bake(2048, 1024, 'gl_FragColor = vec4(min(linesDist(p), 1.0), 0.0, 0.0, 1.0);', THREE.RedFormat, false),
   };
 }
 
@@ -138,7 +140,7 @@ export function createPitch(renderer: THREE.WebGLRenderer, marks: THREE.Texture)
         uniform vec3 uFloodColor;
         uniform float uTime;
         ${STAND_SHADOW_GLSL}
-        ${FLOOD_POOL_GLSL}
+        uniform sampler2D uGroundLight;
         const float HL = ${PITCH.halfL.toFixed(2)};
         const float HW = ${PITCH.halfW.toFixed(2)};
         uniform sampler2D uNoiseFine;
@@ -214,14 +216,16 @@ export function createPitch(renderer: THREE.WebGLRenderer, marks: THREE.Texture)
         '#include <lights_fragment_end>',
         `#include <lights_fragment_end>
         {
-          float sh = standShadowGround(vGrassWorld.xz);
+          // Stand shadow and floodlight pool, baked over the pitch (GroundLight).
+          vec2 gLight = texture2D(uGroundLight, vGrassWorld.xz / vec2(${SIZE_X.toFixed(2)}, ${SIZE_Z.toFixed(2)}) + 0.5).rg;
+          float sh = gLight.r * uStandOn;
           float sun = (1.0 - sh) * (1.0 - cloudShadow(vGrassWorld) * 0.42);
           reflectedLight.directDiffuse *= sun;
           reflectedLight.directSpecular *= sun;
           reflectedLight.indirectDiffuse += diffuseColor.rgb * uShadeTint * sh * 0.3;
           // Floodlights: each bank's pool of light, brightest where they overlap.
           if (uFlood > 0.0) {
-            float pool = clamp(0.1 + 0.9 * floodPool(vGrassWorld), 0.45, 1.8);
+            float pool = gLight.g;
             reflectedLight.indirectDiffuse += diffuseColor.rgb * uFloodColor * uFlood * 0.5 * pool;
           }
           // Standing water mirrors the floodlit stands, brightest at a glancing angle, with
