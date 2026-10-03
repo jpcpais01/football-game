@@ -219,7 +219,10 @@ export class Profiler {
         const ground = Math.max(0, all - g('#ground'));
         const people = Math.max(0, all - g('#people'));
         const rest = Math.max(0, net(all) - ground - people);
-        lines.push(`gpu*  world: ground ${ground.toFixed(1)} · people ${people.toFixed(1)} · rest ${rest.toFixed(1)} · sun shadows ${Math.max(0, g('#shadow') - all).toFixed(1)} · uploads ${Math.max(0, g('#upload') - all).toFixed(1)}`);
+        lines.push(`gpu*  world: ground ${ground.toFixed(1)} · people ${people.toFixed(1)} · rest ${rest.toFixed(1)} · sun shadows ${Math.max(0, g('#shadow') - all).toFixed(1)}`);
+        // Issuing the draws (the scene into one pixel) and the frame's uploads (the first time).
+        const c2 = this.gpuLast.get('#calls2');
+        if (c2 !== undefined) lines.push(`gpu*  draw commands ${net(c2).toFixed(1)} · uploads ${Math.max(0, (this.gpuLast.get('#calls1') ?? c2) - c2).toFixed(1)}`);
       }
       // The bakes: the dearest frame of each in the last two seconds (a dash: none ran).
       const bakes: string[] = [];

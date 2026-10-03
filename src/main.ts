@@ -1093,6 +1093,7 @@ let cpuAvg = 0;
  * makes (the whole world drawn, then again without the part: each part on its own would
  * show what the others hide). Before the real frame, which overwrites it all.
  */
+const probeRT = new THREE.WebGLRenderTarget(1, 1);
 function probeWorld(): void {
   const time = (hide: THREE.Object3D | null, name: string) => {
     const was = hide?.visible;
@@ -1103,10 +1104,16 @@ function probeWorld(): void {
   };
   // What a wait costs by itself (the round trip to the GPU, taken off every figure).
   prof.gpuSync('#idle');
-  // The first draw of a frame also uploads what changed (the players' poses, textures).
+  // The whole scene into a single pixel, twice: every draw call is issued but almost nothing
+  // is filled. The first also uploads what changed this frame (poses, particles); the second
+  // is only the cost of issuing the draws.
   const shadows = renderer.shadowMap.needsUpdate;
   renderer.shadowMap.needsUpdate = false;
-  time(null, '#upload');
+  for (const name of ['#calls1', '#calls2']) {
+    renderer.setRenderTarget(probeRT);
+    renderer.render(scene, rig.camera);
+    prof.gpuSync(name);
+  }
   // Then with the sun's shadow map redrawn (the probe asked for it).
   renderer.shadowMap.needsUpdate = shadows;
   time(null, '#shadow');
