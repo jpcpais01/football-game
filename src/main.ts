@@ -28,6 +28,7 @@ import { SHARED } from './render/look';
 import { Controls } from './ui/controls';
 import { Hud } from './ui/hud';
 import { Minimap } from './ui/minimap';
+import { Cutscene } from './ui/cutscene';
 import { CornerAim } from './render/cornerAim';
 import { Btn } from './sim/input';
 import { GameAudio } from './ui/audio';
@@ -66,6 +67,8 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.12;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap; // (PCFSoft is gone in r18x; this is what it fell back to)
+// Per-material clipping planes (the giant tifo unrolling); free for everything without them.
+renderer.localClippingEnabled = true;
 app.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -89,6 +92,8 @@ const CROWD_SHOT = Number(params.get('crowd')) || 0;
 // ?corner=near / far: your team gets a corner a moment after kick-off (for the corner camera);
 // gk / gk-opp / fk-opp: a goal kick (yours / theirs) or their free kick on the edge of your box.
 const DEBUG_CORNER = params.get('corner');
+// ?nocut: straight to kick-off, no walk-out cutscene.
+const NO_CUT = params.has('nocut') || SHOWCASE;
 let debugCornerDone = false;
 
 // The pass engine's roll table (a few thousand simulated rolls): built during boot, not
@@ -473,6 +478,16 @@ hud.setVisible(false);
 const minimap = new Minimap(ui);
 minimap.setVisible(false);
 pauseBtn.style.display = foulBtn.style.display = 'none';
+/** The walk-out before kick-off (tap to skip each shot). */
+const cutscene = new Cutscene(ui);
+
+/** The in-match controls and readouts (hidden for menus and the cutscene). */
+function setPlayUi(show: boolean): void {
+  controls.setVisible(show);
+  hud.setVisible(show);
+  minimap.setVisible(show);
+  pauseBtn.style.display = foulBtn.style.display = show ? '' : 'none';
+}
 
 async function enterFullscreen(): Promise<void> {
   try {
@@ -498,6 +513,7 @@ async function keepAwake(): Promise<void> {
 
 let matchSeed = 1;
 function newMatch(seed = Date.now() & 0xffff): void {
+  cutscene.cancel();
   matchSeed = seed;
   match = new Match(seed, club.matchSetup(seed));
   officials.reset();
@@ -518,16 +534,22 @@ function startGame(seed: number): void {
   slowFor = 0;
   home.hide();
   onResize();
-  controls.setVisible(true);
-  hud.setVisible(true);
-  minimap.setVisible(true);
-  pauseBtn.style.display = foulBtn.style.display = '';
+  if (NO_CUT) return setPlayUi(true);
+  // The teams walk out first; the match (not stepped meanwhile) starts when it's over.
+  setPlayUi(false);
+  match.autoPlay = true;
+  cutscene.start(match, officials, ground, () => {
+    match.autoPlay = false;
+    playersView.snap();
+    setPlayUi(true);
+  });
 }
 
 pauseBtn.addEventListener('click', () => setPaused(true));
 pauseMenu.querySelector('.resume')!.addEventListener('click', () => setPaused(false));
 pauseMenu.querySelector('.restart')!.addEventListener('click', () => {
   newMatch(matchSeed);
+  setPlayUi(true);
   setPaused(false);
 });
 // Forfeit: back to the menu mid-match, booked as a 0-3 defeat. Two taps, so it's never by accident.
@@ -711,7 +733,7 @@ function setPaused(p: boolean): void {
   quitBtn.classList.remove('armed');
   quitBtn.textContent = 'Forfeit match';
   pauseMenu.classList.toggle('hidden', !p);
-  minimap.setVisible(!p);
+  minimap.setVisible(!p && !cutscene.active);
   controls.enabled = !p;
   if (p) audio.suspend();
   else audio.resume();
@@ -841,6 +863,7 @@ function handleEvents(now: number): void {
 }
 
 function backToMenu(): void {
+  cutscene.cancel();
   playing = false;
   hud.setVisible(false);
   minimap.setVisible(false);
@@ -944,7 +967,10 @@ function frame(now: number): void {
   }
 
   const running = !paused;
-  if (running) {
+  if (running && cutscene.active) {
+    acc = 0;
+    cutscene.update(dt, rig);
+  } else if (running) {
     controls.update(dt);
     // After your goal the buttons pick the celebration (and show which, while it plays).
     const cel = match.celebration;
@@ -971,11 +997,12 @@ function frame(now: number): void {
   const alpha = acc / DT;
   handleEvents(now / 1000);
 
-  officials.update(match, running ? dt : 0);
+  if (!cutscene.active) officials.update(match, running ? dt : 0);
   if (crowded) benches.update(match, running ? dt : 0);
   rig.cinematic = !playing || match.phase === 'halftime' || match.phase === 'fulltime';
   // A 4-second shot of the scoring side's fans going wild after each goal.
   rig.crowdShot = !crowded ? 0 : CROWD_SHOT || (playing && match.phase === 'goal' && match.phaseT >= GOAL_SEQ.crowd && match.phaseT < GOAL_SEQ.back && match.scorer ? (match.scorer.team === 0 ? -1 : 1) : 0);
+  if (!cutscene.active) rig.cut = null;
   rig.update(match, alpha, dt, now / 1000);
   playersView.update(match, alpha, now / 1000);
   ballView.update(match, alpha, running ? dt : 0);
@@ -998,7 +1025,7 @@ function frame(now: number): void {
     else match.startSetPiece('corner', t, PITCH.halfL * match.teams[t].dir, (DEBUG_CORNER === 'far' ? -1 : 1) * PITCH.halfW);
   }
   if (crowded) terraces.update(running ? dt : 0, match);
-  stadium.update(now / 1000, match.excitement, atmo, tifo, terraces);
+  stadium.update(now / 1000, match.excitement, atmo, tifo, terraces, cutscene.active ? cutscene.hang : tifo);
   turfMarks.update(match, renderer);
   if (playing) hud.update(match, now / 1000);
   if (playing && !paused) minimap.update(match, now / 1000);

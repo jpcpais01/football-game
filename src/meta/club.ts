@@ -46,6 +46,8 @@ export interface ClubState {
   crest: Crest;
   /** The drop banner over the home end: its words, and which club colour it's painted in. */
   banner: { text: string; color: 'main' | 'secondary' | 'dark' };
+  /** The captain's card (unset, or not in the XI: the best-rated starter). */
+  captain?: string;
   /** The ground last played at (picked before each match): preselected next time. */
   ground?: Ground;
   freePackAt: number; // ms timestamp when the free pack is next available
@@ -171,6 +173,23 @@ export class Club {
 
   isStarter(id: string): boolean {
     return this.state.lineup.slots.includes(id);
+  }
+
+  /** Shirt index of the captain: the chosen one if he's in the XI, else the best-rated starter. */
+  captainIndex(): number {
+    const s = this.starters();
+    const chosen = s.findIndex((c) => c !== null && c.id === this.state.captain);
+    if (chosen >= 0) return chosen;
+    let best = 0;
+    s.forEach((c, i) => {
+      if (c && overall(c) > (s[best] ? overall(s[best]!) : -1)) best = i;
+    });
+    return best;
+  }
+
+  setCaptain(id: string): void {
+    this.state.captain = id;
+    this.save();
   }
 
   bench(): Card[] {
@@ -411,6 +430,7 @@ export class Club {
         const fallback = c ?? generateCard(new Rng(i + 1), 'common', slot.pos, 45);
         return { ...toSim(fallback, slot.pos), role: roleOf(slot.pos), x: slot.x, z: slot.z };
       }),
+      captain: this.captainIndex(),
     };
   }
 
@@ -425,14 +445,16 @@ export class Club {
     rng.gauss();
     const f = FORMATIONS[Math.floor(rng.next() * 3)];
     const rarityFor = (o: number): Rarity => (o >= 88 ? 'icon' : o >= 82 ? 'legendary' : o >= 74 ? 'epic' : o >= 64 ? 'rare' : 'common');
-    return {
-      info: this.opponentInfo(),
-      players: f.slots.map((slot) => {
-        const o = clamp(Math.round(level + rng.gauss() * 3), 45, 95);
-        const c = generateCard(rng, rarityFor(o), slot.pos, o);
-        return { ...toSim(c, slot.pos), role: roleOf(slot.pos), x: slot.x, z: slot.z };
-      }),
-    };
+    // Their captain: the best-rated man in their XI.
+    let captain = 0;
+    let top = -1;
+    const players = f.slots.map((slot, i) => {
+      const o = clamp(Math.round(level + rng.gauss() * 3), 45, 95);
+      const c = generateCard(rng, rarityFor(o), slot.pos, o);
+      if (overall(c) > top) (top = overall(c)), (captain = i);
+      return { ...toSim(c, slot.pos), role: roleOf(slot.pos), x: slot.x, z: slot.z };
+    });
+    return { info: this.opponentInfo(), players, captain };
   }
 
   matchSetup(seed: number): MatchSetup {

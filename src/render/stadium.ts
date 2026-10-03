@@ -11,7 +11,8 @@ import type { Terraces } from '../ui/terraces';
  * corners filled in with quadrants, no running track, no bowl.
  * - The far side is the great main stand: three tiers, two rows of executive boxes, the
  *   club's name picked out in white seats in the top tier, and a tall cantilever roof with
- *   the TV gantry slung under it.
+ *   the TV gantry slung under it. The players come out of a tunnel in its middle, and for
+ *   kick-off the home fans drop a giant tifo from its roof front, down over the tiers.
  * - The ends and the corners are two tiers under a lower roof. Where the main stand rises
  *   above them its side is a glazed curtain wall, the way grounds grow one stand at a time.
  * - Cantilever roofs, no pillars: steel girders ride on top of the roof sheet, a band of
@@ -32,8 +33,9 @@ export interface Stadium {
   group: THREE.Group;
   /** Show the near stand (behind the broadcast camera) instead of its low paddock. */
   setNearStand(show: boolean): void;
-  /** `tifo` 0..1: the ultras' card display (kick-off of each half). */
-  update(time: number, excitement: number, atmo: Atmosphere, tifo?: number, terraces?: Terraces): void;
+  /** `tifo` 0..1: the ultras' card display (kick-off of each half). `hang` 0/1: the big
+   * stadium's giant hanging tifo, dropped or wound up (it follows `tifo` when left out). */
+  update(time: number, excitement: number, atmo: Atmosphere, tifo?: number, terraces?: Terraces, hang?: number): void;
   /** The player's own photo, held up by fans in the stands (null = take it down). */
   setFanBanner(photo: CanvasImageSource | null): void;
 }
@@ -697,6 +699,152 @@ export function tifoTexture(home: number, club: StadiumClub): THREE.CanvasTextur
   return tex;
 }
 
+/** The giant hanging tifo's artwork (portrait): name, a sunburst behind the crest, the motto. */
+function hangingTifoTexture(home: number, club: StadiumClub): THREE.CanvasTexture {
+  const W = 432;
+  const H = 512;
+  const cv = document.createElement('canvas');
+  cv.width = W;
+  cv.height = H;
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 16;
+  const hex = '#' + home.toString(16).padStart(6, '0');
+  const NAVY = '#14123a';
+  const CREAM = '#f4efe2';
+  const GOLD = '#ffd447';
+  let crest: CanvasImageSource | null = null;
+  const draw = () => {
+    const g = cv.getContext('2d')!;
+    g.fillStyle = hex;
+    g.fillRect(0, 0, W, H);
+    // Sunburst behind the crest: every other ray a shade darker.
+    const cx = W / 2;
+    const cy = 262;
+    g.fillStyle = 'rgba(0, 0, 0, 0.2)';
+    for (let i = 0; i < 28; i += 2) {
+      const a0 = (i / 28) * Math.PI * 2;
+      const a1 = ((i + 1) / 28) * Math.PI * 2;
+      g.beginPath();
+      g.moveTo(cx, cy);
+      g.lineTo(cx + Math.cos(a0) * 600, cy + Math.sin(a0) * 600);
+      g.lineTo(cx + Math.cos(a1) * 600, cy + Math.sin(a1) * 600);
+      g.fill();
+    }
+    // Name band on top, motto band at the bottom, chevrons along their inner edges.
+    const band = (y: number, h: number, text: string, size: number, up: boolean) => {
+      g.fillStyle = NAVY;
+      g.fillRect(0, y, W, h);
+      g.fillStyle = CREAM;
+      const edge = up ? y : y + h;
+      for (let x = 0; x < W; x += 36) {
+        g.beginPath();
+        g.moveTo(x, edge);
+        g.lineTo(x + 18, edge + (up ? -14 : 14));
+        g.lineTo(x + 36, edge);
+        g.fill();
+      }
+      g.font = `800 ${size}px "Barlow Condensed", "Arial Narrow", sans-serif`;
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.fillStyle = GOLD;
+      g.fillText(text, cx, y + h * 0.54, W - 56);
+    };
+    band(0, 104, (club.name ?? 'GAMENIGHT').toUpperCase(), 84, false);
+    band(H - 78, 78, (club.motto?.text || 'ONE CLUB · ONE NIGHT').toUpperCase(), 50, true);
+    // The crest on a cream disc.
+    g.fillStyle = NAVY;
+    g.beginPath();
+    g.arc(cx, cy, 124, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = CREAM;
+    g.beginPath();
+    g.arc(cx, cy, 114, 0, Math.PI * 2);
+    g.fill();
+    if (crest) drawCrest(g, crest, cx, cy, 176);
+    else {
+      g.fillStyle = hex;
+      g.beginPath();
+      for (let i = 0; i < 10; i++) {
+        const r = i % 2 ? 38 : 92;
+        const a = -Math.PI / 2 + (i * Math.PI) / 5;
+        g.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+      }
+      g.fill();
+    }
+    if (club.founded) {
+      g.font = '800 30px "Barlow Condensed", "Arial Narrow", sans-serif';
+      g.fillStyle = CREAM;
+      g.fillText(`EST. ${club.founded}`, cx, cy + 150);
+    }
+    // Cream frame with a dark keyline, and a hem with eyelets where it's tied to the roof.
+    g.strokeStyle = CREAM;
+    g.lineWidth = 16;
+    g.strokeRect(8, 8, W - 16, H - 16);
+    g.strokeStyle = NAVY;
+    g.lineWidth = 3;
+    g.strokeRect(18, 18, W - 36, H - 36);
+    for (let x = 22; x < W; x += 48) {
+      g.fillStyle = '#c9c4b8';
+      g.beginPath();
+      g.arc(x, 8, 3, 0, Math.PI * 2);
+      g.fill();
+    }
+    tex.needsUpdate = true;
+  };
+  draw();
+  void document.fonts?.ready.then(draw);
+  void club.crest?.then((img) => ((crest = img), draw()));
+  return tex;
+}
+
+/**
+ * The home fans' giant tifo: a portrait banner the size of a stand, hung from the main
+ * stand's roof front over the tiers. It drops from a roll at the roof for kick-off (the roll
+ * runs down its foot as it unfurls) and is wound back up once play is under way.
+ */
+function hangingTifo(main: PathPt[], home: number, club: StadiumClub): { group: THREE.Group; update(drop: number): void } {
+  const W = 32;
+  const H = 38;
+  const TOP = MAIN_H - 2.7;
+  const mid = main[Math.floor(main.length / 2)];
+  const base = at(mid, MAIN_EDGE - 0.4, TOP);
+  const yaw = Math.atan2(-mid.nx, -mid.nz);
+  const group = new THREE.Group();
+  const tex = hangingTifoTexture(home, club);
+  // Unfurled down to this height; everything below is still rolled up (clipped away).
+  const cut = new THREE.Plane(new THREE.Vector3(0, 1, 0), -TOP);
+  const mat = windCloth(litMaterial({ roughness: 0.85 }), 0.45, 'top', W, H);
+  mat.map = tex;
+  // Floodlit from the front: a self-lit floor so it reads in the shade of the roof.
+  mat.emissiveMap = tex;
+  mat.emissive.setRGB(0.45, 0.45, 0.45);
+  mat.side = THREE.DoubleSide;
+  mat.clippingPlanes = [cut];
+  const cloth = new THREE.Mesh(new THREE.PlaneGeometry(W, H, 32, 24), mat);
+  cloth.position.set(base.x, TOP - H / 2, base.z);
+  cloth.rotation.y = yaw;
+  const rollGeo = new THREE.CylinderGeometry(0.6, 0.6, W + 0.8, 14);
+  rollGeo.rotateZ(Math.PI / 2);
+  const roll = new THREE.Mesh(rollGeo, litMaterial({ color: new THREE.Color(home).multiplyScalar(0.7).getHex(), roughness: 0.8 }));
+  roll.rotation.y = yaw;
+  group.add(cloth, roll);
+  group.visible = false;
+  return {
+    group,
+    update(drop) {
+      group.visible = drop > 0.001;
+      if (!group.visible) return;
+      const y = TOP - drop * H;
+      cut.constant = -y;
+      // Moved by hand: the stadium's matrices are frozen.
+      roll.position.set(base.x - mid.nx * 0.5, y, base.z - mid.nz * 0.5);
+      roll.updateMatrix();
+      roll.matrixWorld.copy(roll.matrix);
+    },
+  };
+}
+
 // ------------------------------------------------------------------ surfaces
 
 /** LED ribbon boards on the tier fronts: scrolling messages that glow in the dark. */
@@ -1036,6 +1184,22 @@ function boardTexture(boards: Board[]): THREE.CanvasTexture {
   return tex;
 }
 
+/** The players' tunnel between the dugouts: a dark mouth in the main stand's front wall,
+ * framed in concrete (the pitchside boards leave a gap in front of it). */
+export function playersTunnel(frame: THREE.Material): THREE.Group {
+  const g = new THREE.Group();
+  const z = -(PITCH.halfW + 7.5);
+  const mouth = new THREE.Mesh(new THREE.PlaneGeometry(4.4, 2.7), new THREE.MeshBasicMaterial({ color: 0x07070a }));
+  mouth.position.set(0, 1.35, z + 0.03);
+  g.add(mouth);
+  for (const [w, h, x, y] of [[0.5, 3.1, -2.45, 1.55], [0.5, 3.1, 2.45, 1.55], [5.4, 0.5, 0, 2.95]]) {
+    const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.7), frame);
+    b.position.set(x, y, z + 0.3);
+    g.add(b);
+  }
+  return g;
+}
+
 /** Pitchside LED boards (8 designs). */
 export function adBoards(boards: Board[] = BOARDS): THREE.InstancedMesh {
   const panelW = 6;
@@ -1043,9 +1207,11 @@ export function adBoards(boards: Board[] = BOARDS): THREE.InstancedMesh {
   geo.translate(0, 0.45, 0);
   const placements: { x: number; z: number; ry: number }[] = [];
   const zSide = PITCH.halfW + 3.8;
-  for (let x = -PITCH.halfL + panelW / 2; x <= PITCH.halfL - panelW / 2 + 0.01; x += panelW) {
+  for (let x = -PITCH.halfL + panelW / 2; x <= PITCH.halfL - panelW / 2 + 0.01; x += panelW) placements.push({ x, z: zSide, ry: Math.PI });
+  // The far side runs out from a gap at the halfway line, where the teams walk out.
+  for (let x = 3 + panelW / 2; x <= PITCH.halfL - panelW / 2 + 1.6; x += panelW) {
     placements.push({ x, z: -zSide, ry: 0 });
-    placements.push({ x, z: zSide, ry: Math.PI });
+    placements.push({ x: -x, z: -zSide, ry: 0 });
   }
   const xEnd = PITCH.halfL + 4.5;
   for (let z = -PITCH.halfW + panelW / 2; z <= PITCH.halfW - panelW / 2 + 0.01; z += panelW) {
@@ -1963,6 +2129,7 @@ export function createStadium(homeColor: number, awayColor: number, club: Stadiu
     frame.rotation.copy(scr.rotation);
     fixtures.add(frame);
   }
+  fixtures.add(playersTunnel(darkConcrete));
   group.add(bakeStatic(fixtures));
 
   // The paddock on the near side, under the camera: a low open terrace and its wall.
@@ -2030,6 +2197,10 @@ export function createStadium(homeColor: number, awayColor: number, club: Stadiu
   group.add(shafts);
   const fan = fanBanners(path, homeColor);
   group.add(fan.group);
+  const giant = hangingTifo(main, homeColor, club);
+  group.add(giant.group);
+  let drop = 0;
+  let lastTime = -1;
 
   return {
     group,
@@ -2038,8 +2209,13 @@ export function createStadium(homeColor: number, awayColor: number, club: Stadiu
       nearStand.visible = show;
       paddockGroup.visible = !show;
     },
-    update(time, excitement, atmo, tifo = 0, terraces) {
+    update(time, excitement, atmo, tifo = 0, terraces, hang = tifo) {
       const flood = updateShared(time, excitement, atmo, tifo, terraces);
+      // The giant tifo unrolls in about three seconds and is wound back up a little slower.
+      const dt = lastTime < 0 ? 0 : Math.min(0.1, Math.max(0, time - lastTime));
+      lastTime = time;
+      drop = hang > 0.5 ? Math.min(1, drop + dt / 3) : Math.max(0, drop - dt / 4);
+      giant.update(drop * drop * (3 - 2 * drop));
       roofLight.color.setRGB(0.25 + flood * 1.4, 0.24 + flood * 1.35, 0.22 + flood * 1.2);
       // The beams are invisible until dusk: don't spend fill on them.
       shafts.visible = flood > 0.2; // below this a beam adds well under one colour step

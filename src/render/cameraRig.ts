@@ -40,6 +40,8 @@ export class CameraRig {
   cinematic = false;
   /** Goal crowd shot: which end's fans to show (-1 left/home, 1 right/away, 0 none). */
   crowdShot = 0;
+  /** A directed shot (the pre-match cutscene) that takes over the camera outright. */
+  cut: { pos: THREE.Vector3; look: THREE.Vector3; fov: number } | null = null;
   private cine = 0;
   private lastShot = 0;
   private cinePos = new THREE.Vector3();
@@ -377,6 +379,16 @@ export class CameraRig {
       this.look.lerp(this.cineLook, k);
       this.subPixelX *= 1 - k;
       this.subPixelY *= 1 - k;
+    }
+    const cut = this.cut;
+    if (cut) {
+      cam.position.copy(cut.pos);
+      this.look.copy(cut.look);
+      this.subPixelX = this.subPixelY = 0;
+      if (cam.fov !== cut.fov) {
+        cam.fov = cut.fov;
+        cam.updateProjectionMatrix();
+      }
     }
     cam.lookAt(this.look);
   }
