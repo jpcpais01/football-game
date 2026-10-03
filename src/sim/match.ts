@@ -1033,26 +1033,37 @@ export class Match {
       }
     }
 
-    if (!attacking && this.pressHeld) {
-      // Contain: close down the ball, face it, hold a goal-side distance.
-      this.ai.containTarget(c, tmpV);
-      const dx = tmpV.x - c.pos.x;
-      const dz = tmpV.z - c.pos.z;
-      const d = Math.hypot(dx, dz);
-      if (d > 0.3) {
-        c.moveX = dx / d;
-        c.moveZ = dz / d;
-        c.wantSpeed = input.sprint ? c.topSpeed : Math.min(PLAYER.jogSpeed + 1, d * 2.5 + 1);
-      }
+    // Pressing the carrier (or a keeper holding it). On a loose ball or one in the air,
+    // pressing is going for it: that's the seek below, at full commitment.
+    const loose = this.owner === null && this.heldBy === null;
+    const carrier = this.owner ?? this.heldBy;
+    if (!attacking && this.pressHeld && carrier && carrier.team !== c.team) {
+      // Goal-side, moving with the ball: its pace plus a pull onto the spot, so he neither
+      // trails the carrier nor runs past him. Sprint presses tighter, up against him; a
+      // touch that gets away from the carrier is pounced on (see AI.pressPoint).
+      const onBall = this.ai.pressPoint(c, carrier, tmpV, input.sprint ? 0.8 : 1.2);
+      const pull = onBall ? 5 : 3;
+      const vx = this.ball.vel.x * 0.9 + (tmpV.x - c.pos.x) * pull;
+      const vz = this.ball.vel.z * 0.9 + (tmpV.z - c.pos.z) * pull;
+      const v = Math.hypot(vx, vz);
+      if (v > 0.2) {
+        c.moveX = vx / v;
+        c.moveZ = vz / v;
+        c.wantSpeed = Math.min(v, input.sprint || onBall ? c.topSpeed : PLAYER.jogSpeed + 1);
+      } else c.wantSpeed = 0;
       c.lookTarget.copy(this.ball.pos);
       c.lookAt = c.lookTarget;
-      c.squareUp = true;
+      // Jockey square-on while he can keep up that way; when the carrier runs at him faster
+      // than he can backpedal, he opens his hips and runs with him instead.
+      c.squareUp = !onBall && v < 4.5;
+      c.burst = onBall;
     }
 
     // Ball seeking: the active player always hunts the ball (meets loose balls and
     // passes, closes down the carrier). The stick bends the run (up to 70%) while he has
     // time in hand, and still about 35% when the meeting is tight. Stick idle: pure seek.
-    if (this.owner !== c && !this.pressHeld) {
+    // Pressing on a ball in the air or running loose means attacking it flat out.
+    if (this.owner !== c && (!this.pressHeld || loose)) {
       const mode = this.seekTarget(c, tmpV);
       if (mode) {
         const dx = tmpV.x - c.pos.x;
@@ -1107,7 +1118,7 @@ export class Match {
           }
           c.moveX = dirX;
           c.moveZ = dirZ;
-          c.wantSpeed = input.sprint ? c.topSpeed : Math.min(c.topSpeed, speed);
+          c.wantSpeed = input.sprint || this.pressHeld ? c.topSpeed : Math.min(c.topSpeed, speed);
           if (mode === 'press' && d < 6) {
             c.lookTarget.copy(this.ball.pos);
             c.lookAt = c.lookTarget;
@@ -1125,7 +1136,7 @@ export class Match {
     const own = this.owner;
     if (own && own.team === c.team) return null;
     if (own) {
-      this.ai.containTarget(c, out, 0.85);
+      this.ai.pressPoint(c, own, out, 0.85);
       return 'press';
     }
     // Loose ball or a pass in flight: ours to meet, or theirs to intercept. A pass meant for a
@@ -2093,16 +2104,19 @@ export class Match {
       if (this.ai.keeperContact(k)) return;
     }
 
-    // Closest eligible player gets the touch.
+    // Closest eligible player gets the touch; a high ball both sides can reach is a duel.
     let best: Player | null = null;
     let bestD = 1e9;
+    let rival: Player | null = null;
+    let rivalD = 1e9;
     for (const p of this.players) {
       if (p.touchCooldown > 0) continue;
       if (p.action === 'stumble' || p.action === 'fall' || p.action === 'slide' || p.action === 'dive' || p.action === 'kick' || p.action === 'throw') continue;
       const d = this.ballDist(p);
       const headMax = p.headReach;
       const headZone = h > PLAYER.controlHeight && h < headMax;
-      const reach = headZone ? 0.6 : PLAYER.reach + (h < 0.5 ? this.stretchReach(p) : 0);
+      const attack = headZone ? this.attackingBall(p, d) : 0;
+      const reach = headZone ? 0.6 + 0.25 * attack : PLAYER.reach + (h < 0.5 ? this.stretchReach(p) : 0);
       if (d > reach || h > headMax) continue;
       if (!this.wantsBall(p)) {
         // Body deflection for anyone in the way.
@@ -2117,24 +2131,56 @@ export class Match {
       // Close control by the owner: opponents must tackle, not just touch.
       if (this.owner && this.owner !== p && this.owner.team !== p.team && this.ballDist(this.owner) < PLAYER.reach) continue;
       if (p.plan && h < 1.0) continue; // the plan will strike it
-      // In the air the better jumper / taller player wins a close contest.
-      const score = headZone ? d - (p.aerial - 0.5) * 0.35 : d;
+      // In the air the better jumper / taller player, the one attacking the ball, and the
+      // stronger body in the challenge win it.
+      const score = headZone ? d - (p.aerial - 0.5) * 0.35 - attack * 0.2 - (p.duelStrength - 0.5) * 0.15 : d;
       if (score < bestD) {
+        if (best && best.team !== p.team) {
+          rival = best;
+          rivalD = bestD;
+        }
         bestD = score;
         best = p;
+      } else if (best && p.team !== best.team && score < rivalD) {
+        rival = p;
+        rivalD = score;
       }
     }
     if (!best) return;
-    const p = best;
+    let p = best;
+    let challenged = false;
+    if (rival && h > PLAYER.controlHeight) {
+      // An aerial duel: both go up for it. Who gets there is close to a coin toss between
+      // near equals and clear-cut between a big centre-half and a small winger. The other
+      // still jumps into him, and whoever wins it plays it under that challenge.
+      if (rivalD + this.rng.gauss() * 0.12 < bestD) [p, rival] = [rival, p];
+      const dx = this.ball.pos.x - rival.pos.x;
+      const dz = this.ball.pos.z - rival.pos.z;
+      const dd = Math.max(0.01, Math.hypot(dx, dz));
+      rival.startAction('header', 0.4, dx / dd, dz / dd);
+      rival.touchCooldown = 0.45;
+      challenged = true;
+    }
     if (this.offsideTouch(p)) return;
     if (h > PLAYER.controlHeight) {
       // Head it only when it makes sense; otherwise take it down on the chest.
-      if (this.shouldHead(p)) this.header(p);
+      if (challenged || this.shouldHead(p)) this.header(p, challenged);
       else this.controlTouch(p);
       return;
     }
     if (p === this.owner) this.dribbleTouch(p);
     else this.controlTouch(p);
+  }
+
+  /**
+   * How hard a player is going at a ball in the air, 0..1: running onto it (a jump with a
+   * run-up reaches further and lands with more force), or pressing for it.
+   */
+  private attackingBall(p: Player, d: number): number {
+    const b = this.ball.pos;
+    const closing = d > 0.01 ? (p.vel.x * (b.x - p.pos.x) + p.vel.z * (b.z - p.pos.z)) / d : 0;
+    const pressing = p === this.controlled && this.pressHeld ? 0.5 : 0;
+    return clamp(closing / 4 + pressing, 0, 1);
   }
 
   private deflect(p: Player): void {
@@ -2334,7 +2380,7 @@ export class Match {
     return press < 1.8;
   }
 
-  private header(p: Player): void {
+  private header(p: Player, challenged = false): void {
     const b = this.ball;
     const team = this.teams[p.team];
     const gx = PITCH.halfL * team.dir;
@@ -2365,9 +2411,11 @@ export class Match {
       up = clearing ? 0.35 : 0.05;
     }
     const d = Math.max(0.01, Math.hypot(dirX, dirZ));
-    const sd = 0.08 + (1 - (p.attrs.control * 0.4 + p.aerial * 0.6)) * 0.12;
+    // Won under a challenge, it comes off the head less cleanly and with less on it.
+    const sd = (0.08 + (1 - (p.attrs.control * 0.4 + p.aerial * 0.6)) * 0.12) * (challenged ? 2.2 : 1);
+    if (challenged) speed *= 0.85;
     const a = Math.atan2(dirZ / d, dirX / d) + this.rng.gauss() * sd;
-    b.kick(Math.cos(a) * speed, speed * up + this.rng.gauss() * 0.6, Math.sin(a) * speed, 0, 0, 0);
+    b.kick(Math.cos(a) * speed, speed * up + this.rng.gauss() * (challenged ? 1.2 : 0.6), Math.sin(a) * speed, 0, 0, 0);
     b.onGround = false;
     p.startAction('header', 0.4, Math.cos(a), Math.sin(a));
     p.plan = null;
