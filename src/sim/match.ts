@@ -2,7 +2,7 @@ import { Ball } from './ball';
 import { BALL, DT, GOAL_SEQ, MATCH, PITCH, PLAYER } from './constants';
 import { Btn, type InputState } from './input';
 import { groundKick, predictBallAt, solveFreeKick, solveGroundPass, solveLofted, solveShot } from './kick';
-import { Player, type Attributes, type KickPlan, type Role } from './player';
+import { Player, SLIDE_DECEL, type Attributes, type KickPlan, type Role } from './player';
 import { FORMATION_433, HAIR_COLORS, SKIN_TONES, TEAMS, makeAttributes, type TeamInfo } from './teams';
 import { V3, Rng, angleDiff, clamp, dist2D, smoothstep } from './vec';
 import { AI, AIM_CONE, type ThroughPlan } from './ai';
@@ -1277,13 +1277,40 @@ export class Match {
     this.startTackle(c, tx / d, tz / d, slide);
   }
 
+  /**
+   * Committing to a tackle toward (dx, dz). Going in is a plant step, and a plant step only
+   * bends a run so far: hardly at all at a sprint, a lot from a jog. The body goes on that
+   * line; the leg reaches the rest of the way to the ball (up to ~35° off it). Both are
+   * fixed from here on: whatever the ball does next, he's committed.
+   */
   startTackle(p: Player, dx: number, dz: number, slide: boolean): void {
-    p.facing = Math.atan2(dz, dx);
+    const want = Math.atan2(dz, dx);
+    const sp = p.speed;
+    let body = want;
+    if (sp > 1.2) {
+      const run = Math.atan2(p.vel.z, p.vel.x);
+      const fast = clamp((sp - 2) / 5, 0, 1);
+      const turn = slide ? 1.3 - 0.75 * fast : 2.2 - 1.2 * fast;
+      body = run + clamp(angleDiff(run, want), -turn, turn);
+    }
+    const leg = body + clamp(angleDiff(body, want), -0.6, 0.6);
+    const bx = Math.cos(body);
+    const bz = Math.sin(body);
+    p.legX = Math.cos(leg);
+    p.legZ = Math.sin(leg);
     // Tackle with the leg on the ball's side (same convention as strikes).
-    const side = -Math.sin(p.facing) * (this.ball.pos.x - p.pos.x) + Math.cos(p.facing) * (this.ball.pos.z - p.pos.z);
+    const side = -bz * (this.ball.pos.x - p.pos.x) + bx * (this.ball.pos.z - p.pos.z);
     p.kickLeg = side >= 0 ? 1 : -1;
-    if (slide) p.startAction('slide', 1.0, dx, dz);
-    else p.startAction('tackle', 0.42, dx, dz);
+    if (slide) {
+      // Down onto the grass with the pace he carries along that line (and the push of the
+      // plant): what's across it is lost in the step. Then only the grass slows him.
+      const v0 = clamp(p.vel.x * bx + p.vel.z * bz + 1.2, 4.5, 8.5);
+      p.vel.x = bx * v0;
+      p.vel.z = bz * v0;
+      p.slideV0 = v0;
+      p.slideStop = v0 / SLIDE_DECEL;
+      p.startAction('slide', p.slideStop + 0.55, bx, bz);
+    } else p.startAction('tackle', 0.42, bx, bz);
   }
 
   // ------------------------------------------------------------------ physics between players
@@ -1490,7 +1517,7 @@ export class Match {
           p.actionDone = true;
           // The leg meets his legs: what that does to him is physics (see legImpact).
           const knock = bodyHit ? this.legImpact(p, victim!, slide) : 0;
-          if (ballHit) this.resolveTackle(p, slide, bodyHit, knock);
+          if (ballHit) this.resolveTackle(p, slide, bodyHit, knock, leg);
           else {
             // Missed the ball but caught the man.
             const late = victim !== this.owner;
@@ -1508,14 +1535,18 @@ export class Match {
    */
   private tackleLeg(p: Player): { ax: number; az: number; bx: number; bz: number } | null {
     const slide = p.action === 'slide';
-    const pr = p.actionT / p.actionDur;
-    const ext = slide ? smoothstep(0.04, 0.14, pr) * (1 - smoothstep(0.6, 0.76, pr)) : smoothstep(0.12, 0.42, pr) * (1 - smoothstep(0.62, 0.9, pr));
+    const t = p.actionT;
+    // A slide's leg is out from just after he drops until the slide dies (players.ts uses the
+    // same curve); a block tackle's swings out and back over the action.
+    const ext = slide
+      ? smoothstep(0.04, 0.14, t) * (1 - smoothstep(p.slideStop - 0.05, p.slideStop + 0.15, t))
+      : smoothstep(0.12, 0.42, t / p.actionDur) * (1 - smoothstep(0.62, 0.9, t / p.actionDur));
     if (ext < 0.35) return null;
-    const dx = p.actionDirX;
-    const dz = p.actionDirZ;
+    const lx = p.legX;
+    const lz = p.legZ;
     const from = slide ? -0.15 : 0.15;
     const to = slide ? 0.2 + 0.85 * ext : 0.25 + 0.6 * ext;
-    return { ax: p.pos.x + dx * from, az: p.pos.z + dz * from, bx: p.pos.x + dx * to, bz: p.pos.z + dz * to };
+    return { ax: p.pos.x + lx * from, az: p.pos.z + lz * from, bx: p.pos.x + lx * to, bz: p.pos.z + lz * to };
   }
 
   /**
@@ -1742,7 +1773,7 @@ export class Match {
     this.whistleFoul(victim.team, x, z, penalty);
   }
 
-  private resolveTackle(p: Player, slide: boolean, bodyHit: boolean, knock = 0): void {
+  private resolveTackle(p: Player, slide: boolean, bodyHit: boolean, knock: number, leg: { ax: number; az: number; bx: number; bz: number }): void {
     const b = this.ball;
     const carrier = this.owner && this.owner.team !== p.team ? this.owner : null;
     let win = 1;
@@ -1771,10 +1802,35 @@ export class Match {
     }
     if (won) {
       if (!carrier && this.offsideTouch(p)) return;
-      const keep = !slide && this.rng.next() < 0.45;
-      const a = Math.atan2(p.actionDirZ, p.actionDirX) + this.rng.gauss() * 0.6;
-      const s = keep ? 1.2 : slide ? this.rng.range(5, 9) : this.rng.range(3, 6);
-      b.kick(Math.cos(a) * s + p.vel.x * 0.4, 0, Math.sin(a) * s + p.vel.z * 0.4, 0, 0, 0);
+      // The ball comes off the leg: the boot's speed into it along the line of contact (the
+      // leg swinging through on a block, mostly the body's run on a slide). Met square and
+      // soft, it dies at his feet and he has it; met hard, it flies off where it was hit.
+      const vx0 = leg.bx - leg.ax;
+      const vz0 = leg.bz - leg.az;
+      const l2 = vx0 * vx0 + vz0 * vz0;
+      const k = l2 > 1e-9 ? clamp(((b.pos.x - leg.ax) * vx0 + (b.pos.z - leg.az) * vz0) / l2, 0, 1) : 1;
+      let nx = b.pos.x - (leg.ax + vx0 * k);
+      let nz = b.pos.z - (leg.az + vz0 * k);
+      const nd = Math.hypot(nx, nz);
+      if (nd > 1e-3) {
+        nx /= nd;
+        nz /= nd;
+      } else {
+        nx = p.legX;
+        nz = p.legZ;
+      }
+      const sweep = slide ? 0.8 : 2.5;
+      const lvx = p.vel.x + p.legX * sweep;
+      const lvz = p.vel.z + p.legZ * sweep;
+      const rel = (lvx - b.vel.x) * nx + (lvz - b.vel.z) * nz;
+      let vx = rel > 0.3 ? b.vel.x + nx * rel * 1.55 : lvx * 0.8;
+      let vz = rel > 0.3 ? b.vel.z + nz * rel * 1.55 : lvz * 0.8;
+      const wob = this.rng.gauss() * 0.15;
+      const cw = Math.cos(wob);
+      const sw = Math.sin(wob);
+      [vx, vz] = [vx * cw - vz * sw, vx * sw + vz * cw];
+      const keep = !slide && Math.hypot(vx - p.vel.x, vz - p.vel.z) < 2.5;
+      b.kick(vx, 0, vz, 0, 0, 0);
       if (carrier && carrier.action === 'none') {
         carrier.startAction('stumble', 0.45, 0, 0);
         carrier.touchCooldown = 0.6;

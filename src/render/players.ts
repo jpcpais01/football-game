@@ -1482,10 +1482,14 @@ export class PlayersView {
           const side = right ? -1 : 1; // tackling leg's side (left = +)
           const tHip = 1.05;
           const tKnee = 0.18;
+          // The leg goes out on the line he committed it to (the sim's tackling leg).
+          const tcf = Math.cos(facing);
+          const tsf = Math.sin(facing);
+          const aim = clamp(Math.atan2(-p.legX * tsf + p.legZ * tcf, p.legX * tcf + p.legZ * tsf), -0.6, 0.6) * reach;
           if (right) {
             hipR = lerp(hipR, tHip, reach);
             kneeR = lerp(kneeR, tKnee, reach);
-            legYawR = lerp(legYawR, -0.5, reach);
+            legYawR = lerp(legYawR, -0.5, reach) - aim;
             legOutR = lerp(legOutR, 0.12, reach);
             hipL = lerp(hipL, -0.15, load);
             kneeL = lerp(kneeL, 0.75, load);
@@ -1494,7 +1498,7 @@ export class PlayersView {
           } else {
             hipL = lerp(hipL, tHip, reach);
             kneeL = lerp(kneeL, tKnee, reach);
-            legYawL = lerp(legYawL, 0.5, reach);
+            legYawL = lerp(legYawL, 0.5, reach) + aim;
             legOutL = lerp(legOutL, 0.12, reach);
             hipR = lerp(hipR, -0.15, load);
             kneeR = lerp(kneeR, 0.75, load);
@@ -1511,27 +1515,27 @@ export class PlayersView {
         }
         case 'slide': {
           // Shaped by the slide itself: he drops as he commits, lower and further back the
-          // faster he went in; the lead leg (the ball side) reaches along the grass and aims
-          // at the ball; the hip meets the turf with a small damped bounce; the support hand
-          // goes down a beat after; and he gets up as the slide dies, not on a timer.
+          // faster he went in; the lead leg (the ball side) reaches along the grass on the
+          // line it was committed to (the sim's tackling leg: contact happens where you see
+          // it); the hip meets the turf with a small damped bounce; the support hand goes down
+          // a beat after; and he gets up as the slide dies, not on a timer. Timed in seconds
+          // from the moment he went down, against when the grass stops him.
           const speedNow = Math.hypot(p.vel.x, p.vel.z);
           const entry = clamp((p.slideV0 - 6) / 2.5, 0, 1);
           const vary = Math.sin(p.id * 12.9898) * 0.5; // a little of each player's own style
-          const down = smoothstep(0, 0.13, pr);
-          const landT = Math.max(0, pr - 0.12);
+          const t = p.actionT;
+          const stop = p.slideStop;
+          const down = smoothstep(0, 0.13, t);
+          const landT = Math.max(0, t - 0.12);
           const bounce = landT > 0 ? Math.exp(-landT * 9) * Math.sin(landT * 26) : 0;
-          const rise = smoothstep(0.42, 0.85, pr) * (1 - smoothstep(0.7, 2.4, speedNow));
+          const rise = smoothstep(stop - 0.1, p.actionDur - 0.1, t) * (1 - smoothstep(0.7, 2.4, speedNow));
           const lying = down * (1 - rise);
-          const kneel = rise * (1 - smoothstep(0.88, 1, pr));
-          const reach = smoothstep(0.03, 0.12, pr) * (1 - smoothstep(0.6, 0.78, pr));
-          // The ball in his frame: the lead leg aims at it.
+          const kneel = rise * (1 - smoothstep(p.actionDur - 0.12, p.actionDur, t));
+          const reach = smoothstep(0.03, 0.12, t) * (1 - smoothstep(stop - 0.05, stop + 0.15, t));
+          // The committed leg line in his frame.
           const cf = Math.cos(facing);
           const sf = Math.sin(facing);
-          const rbx = ball.pos.x - x;
-          const rbz = ball.pos.z - z;
-          const bF = rbx * cf + rbz * sf;
-          const bL = -rbx * sf + rbz * cf;
-          const aim = Math.hypot(bF, bL) < 2.5 ? clamp(Math.atan2(bL, Math.max(0.4, bF)), -0.5, 0.5) * reach : 0;
+          const aim = clamp(Math.atan2(-p.legX * sf + p.legZ * cf, p.legX * cf + p.legZ * sf), -0.6, 0.6) * reach;
           const right = p.kickLeg > 0;
           const tuck = right ? 1 : -1; // the folded leg's side (left = +)
           hipY = lerp(hipY, 0.27 - 0.05 * entry + 0.04 * bounce, lying) + 0.3 * kneel;
@@ -1543,7 +1547,7 @@ export class PlayersView {
           const lead = { hip: lerp(0.3, 0.6 + 0.05 * entry, reach), knee: lerp(0.55, 0.06, reach) };
           const fold = { hip: 0.48 + 0.06 * vary, knee: 1.95 };
           const up = { hip: 1.15, knee: 1.9 };
-          const supp = smoothstep(0.08, 0.26, pr) * (1 - rise); // the support hand lands a beat later
+          const supp = smoothstep(0.08, 0.26, t) * (1 - rise); // the support hand lands a beat later
           const freeArm = -1.0 - 0.25 * entry - 0.3 * bounce;
           if (right) {
             hipR = lerp(lerp(hipR, lead.hip, lying), up.hip * 0.6, kneel);

@@ -22,6 +22,9 @@ export interface Attributes {
   weight: number;
 }
 
+/** How hard the grass brakes a slide (m/s²): from a sprint, about 4 m on the floor. */
+export const SLIDE_DECEL = 8.5;
+
 export type ActionKind = 'none' | 'kick' | 'tackle' | 'slide' | 'dive' | 'stumble' | 'fall' | 'header' | 'throw' | 'catch' | 'celebrate' | 'stretch';
 
 export interface KickPlan {
@@ -196,8 +199,12 @@ export class Player {
     return this.action !== 'none';
   }
 
-  /** Speed a slide tackle starts with (set as he goes down). */
+  /** Speed a slide tackle starts with, and when the grass has stopped it (set as he goes down). */
   slideV0 = 7.5;
+  slideStop = 0.8;
+  /** Where a tackling leg reaches (unit, on the ground), fixed when he commits. */
+  legX = 1;
+  legZ = 0;
 
   /** A leg stretched out for the ball, 0..1: shoots out (~0.14 s), holds, draws back. */
   static stretchExt(t: number, dur: number): number {
@@ -249,12 +256,12 @@ export class Player {
         tx = this.actionDirX * lunge;
         tz = this.actionDirZ * lunge;
       } else if (a === 'slide') {
-        // Slide: he goes down with the pace he had (a burst if he was jogging) and the
-        // grass brakes him to a stop (~2-3 m).
-        if (this.actionT <= dt * 1.5) this.slideV0 = clamp(Math.hypot(this.vel.x, this.vel.z) + 1, 6, 8.5);
-        const s = Math.max(0, this.slideV0 - 12.5 * this.actionT);
-        this.vel.x = this.actionDirX * s;
-        this.vel.z = this.actionDirZ * s;
+        // Committed: he goes where his momentum takes him (set as he went down, in
+        // Match.startTackle) and the grass brakes him to a stop.
+        const sp = Math.hypot(this.vel.x, this.vel.z);
+        const k = sp > 1e-3 ? Math.max(0, sp - SLIDE_DECEL * dt) / sp : 0;
+        this.vel.x *= k;
+        this.vel.z *= k;
         tx = this.vel.x;
         tz = this.vel.z;
       } else if (a === 'dive') {
@@ -375,8 +382,11 @@ export class Player {
     this.pos.x += this.vel.x * dt;
     this.pos.z += this.vel.z * dt;
 
-    // Facing.
-    if (!passive && this.action !== 'tackle') {
+    // Facing. Committed to a tackle, the body turns (quickly) to the line it went in on.
+    if (this.action === 'tackle' || this.action === 'slide') {
+      const step = 14 * dt;
+      this.facing += clamp(angleDiff(this.facing, Math.atan2(this.actionDirZ, this.actionDirX)), -step, step);
+    } else if (!passive) {
       let want = this.facing;
       const run = nsp > 0.6 ? Math.atan2(this.vel.z, this.vel.x) : null;
       if (this.lookAt) {
