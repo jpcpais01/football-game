@@ -7,6 +7,7 @@ import { smoothstep } from './sim/vec';
 import { CELEBRATIONS, Match } from './sim/match';
 import { rollTimeAt } from './sim/kick';
 import { createPitch } from './render/pitch';
+import { StandShadow } from './render/standShadow';
 import { TurfMarks } from './render/turfMarks';
 import { createStadium } from './render/stadium';
 import { createOldGround } from './render/oldGround';
@@ -81,6 +82,8 @@ const freeze = <T extends THREE.Object3D>(o: T): T => {
 // Shadow texels well under an art pixel are wasted: 512 covers the 80 m around the camera
 // at ~16 cm (an art pixel is ~25 cm there). Redrawn every other frame (see frame()).
 const atmo = new Atmosphere(scene, { shadowSize: startsHD ? (coarse ? 1024 : 2048) : 512 });
+/** The ground's stands, roofs and pylons in shadow on the pitch (baked when the sun moves). */
+const standShadow = new StandShadow();
 renderer.shadowMap.autoUpdate = false;
 let shadowTick = 0;
 // ?tod=0..1 pins the time of day (for looking at the evening without playing a match).
@@ -1031,6 +1034,7 @@ function frame(now: number): void {
   }
   if (crowded) terraces.update(running ? dt : 0, match);
   stadium.update(now / 1000, match.excitement, atmo, tifo, terraces, cutscene.active ? cutscene.hang : tifo);
+  standShadow.update(renderer, stadium.group, SHARED.uStandOn.value > 0);
   turfMarks.update(match, renderer);
   if (playing) hud.update(match, now / 1000);
   if (playing && !paused) minimap.update(match, now / 1000);

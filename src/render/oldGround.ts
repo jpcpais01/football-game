@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { PITCH } from '../sim/constants';
-import { PYLONS, SHARED, litMaterial } from './look';
+import { PYLONS, floodLamps, litMaterial } from './look';
 import {
   type Board,
   type PathPt,
@@ -540,6 +540,7 @@ export function createOldGround(homeColor: number, awayColor: number, club: Stad
   lamps.instanceMatrix.needsUpdate = true;
   group.add(lamps);
   const glows = lampGlows(spots, 1.25);
+  const banks = floodLamps(spots);
   group.add(glows.mesh);
   // Beams from the far pylons only: the near ones would wash over the broadcast picture.
   const shafts = lightShafts(spots.filter((s) => s.z < 0));
@@ -557,6 +558,7 @@ export function createOldGround(homeColor: number, awayColor: number, club: Stad
 
   const nearStand = new THREE.Group();
   nearStand.visible = false;
+  nearStand.userData.castsHidden = true; // its shadow falls on the pitch either way
   {
     const nearCrowd = crowdMaterial({ home: homeColor, away: awayColor, shade: [-2, 6], seat, aisles: [12, 1], fill: 0.8 });
     const nb = new Map<THREE.Material, THREE.BufferGeometry[]>();
@@ -607,9 +609,7 @@ export function createOldGround(homeColor: number, awayColor: number, club: Stad
       paddockGroup.visible = !show;
     },
     update(time, excitement, atmo, tifo = 0, terraces) {
-      const flood = updateShared(time, excitement, atmo, tifo, terraces);
-      // The near stand here is low: its shadow reaches a third as far onto the pitch.
-      SHARED.uShadowZ0.value = 43 - (49.5 - SHARED.uShadowZ0.value) * 0.3;
+      const flood = updateShared(time, excitement, atmo, tifo, terraces, banks);
       shafts.visible = flood > 0.2; // below this a beam adds well under one colour step
       glows.update(flood);
     },

@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { SHARED } from './look';
 import { type Stadium, bakeStatic, groundPlanes, pitchside, sky, updateShared } from './stadium';
 
 /**
@@ -21,8 +20,6 @@ export function createBarePitch(homeColor: number, awayColor: number): Stadium {
     setNearStand: () => {},
     update(time, excitement, atmo) {
       updateShared(time, excitement, atmo);
-      // No near stand: no shadow across the pitch.
-      SHARED.uShadowZ0.value = 1e4;
     },
   };
 }

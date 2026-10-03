@@ -20,9 +20,28 @@ export const PYLONS: [number, number][] = [
   [65.3, 45.8],
 ];
 
+/** The stands' shadow map (see standShadow.ts): its ground area (half extents, m) and the
+ * height (m) its 0..1 texels span. */
+export const STAND_EXT = { x: 130, z: 100 };
+export const STAND_HMAX = 64;
+/** Floodlight banks a ground can hand the pitch for its light pools (see floodLamps). */
+export const MAX_LAMPS = 12;
+
 export const SHARED = {
-  /** Ground edge of the near stand's shadow: z > uShadowZ0 + 0.8y + 0.05x is in shade. */
-  uShadowZ0: { value: 24.0 },
+  /** Height of the highest thing on each ground point's sun ray (standShadow.ts). */
+  uStandMap: { value: null as THREE.Texture | null },
+  /** The sun direction the map was baked for: lookups must project along the same ray. */
+  uStandSun: { value: new THREE.Vector3(0, -1, 0) },
+  /** Depth of the stands' shade (0 = no stand shadow: a night match, no sun). */
+  uStandOn: { value: 0 },
+  /** Width (m) of the shadow's soft edge on the grass: wider when the sun is low. */
+  uStandSoft: { value: 0.4 },
+  /** Floodlight banks (xyz) and where each is aimed (xyz of uLampAim), uLampN of them,
+   * uLampNorm scaling their light to an average of 1 over the pitch (0 banks = even light). */
+  uLamps: { value: Array.from({ length: MAX_LAMPS }, () => new THREE.Vector3()) },
+  uLampAim: { value: Array.from({ length: MAX_LAMPS }, () => new THREE.Vector3()) },
+  uLampN: { value: 0 },
+  uLampNorm: { value: 1 },
   /** 0 = floodlights off, 1 = full evening floodlighting. */
   uFlood: { value: 0 },
   /** Dew on the grass late in the match (sheen). */
@@ -49,9 +68,43 @@ export const COLORS = {
   hemiGround: 0x5b6a3f,
 };
 
-/** GLSL: 0 = lit by the sun, 1 = inside the near stand's shadow. Needs uShadowZ0. */
+/**
+ * GLSL: the stands' baked shadow. `standShadow(p)`: 0 = in the sun, uStandOn = in the shade
+ * of something standing higher on p's sun ray (the roofs, the stands, a pylon, a board), so
+ * the grass, a player's head and a seat all agree. `standShadowGround` is the grass version,
+ * with a soft edge.
+ */
+export const STAND_MAP_GLSL = /* glsl */ `
+uniform sampler2D uStandMap;
+uniform vec3 uStandSun;
+uniform float uStandOn;
+uniform float uStandSoft;
+vec2 standUv(vec2 g) { return g / vec2(${(STAND_EXT.x * 2).toFixed(1)}, ${(STAND_EXT.z * 2).toFixed(1)}) + 0.5; }
+float standShadow(vec3 wp) {
+  if (uStandOn <= 0.0) return 0.0;
+  float y = max(wp.y, 0.0);
+  vec2 uv = standUv(wp.xz - uStandSun.xz * (y / uStandSun.y));
+  if (abs(uv.x - 0.5) > 0.5 || abs(uv.y - 0.5) > 0.5) return 0.0;
+  float h = texture2D(uStandMap, uv).r * ${STAND_HMAX.toFixed(1)};
+  return smoothstep(y + 0.35, y + 0.9, h) * uStandOn;
+}
+float standShadowGround(vec2 p) {
+  if (uStandOn <= 0.0) return 0.0;
+  vec2 uv = standUv(p);
+  vec2 r = uStandSoft / vec2(${(STAND_EXT.x * 2).toFixed(1)}, ${(STAND_EXT.z * 2).toFixed(1)});
+  // Anything over ~0.4 m on the ray shades the grass; five taps make the penumbra.
+  const float T0 = ${(0.25 / STAND_HMAX).toFixed(5)}, T1 = ${(0.6 / STAND_HMAX).toFixed(5)};
+  float s = smoothstep(T0, T1, texture2D(uStandMap, uv).r) * 2.0;
+  s += smoothstep(T0, T1, texture2D(uStandMap, uv + r * vec2(0.8, 0.6)).r);
+  s += smoothstep(T0, T1, texture2D(uStandMap, uv + r * vec2(-0.6, 0.8)).r);
+  s += smoothstep(T0, T1, texture2D(uStandMap, uv + r * vec2(-0.8, -0.6)).r);
+  s += smoothstep(T0, T1, texture2D(uStandMap, uv + r * vec2(0.6, -0.8)).r);
+  return s / 6.0 * uStandOn;
+}
+`;
+
+/** GLSL: the stands' shadow (STAND_MAP_GLSL) and the drifting cloud shadows. */
 export const STAND_SHADOW_GLSL = /* glsl */ `
-uniform float uShadowZ0;
 uniform vec2 uWind;
 uniform float uClouds;
 uniform float uTimeC;
@@ -67,13 +120,75 @@ float cloudShadow(vec3 wp) {
   float n = cNoise(q) * 0.65 + cNoise(q * 2.3 + 7.1) * 0.35;
   return smoothstep(0.5, 0.72, n) * uClouds;
 }
-float standShadow(vec3 wp) {
-  float edge = uShadowZ0 + 0.8 * wp.y + 0.05 * wp.x;
-  float s = smoothstep(edge - 1.2, edge + 1.2, wp.z);
-  s *= 1.0 - smoothstep(64.0, 72.0, abs(wp.x - wp.y * 0.5));
-  return s;
+${STAND_MAP_GLSL}
+`;
+
+/**
+ * GLSL: the floodlight pools on the grass. Each bank is aimed at its own patch of the pitch,
+ * so its light lands as a soft, stretched pool; where they overlap the grass is brightest.
+ * Averages 1 over the pitch (even light when the ground has no banks).
+ */
+export const FLOOD_POOL_GLSL = /* glsl */ `
+uniform vec3 uLamps[${MAX_LAMPS}];
+uniform vec3 uLampAim[${MAX_LAMPS}];
+uniform float uLampN;
+uniform float uLampNorm;
+float floodPool(vec3 p) {
+  if (uLampN < 0.5) return 1.0;
+  float e = 0.0;
+  for (int i = 0; i < ${MAX_LAMPS}; i++) {
+    if (float(i) >= uLampN) break;
+    vec3 d = uLamps[i] - p;
+    float r2 = dot(d, d);
+    vec3 l = d * inversesqrt(r2);
+    float beam = smoothstep(0.8, 0.96, dot(-l, uLampAim[i]));
+    e += l.y / r2 * (0.3 + beam);
+  }
+  return e * uLampNorm;
 }
 `;
+
+/** Floodlight banks as the pitch's light pools see them: positions, aims, normalisation. */
+export interface FloodLamps {
+  pos: THREE.Vector3[];
+  aim: THREE.Vector3[];
+  n: number;
+  norm: number;
+}
+
+/** Aims each bank at a patch of the pitch on its own side, and scales the lot to average 1. */
+export function floodLamps(spots: THREE.Vector3[]): FloodLamps {
+  const n = Math.min(MAX_LAMPS, spots.length);
+  const pos = Array.from({ length: MAX_LAMPS }, (_, i) => (i < n ? spots[i].clone() : new THREE.Vector3()));
+  const aim = pos.map((p, i) => (i < n ? new THREE.Vector3(p.x * 0.4, 0, p.z * 0.32).sub(p).normalize() : new THREE.Vector3()));
+  // Same sum as FLOOD_POOL_GLSL, averaged over the pitch.
+  const d = new THREE.Vector3();
+  let sum = 0;
+  let count = 0;
+  for (let x = -50; x <= 50; x += 5) {
+    for (let z = -32; z <= 32; z += 4) {
+      for (let i = 0; i < n; i++) {
+        d.set(pos[i].x - x, pos[i].y, pos[i].z - z);
+        const r2 = d.lengthSq();
+        d.divideScalar(Math.sqrt(r2));
+        const c = -d.dot(aim[i]);
+        const t = Math.min(1, Math.max(0, (c - 0.8) / 0.16));
+        sum += (d.y / r2) * (0.3 + t * t * (3 - 2 * t));
+      }
+      count++;
+    }
+  }
+  return { pos, aim, n, norm: sum > 0 ? count / sum : 1 };
+}
+
+/** Hands the pitch a ground's floodlight banks (null: no banks, even light). */
+export function useFloodLamps(l: FloodLamps | null): void {
+  SHARED.uLampN.value = l ? l.n : 0;
+  if (!l) return;
+  SHARED.uLamps.value = l.pos;
+  SHARED.uLampAim.value = l.aim;
+  SHARED.uLampNorm.value = l.norm;
+}
 
 /** Shared uniform declarations for custom ShaderMaterials that want the evening look. */
 export function sharedUniforms(): Record<string, { value: unknown }> {
@@ -153,7 +268,7 @@ export function litMaterial(o: LitOptions = {}): THREE.MeshStandardMaterial {
         `#include <lights_fragment_end>
         {
           float sh = standShadow(vWorldPos);
-          float sun = (1.0 - sh * 0.9) * (1.0 - cloudShadow(vWorldPos) * 0.42);
+          float sun = (1.0 - sh) * (1.0 - cloudShadow(vWorldPos) * 0.42);
           reflectedLight.directDiffuse *= sun;
           reflectedLight.directSpecular *= sun;
           vec3 wn = normalize((vec4(normal, 0.0) * viewMatrix).xyz);
