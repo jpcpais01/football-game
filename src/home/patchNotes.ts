@@ -1,5 +1,6 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.80', note: 'The stick steers your player’s chase for a loose ball much more: up to 70% of the run (was 45%), and about 35% even when the ball is tight to win. Leave the stick alone and he simply goes and meets it.' },
   { v: '0.79', note: 'Club studio: Tifos is now its own tab next to Crest, with the stand banner. Save look keeps your name, code, kit, crest, banner and tifo pictures; try Surprise me as much as you like, then Back to saved brings it all back.' },
   { v: '0.78', note: 'New Tifos page in Club settings (the gear on the Club screen): upload your own picture for the giant hanging tifo, the home end card display and the fan banner, or go back to the club design. The fan banner upload moved here from the pause menu.' },
   { v: '0.77.3', note: 'The goal roar now lasts the whole celebration and the crowd shot, the recording blending into itself, and only starts to fade as the camera brings the players back for the restart.' },
