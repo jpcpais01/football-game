@@ -164,7 +164,39 @@ let stadium = makeStadium();
 scene.add(freeze(stadium.group));
 boot.__boot?.(0.75);
 
+/**
+ * The first time the GPU draws anything it has to compile and link its shader, upload its
+ * textures and vertex buffers, and build its shadow-pass shader; done lazily, that happens
+ * the moment it first comes into view, a hitch each time the camera swings onto a stand, a
+ * banner or a corner it hasn't shown yet. So once per new scene (boot, a new ground, kick
+ * off) everything is drawn once off screen, all of it at once: shown or hidden, in view or
+ * not, into the world target and the shadow map. Nothing is seen; the next frame redraws.
+ */
+let warmPending = true;
+function prewarm(): void {
+  warmPending = false;
+  const saved: THREE.Object3D[] = [];
+  const flags: boolean[] = [];
+  scene.traverse((o) => {
+    saved.push(o);
+    flags.push(o.visible, o.frustumCulled);
+    o.visible = true;
+    o.frustumCulled = false;
+  });
+  const target = renderer.getRenderTarget();
+  renderer.setRenderTarget(pixelLook() ? pixelPass.target : null);
+  renderer.shadowMap.needsUpdate = true;
+  renderer.render(scene, rig.camera);
+  renderer.setRenderTarget(target);
+  for (let i = 0; i < saved.length; i++) {
+    saved[i].visible = flags[i * 2];
+    saved[i].frustumCulled = flags[i * 2 + 1];
+  }
+  renderer.shadowMap.needsUpdate = true;
+}
+
 function rebuildStadium(): void {
+  warmPending = true;
   scene.remove(stadium.group);
   // Free the old ground's GPU memory: geometry, materials and every texture they hold.
   const textures = new Set<THREE.Texture>();
@@ -570,6 +602,7 @@ function newMatch(seed = Date.now() & 0xffff): void {
 }
 
 function startGame(seed: number): void {
+  warmPending = true;
   audio.unlock();
   void enterFullscreen();
   void keepAwake();
@@ -607,6 +640,7 @@ function startTraining(kind: DrillKind): void {
   void enterFullscreen();
   void keepAwake();
   groundOverride = 'training';
+  warmPending = true;
   if (ground !== 'training') rebuildStadium();
   audio.setCrowd(false);
   playersView.hideBench = true;
@@ -1168,6 +1202,7 @@ function frame(now: number): void {
   audio.setRain(atmo.weather === 'rain');
   if (crowded) audio.terraces(terraces);
   // A full-screen menu covers the stadium: don't spend the battery drawing it.
+  if (warmPending) prewarm();
   if (home.opaque) {
     /* skip */
   } else if (pixelLook()) {
