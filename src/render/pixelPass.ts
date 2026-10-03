@@ -378,7 +378,7 @@ export class PixelPass {
     return this.artW;
   }
 
-  render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera, night: number, cool = 1, subX = 0, subY = 0): void {
+  render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera, night: number, cool = 1, subX = 0, subY = 0, onPass?: (pass: string) => void): void {
     (this.blit.uniforms.uSub.value as THREE.Vector2).set(subX, subY);
     this.mat.uniforms.uCool.value = cool;
     this.mat.uniforms.uExposure.value = renderer.toneMappingExposure;
@@ -387,11 +387,14 @@ export class PixelPass {
     this.mat.uniforms.uNight.value = night;
     renderer.setRenderTarget(this.target);
     renderer.render(scene, camera);
+    onPass?.('world');
     this.quad.material = this.mat;
     renderer.setRenderTarget(this.post);
     renderer.render(this.scene, this.cam);
+    onPass?.('post');
     this.quad.material = this.blit;
     renderer.setRenderTarget(null);
     renderer.render(this.scene, this.cam);
+    onPass?.('screen');
   }
 }

@@ -49,11 +49,16 @@ export class CloudField {
     this.scene.add(quad);
   }
 
-  update(renderer: THREE.WebGLRenderer): void {
-    if (SHARED.uClouds.value <= 0) return;
+  /** Whether update() will bake this frame. */
+  due(): boolean {
+    if (SHARED.uClouds.value <= 0) return false;
     // Where the field has slid to (as cloudShadow works it out).
     this.drift.copy(SHARED.uWind.value).multiplyScalar(SHARED.uTime.value * 0.012);
-    if (Math.abs(this.drift.x + this.origin.x) < RECENTRE && Math.abs(this.drift.y + this.origin.y) < RECENTRE) return;
+    return Math.abs(this.drift.x + this.origin.x) >= RECENTRE || Math.abs(this.drift.y + this.origin.y) >= RECENTRE;
+  }
+
+  update(renderer: THREE.WebGLRenderer): void {
+    if (!this.due()) return;
     // The lookup is q - origin with q = ground * 0.016 - drift: centre the window on -drift.
     this.origin.set(-Math.round(this.drift.x), -Math.round(this.drift.y));
     SHARED.uCloudOrigin.value.copy(this.origin);
