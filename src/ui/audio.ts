@@ -64,7 +64,14 @@ export class GameAudio {
     // own slightly different speed and wandering in level, so no loop point stands out.
     this.crowdGain = ctx.createGain();
     this.crowdGain.gain.value = 0.3;
-    this.crowdGain.connect(this.crowdBus);
+    // A limiter on the bed alone, so the goal-mouth surge can go very loud without clipping.
+    const lim = ctx.createDynamicsCompressor();
+    lim.threshold.value = -8;
+    lim.knee.value = 4;
+    lim.ratio.value = 20;
+    lim.attack.value = 0.005;
+    lim.release.value = 0.2;
+    this.crowdGain.connect(lim).connect(this.crowdBus);
     void this.load('audio/crowd-bed.mp3').then((buf) => {
       if (!buf) return;
       for (let i = 0; i < 5; i++) {
@@ -173,7 +180,7 @@ export class GameAudio {
     if (this.excite < 0) this.chants?.out.gain.setTargetAtTime(1, t, 0.5);
     this.excite = e;
     this.mouth = mouth;
-    this.crowdGain.gain.setTargetAtTime((0.2 + e * 0.6) * (1 + 2.2 * mouth), t, mouth > 0 ? 0.15 : 0.4);
+    this.crowdGain.gain.setTargetAtTime((0.2 + e * 0.6) * (1 + 6 * mouth), t, mouth > 0 ? 0.15 : 0.4);
   }
 
   private noiseBurst(t: number, dur: number, type: BiquadFilterType, freq: number, q: number, gain: number, rate = 1, out: AudioNode = this.master): void {

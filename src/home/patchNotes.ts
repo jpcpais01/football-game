@@ -1,5 +1,6 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.77.2', note: 'A much bigger crowd surge near goal: it now starts building 12 m from the goal line (was 5 m) and climbs exponentially to about seven times as loud on the line (was three), with a limiter so it never distorts.' },
   { v: '0.77.1', note: 'Fixed the club studio on phones: the club name box no longer pushes the three-letter code off the edge, so you can tap the code and edit it again. The code box is a little wider too.' },
   { v: '0.77', note: 'Walk-out before kick-off: the teams come out of a new tunnel, wide shots of the ground end on a giant home tifo dropped from the main stand roof, then the captains meet the referees. Tap to skip each shot. Pick your captain on the Squad screen; both captains wear armbands.' },
   { v: '0.76.3', note: 'The goal roar starts straight away: the recording now skips its first tenth of a second.' },

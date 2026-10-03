@@ -795,15 +795,15 @@ let fpsFrames = 0;
 let fpsT = performance.now();
 let lastPhase = match.phase;
 
-/** 0..1: the ball in the last 5 m before a goal line, in front of the goal, rising
+/** 0..1: the ball in the last 12 m before a goal line, in front of the goal, rising
  * exponentially to the line (the crowd surges with it). */
 function goalMouth(): number {
   if (match.phase !== 'play') return 0;
   const b = match.ball.pos;
-  const k = 1 - Math.min(1, Math.max(0, PITCH.length / 2 - Math.abs(b.x)) / 5);
+  const k = 1 - Math.min(1, Math.max(0, PITCH.length / 2 - Math.abs(b.x)) / 12);
   if (k <= 0) return 0;
-  const front = 1 - smoothstep(12, 24, Math.abs(b.z));
-  return ((Math.exp(3 * k) - 1) / (Math.exp(3) - 1)) * front;
+  const front = 1 - smoothstep(16, 30, Math.abs(b.z));
+  return ((Math.exp(4 * k) - 1) / (Math.exp(4) - 1)) * front;
 }
 
 function handleEvents(now: number): void {
