@@ -43,6 +43,13 @@ const WIDE: Record<Ground, Shot[]> = {
     // The Shed, packed and bouncing.
     { kind: 'wide', dur: 5, from: [[-30, 2.5, 14], [-80, 9, 0]], to: [[-36, 3, -10], [-80, 10, 2]], fov: 40 },
   ],
+  solar: [
+    { kind: 'wide', dur: 3, from: [[-70, 32, 52], [10, 6, -12]], to: [[-46, 28, 60], [18, 8, -18]], fov: 40 },
+    // The main stand: the solar canopy, the hanging gardens and the sun crest.
+    { kind: 'wide', dur: 3, from: [[14, 3, 20], [0, 15, -60]], to: [[-8, 3, 16], [0, 16, -60]], fov: 42 },
+    // The Grove, with the wood growing on its roof.
+    { kind: 'wide', dur: 5, from: [[-28, 2.5, 16], [-80, 12, 0]], to: [[-34, 3, -10], [-80, 13, 2]], fov: 42 },
+  ],
   training: [
     { kind: 'wide', dur: 3, from: [[-72, 24, 54], [10, 3, -12]], to: [[-50, 20, 60], [18, 4, -18]], fov: 40 },
     // The training centre, its name over the doors.

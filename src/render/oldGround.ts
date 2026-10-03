@@ -59,7 +59,7 @@ const RAKE = 10.1 / 19.6;
 const tier = (o: number) => 1.4 + (o - 0.4) * RAKE;
 
 /** One straight stand's front edge, centred on (cx, cz), facing the pitch, `half` m each way. */
-function standPath(cx: number, cz: number, nx: number, nz: number, half: number, zone: number): PathPt[] {
+export function standPath(cx: number, cz: number, nx: number, nz: number, half: number, zone: number): PathPt[] {
   // Running the way the crowd shader expects (its "along" axis).
   const dx = -nz;
   const dz = nx;

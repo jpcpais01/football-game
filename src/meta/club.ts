@@ -64,11 +64,13 @@ export interface ClubLook {
   banner: ClubState['banner'];
 }
 
-/** Where a match is played: the big stadium, the old second-division ground, or the bare pitch. */
-export type Ground = 'stadium' | 'old' | 'training' | 'bare';
+/** Where a match is played: the big stadium, the old second-division ground, the solarpunk
+ * Solar Gardens, the training ground or the bare pitch. */
+export type Ground = 'stadium' | 'old' | 'solar' | 'training' | 'bare';
 export const GROUNDS: { id: Ground; name: string; about: string }[] = [
   { id: 'stadium', name: 'Big stadium', about: 'Four stands, floodlit roofs, a full house' },
   { id: 'old', name: 'Old Ground', about: 'Terraces, the Shed, pylons and the town beyond' },
+  { id: 'solar', name: 'Solar Gardens', about: 'Solar canopies, roof gardens, wind turbines on the hills' },
   { id: 'training', name: 'Training ground', about: 'The club’s own: clean, modern, no crowd' },
   { id: 'bare', name: 'Bare pitch', about: 'Just the field: no stands, no crowd' },
 ];

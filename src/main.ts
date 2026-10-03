@@ -13,6 +13,7 @@ import { CloudField } from './render/cloudField';
 import { TurfMarks } from './render/turfMarks';
 import { createStadium } from './render/stadium';
 import { createOldGround } from './render/oldGround';
+import { createSolarGround } from './render/solarGround';
 import { createBarePitch } from './render/barePitch';
 import { createTrainingGround } from './render/trainingGround';
 import { DRILLS, Drill, type DrillKind } from './sim/training';
@@ -150,7 +151,7 @@ const makeStadium = () => {
       ? createBarePitch(home, away)
       : ground === 'training'
         ? createTrainingGround(home, away, clubArt)
-        : (ground === 'old' ? createOldGround : createStadium)(home, away, clubArt);
+        : (ground === 'old' ? createOldGround : ground === 'solar' ? createSolarGround : createStadium)(home, away, clubArt);
   // The crowd (the costliest shader) draws after the rest of the opaque scene, so whatever
   // stands in front of it has already filled the depth buffer and hides those pixels.
   st.group.traverse((o) => {
