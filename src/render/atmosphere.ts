@@ -78,8 +78,9 @@ export class Atmosphere {
     this.fog.near = 95;
     this.fog.far = 300;
     const t = clamp(progress, 0, 1);
-    // Sun sinks from ~30° to ~11°.
-    const elev = lerp(30, 15, t) * (Math.PI / 180);
+    // The sun sinks from ~38° to ~24°: the near stand's shadow creeps from the touchline
+    // past halfway (it's baked from the real stands: standShadow.ts).
+    const elev = lerp(38, 24, t) * (Math.PI / 180);
     const az = lerp(-0.42, -0.62, t); // swings slowly along the stand
     const h = Math.cos(elev);
     SUN_DIR.set(Math.sin(-az) * h, -Math.sin(elev), -Math.cos(az) * h).normalize();
@@ -98,8 +99,9 @@ export class Atmosphere {
     this.fog.color.copy(this.c1);
     this.bg.copy(this.c1);
 
-    // The near stand's shadow creeps across the pitch as the sun drops.
-    SHARED.uShadowZ0.value = lerp(25, 9, smoothstep(0, 1, t));
+    // Golden hour: deep shade with soft edges, softer and fainter as the light goes.
+    SHARED.uStandOn.value = lerp(1.0, 0.85, dusk);
+    SHARED.uStandSoft.value = lerp(0.7, 1.5, t);
     // Floodlights: faintly on from the start, carrying the light by full time.
     SHARED.uFlood.value = lerp(0.12, 1.0, smoothstep(0.15, 0.95, t));
     SHARED.uDew.value = smoothstep(0.55, 1, t);
@@ -109,9 +111,9 @@ export class Atmosphere {
     SHARED.uSunColor.value.copy(this.sun.color);
   }
 
-  /** Clear midday: high bright sun, crisp shadows, deep blue sky, almost no haze. */
+  /** Clear early afternoon: high bright sun, crisp shadows, deep blue sky, almost no haze. */
   private setSunny(): void {
-    const elev = (52 * Math.PI) / 180;
+    const elev = (47 * Math.PI) / 180;
     const az = -0.5;
     const h = Math.cos(elev);
     SUN_DIR.set(Math.sin(-az) * h, -Math.sin(elev), -Math.cos(az) * h).normalize();
@@ -128,8 +130,9 @@ export class Atmosphere {
     this.fog.near = 260;
     this.fog.far = 900;
     this.haze = 0.15;
-    // High sun: the near stand's shadow barely reaches the touchline.
-    SHARED.uShadowZ0.value = 33;
+    // Hard, deep stand shadows across the near side of the pitch: the day's big contrast.
+    SHARED.uStandOn.value = 1;
+    SHARED.uStandSoft.value = 0.3;
     SHARED.uFlood.value = 0;
     SHARED.uDew.value = 0;
     SHARED.uShadeTint.value.setHex(0x9cc4f0);
@@ -160,8 +163,8 @@ export class Atmosphere {
     this.fog.near = 50;
     this.fog.far = 230;
     this.haze = 1.15;
-    // No sun: nothing casts the stand's shadow.
-    SHARED.uShadowZ0.value = 80;
+    // No sun: no stand shadow. The floodlights' pools light the grass instead (pitch.ts).
+    SHARED.uStandOn.value = 0;
     SHARED.uFlood.value = 1.05;
     SHARED.uDew.value = 1;
     SHARED.uShadeTint.value.setHex(0x5d71a8);

@@ -1,13 +1,14 @@
 import * as THREE from 'three';
 import { PITCH } from '../sim/constants';
-import { SHARED, STAND_SHADOW_GLSL } from './look';
+import { FLOOD_POOL_GLSL, SHARED, STAND_SHADOW_GLSL } from './look';
 
 /**
  * The pitch is one quad with a procedural, physically lit grass material:
  * - mowing stripes whose brightness depends on the view direction (blades lean one way or
  *   the other), so they shimmer as the camera moves, like a real broadcast,
  * - chalk lines, goalmouth wear and fine grain computed per pixel (no textures),
- * - real sun shadows from the players, the stand's shadow, dew sheen in the evening.
+ * - real sun shadows from the players and the ground's stands (baked: standShadow.ts), dew
+ *   sheen in the evening, the floodlights' pools of light at night.
  */
 const MARGIN = 9;
 const SIZE_X = PITCH.length + MARGIN * 2;
@@ -137,6 +138,7 @@ export function createPitch(renderer: THREE.WebGLRenderer, marks: THREE.Texture)
         uniform vec3 uFloodColor;
         uniform float uTime;
         ${STAND_SHADOW_GLSL}
+        ${FLOOD_POOL_GLSL}
         const float HL = ${PITCH.halfL.toFixed(2)};
         const float HW = ${PITCH.halfW.toFixed(2)};
         uniform sampler2D uNoiseFine;
@@ -212,15 +214,16 @@ export function createPitch(renderer: THREE.WebGLRenderer, marks: THREE.Texture)
         '#include <lights_fragment_end>',
         `#include <lights_fragment_end>
         {
-          float sh = standShadow(vGrassWorld);
-          float sun = (1.0 - sh * 0.9) * (1.0 - cloudShadow(vGrassWorld) * 0.42);
+          float sh = standShadowGround(vGrassWorld.xz);
+          float sun = (1.0 - sh) * (1.0 - cloudShadow(vGrassWorld) * 0.42);
           reflectedLight.directDiffuse *= sun;
           reflectedLight.directSpecular *= sun;
-          reflectedLight.indirectDiffuse += diffuseColor.rgb * uShadeTint * sh * 0.45;
-          // Floodlight pools: a touch brighter through the middle, falling off to the corners.
-          vec2 q = vGrassWorld.xz / vec2(HL, HW);
-          float pool = 1.12 - 0.3 * smoothstep(0.35, 1.25, length(q * vec2(0.85, 1.0)));
-          reflectedLight.indirectDiffuse += diffuseColor.rgb * uFloodColor * uFlood * 0.5 * pool;
+          reflectedLight.indirectDiffuse += diffuseColor.rgb * uShadeTint * sh * 0.3;
+          // Floodlights: each bank's pool of light, brightest where they overlap.
+          if (uFlood > 0.0) {
+            float pool = clamp(0.1 + 0.9 * floodPool(vGrassWorld), 0.45, 1.8);
+            reflectedLight.indirectDiffuse += diffuseColor.rgb * uFloodColor * uFlood * 0.5 * pool;
+          }
           // Standing water mirrors the floodlit stands, brightest at a glancing angle, with
           // rings spreading where the drops land.
           if (gPuddle > 0.001) {

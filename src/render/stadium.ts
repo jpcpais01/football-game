@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { PITCH } from '../sim/constants';
 import type { Atmosphere } from './atmosphere';
-import { SHARED, litMaterial } from './look';
+import { type FloodLamps, SHARED, STAND_MAP_GLSL, floodLamps, litMaterial, useFloodLamps } from './look';
 import { DUGOUT } from './bench';
 import type { Terraces } from '../ui/terraces';
 
@@ -51,6 +51,8 @@ export const U = {
   uFogFar: { value: 300 },
   /** Light on the crowd (sun + sky + floodlights), updated per frame. */
   uLight: { value: new THREE.Color(1, 1, 1) },
+  /** The sun's share of uLight: what a fan in the shade of the stands goes without. */
+  uCrowdSun: { value: new THREE.Color() },
   uSkyTop: { value: new THREE.Color() },
   uSkyHorizon: { value: new THREE.Color() },
   uSunDir: { value: new THREE.Vector3() },
@@ -334,6 +336,10 @@ function crowdShader(o: CrowdOpts): THREE.ShaderMaterial {
       uLetterRect: { value: o.letters?.rect ?? new THREE.Vector4(0, 1, 0, 1) },
       uHasLetters: { value: o.letters ? 1 : 0 },
       uFill: { value: o.fill ?? 1 },
+      uStandMap: SHARED.uStandMap,
+      uStandSun: SHARED.uStandSun,
+      uStandOn: SHARED.uStandOn,
+      uStandSoft: SHARED.uStandSoft,
     },
     vertexShader: /* glsl */ `
       attribute float aHome;
@@ -370,7 +376,8 @@ function crowdShader(o: CrowdOpts): THREE.ShaderMaterial {
       uniform sampler2D uTifoB;
       uniform vec4 uTifoRectB;
       uniform vec2 uShade, uAisle;
-      uniform vec3 uA, uB, uFog, uLight, uSeat, uVom;
+      uniform vec3 uA, uB, uFog, uLight, uCrowdSun, uSeat, uVom;
+      ${STAND_MAP_GLSL}
       uniform sampler2D uTifo, uLetters;
       uniform vec4 uTifoRect, uLetterRect;
 
@@ -565,7 +572,8 @@ function crowdShader(o: CrowdOpts): THREE.ShaderMaterial {
         c *= 1.0 - 0.38 * smoothstep(uShade.x, uShade.y, sv);
 
         vec3 alb = pow(c, vec3(2.2));
-        c = alb * uLight;
+        // The sun reaches the fans the roofs and stands don't shade.
+        c = alb * (uLight - uCrowdSun * standShadow(vWorld));
         // Flares: a flickering red-orange glow on everyone around them.
         // (They burn in the ends: the side stands are out of their reach.)
         if (uFlareN > 0.0 && abs(vWorld.x) > 50.0) {
@@ -851,6 +859,8 @@ function hangingTifo(main: PathPt[], home: number, club: StadiumClub): { group: 
   roll.rotation.y = yaw;
   group.add(cloth, roll);
   group.visible = false;
+  // Clipped and moved by hand: the baked stand shadow leaves it out.
+  group.userData.noStandShadow = true;
   return {
     group,
     update(drop) {
@@ -999,6 +1009,19 @@ function alongRoof(path: PathPt[], every: number, geo: THREE.BufferGeometry, mat
   });
   mesh.instanceMatrix.needsUpdate = true;
   return mesh;
+}
+
+/** The near stand's banks (on its roof front, out of the broadcast picture): they light the
+ * near touchline's grass, though their glows and beams aren't drawn. */
+function nearLampSpots(): THREE.Vector3[] {
+  const cx = BOWL_X - BOWL_R;
+  const cz = BOWL_Z - BOWL_R;
+  const r = (BOWL_R + ROOF_EDGE + 1) * Math.SQRT1_2;
+  return [
+    new THREE.Vector3(-cx - r, ROOF_H - 2, cz + r),
+    new THREE.Vector3(cx + r, ROOF_H - 2, cz + r),
+    new THREE.Vector3(0, ROOF_H - 2, BOWL_Z + ROOF_EDGE + 1),
+  ];
 }
 
 /** Floodlight banks along the roof fronts (ends, corners, main stand): beams and glows. */
@@ -2176,6 +2199,7 @@ export function createStadium(homeColor: number, awayColor: number, club: Stadiu
   // penalties). The same profile as the ends - tiers, boxes, roof - closing the ground.
   const nearStand = new THREE.Group();
   nearStand.visible = false;
+  nearStand.userData.castsHidden = true; // its shadow falls on the pitch either way
   {
     const np = nearPath();
     const nb = new Map<THREE.Material, THREE.BufferGeometry[]>();
@@ -2211,6 +2235,7 @@ export function createStadium(homeColor: number, awayColor: number, club: Stadiu
   group.add(nearStand);
 
   const spots = lampSpots();
+  const lamps = floodLamps([...spots, ...nearLampSpots()]);
   const glows = lampGlows(spots);
   group.add(glows.mesh);
 
@@ -2235,7 +2260,7 @@ export function createStadium(homeColor: number, awayColor: number, club: Stadiu
       paddockGroup.visible = !show;
     },
     update(time, excitement, atmo, tifo = 0, terraces, hang = tifo) {
-      const flood = updateShared(time, excitement, atmo, tifo, terraces);
+      const flood = updateShared(time, excitement, atmo, tifo, terraces, lamps);
       // The giant tifo unrolls in about three seconds and is wound back up a little slower.
       const dt = lastTime < 0 ? 0 : Math.min(0.1, Math.max(0, time - lastTime));
       lastTime = time;
@@ -2256,8 +2281,9 @@ export function createStadium(homeColor: number, awayColor: number, club: Stadiu
 const c = new THREE.Color();
 const c2 = new THREE.Color();
 
-export function updateShared(time: number, excitement: number, atmo: Atmosphere, tifo = 0, terraces?: Terraces): number {
+export function updateShared(time: number, excitement: number, atmo: Atmosphere, tifo = 0, terraces?: Terraces, lamps: FloodLamps | null = null): number {
   U.uTime.value = time;
+  useFloodLamps(lamps);
   if (terraces) {
     U.uChant.value.set(terraces.home, terraces.away, terraces.beat, terraces.arms);
     // The flares burning now (and their flicker).
@@ -2286,6 +2312,7 @@ export function updateShared(time: number, excitement: number, atmo: Atmosphere,
   c.copy(atmo.hemi.color).multiplyScalar(atmo.hemi.intensity * 0.55);
   c2.copy(atmo.sun.color).multiplyScalar(atmo.sun.intensity * 0.22);
   c.add(c2);
+  U.uCrowdSun.value.copy(c2);
   c2.copy(SHARED.uFloodColor.value).multiplyScalar(flood * 0.6);
   c.add(c2);
   U.uLight.value.copy(c);
