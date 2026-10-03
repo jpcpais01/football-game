@@ -386,7 +386,7 @@ pauseMenu.innerHTML = `
     <button class="palette ghost">Palette</button>
     <button class="camera ghost">Camera: Normal</button>
     <button class="sound ghost">Sound: on</button>
-    <button class="smooth ghost">Smoothing: on</button>
+    <button class="smooth ghost">Graphics: full</button>
     <label class="fine wide"><span>Pixels</span><div class="fine-track"><div class="fine-ticks"></div><input class="fine-in" type="range" min="${PIXELS_MIN}" max="${PIXELS_MAX}" step="1"></div><b class="fine-val">288</b></label>
     <button class="stats ghost wide">FPS counter: off</button>
   </div>`;
@@ -840,7 +840,8 @@ fineIn.addEventListener('input', () => {
     /* ignore */
   }
 });
-// Smoothing: each art pixel picks the most typical of 4 samples (no shimmer), or takes 1.
+// Graphics quality: full (each art pixel picks the most typical of 4 samples: no shimmer)
+// or fast (1 sample: about a quarter of the world pass, a little more shimmer on fine detail).
 const smoothBtn = pauseMenu.querySelector('.smooth') as HTMLButtonElement;
 let smoothing = true;
 try {
@@ -850,7 +851,7 @@ try {
 }
 const applySmoothing = () => {
   pixelPass.setSupersample(smoothing ? 2 : 1);
-  smoothBtn.textContent = `Smoothing: ${smoothing ? 'on' : 'off'}`;
+  smoothBtn.textContent = `Graphics: ${smoothing ? 'full' : 'fast'}`;
 };
 applySmoothing();
 smoothBtn.addEventListener('click', () => {

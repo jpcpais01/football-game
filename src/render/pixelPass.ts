@@ -430,7 +430,8 @@ export class PixelPass {
   /** The world pass alone (the grass first, at art resolution) into `target`. */
   renderWorld(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, onPass?: (pass: string) => void): void {
     const g = this.grass;
-    const grassOn = !!g && g.mesh.visible && g.mesh.parent !== null;
+    // (With one sample a pixel the world pass already shades the grass once per art pixel.)
+    const grassOn = !!g && this.ss > 1 && g.mesh.visible && g.mesh.parent !== null;
     if (grassOn) {
       // The grass alone, one fragment per art pixel (the camera sees only the grass layer;
       // the shadow map isn't redrawn here: it would only hold what's on that layer).

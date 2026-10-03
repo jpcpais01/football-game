@@ -1,5 +1,6 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.96.15', note: 'New Graphics setting in the pause menu (it replaces Smoothing): Full is the look as it was, Fast draws one sample per pixel instead of four, about a quarter of the 3D work, for phones that run hot. Fine detail shimmers a little more on Fast.' },
   { v: '0.96.14', note: 'Smaller hitches on passes and through balls: a ground pass is now read from a table built while loading instead of rolling out half a dozen test flights in the frame of the kick (about 40 times faster), and the through-ball planner\'s busiest sums are cheaper.' },
   { v: '0.96.13', note: 'Fewer hitches when the camera swings after the ball: a player stepping in or out of view no longer rewrites kit data the graphics chip is still drawing from, and per-frame data now rotates through three buffers instead of two, since phones keep a couple of frames in flight.' },
   { v: '0.96.12', note: 'The FPS counter starts measuring 10 seconds after kickoff (it counts down until then), so loading and the walk-out no longer colour the numbers.' },
