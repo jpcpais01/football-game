@@ -1,14 +1,13 @@
 import type { Terraces, Vowel } from './terraces';
 
 /**
- * The terraces, synthesised: thousands of voices singing in a concrete
- * bowl. Each sung note is a section of the crowd — detuned saw "voices" an octave apart
- * plus breath, shaped by the vowel's two formants, scattered by a few tens of ms (they
- * never sing exactly together) — into the end's bus, panned to its side of the ground,
- * and through a long stadium reverb. The ultras' bass drum, crowd claps, the Viking
- * "HUH!", boos and the "ooooh" of a near miss go the same way.
+ * The terraces, synthesised, on top of the recorded crowd bed: the ultras' bass drum and
+ * crowd claps keeping the director's songs' rhythm, the Viking "HUH!", boos, and the
+ * "ooooh" of a near miss. Voices are breath only (noise through the vowel's two
+ * formants): pitched saws sounded like brass. Each end is panned to its side of the
+ * ground, through a long stadium reverb.
  *
- * Notes are scheduled a little ahead from the director's song (lookahead scheduling).
+ * Beats are scheduled a little ahead from the director's song (lookahead scheduling).
  */
 
 /** First and second formants (Hz) of each vowel, a big male crowd. */
@@ -20,13 +19,9 @@ const FORMANTS: Record<Vowel, [number, number]> = {
   u: [320, 800],
 };
 
-/** The home end sings a little lower and louder than the travelling fans. */
-const ROOT = [138.6, 146.8];
+/** The home end is louder than the travelling fans. */
 const END_GAIN = [1, 0.62];
 const END_PAN = [-0.55, 0.55];
-
-/** The tension choir's three voices: a slightly beating unison and the octave below. */
-const VOICE_DETUNE = [1, 1.011, 0.5];
 
 export class ChantAudio {
   /** Overall level of the terraces (menus sink it). */
@@ -34,15 +29,6 @@ export class ChantAudio {
   private ends: GainNode[] = [];
   private scheduledId = -1;
   private scheduledTo = 0;
-  /** Per end: the anticipation, a swelling "oooOOO". */
-  private tension: { voices: OscillatorNode[]; choirG: GainNode }[] = [];
-  private paramsAt = -1;
-  /** Per end: the danger last sent to the tension layer, whether its choir is in the graph,
-   * and since when it has been silent (a silent choir is unplugged: no saws to compute). */
-  private lastDanger = [-1, -1];
-  private choirOn = [true, true];
-  private choirQuietAt = [0, 0];
-
   constructor(
     private ctx: AudioContext,
     dest: AudioNode,
@@ -71,38 +57,7 @@ export class ChantAudio {
       pan.pan.value = END_PAN[e];
       g.connect(pan).connect(this.out);
       this.ends.push(g);
-      this.tension.push(this.tensionLayer(g, e));
     }
-  }
-
-  /** An end's anticipation "oooOOO": always running, its level and pitch set by the danger
-   * (the roar under it is the recorded crowd bed, see GameAudio). */
-  private tensionLayer(bus: AudioNode, e: number) {
-    const ctx = this.ctx;
-    const choirG = ctx.createGain();
-    choirG.gain.value = 0;
-    const f1 = ctx.createBiquadFilter();
-    f1.type = 'bandpass';
-    f1.frequency.value = FORMANTS.o[0];
-    f1.Q.value = 2.5;
-    const f2 = ctx.createBiquadFilter();
-    f2.type = 'bandpass';
-    f2.frequency.value = FORMANTS.o[1];
-    f2.Q.value = 3;
-    f1.connect(choirG);
-    f2.connect(choirG);
-    choirG.connect(bus);
-    const voices: OscillatorNode[] = [];
-    for (const m of VOICE_DETUNE) {
-      const o = ctx.createOscillator();
-      o.type = 'sawtooth';
-      o.frequency.value = ROOT[e] * 0.85 * m;
-      o.connect(f1);
-      o.connect(f2);
-      o.start();
-      voices.push(o);
-    }
-    return { voices, choirG };
   }
 
   private impulse(seconds: number): AudioBuffer {
@@ -134,32 +89,6 @@ export class ChantAudio {
     if (dir.oohs.length) for (const lv of dir.oohs.splice(0)) this.ooh(lv, ctx.currentTime + 0.05);
     if (dir.erupts.length) for (const end of dir.erupts.splice(0)) this.erupt(end, ctx.currentTime + 0.02);
     if (dir.groans.length) for (const end of dir.groans.splice(0)) this.groan(end, ctx.currentTime + 0.05);
-    // The anticipation follows each team's danger: louder and louder, the "ooo" rising.
-    const now = ctx.currentTime;
-    if (now - this.paramsAt > 0.08) {
-      this.paramsAt = now;
-      for (let e = 0; e < 2; e++) {
-        const d = dir.danger[e];
-        const L = this.tension[e];
-        const sw = Math.max(0, (d - 0.25) / 0.75);
-        // The choir only sings above a quarter danger: off the graph a while after it fades.
-        if (sw > 0) {
-          this.choirQuietAt[e] = now;
-          if (!this.choirOn[e]) {
-            this.choirOn[e] = true;
-            L.choirG.connect(this.ends[e]);
-          }
-        } else if (this.choirOn[e] && now - this.choirQuietAt[e] > 2) {
-          this.choirOn[e] = false;
-          L.choirG.disconnect();
-        }
-        // A steady danger needs no new automation.
-        if (Math.abs(d - this.lastDanger[e]) < 0.003) continue;
-        this.lastDanger[e] = d;
-        L.choirG.gain.setTargetAtTime(0.16 * sw * Math.sqrt(sw), now, 0.25);
-        if (this.choirOn[e]) for (let i = 0; i < 3; i++) L.voices[i].frequency.setTargetAtTime(ROOT[e] * 0.85 * VOICE_DETUNE[i] * (1 + 0.5 * d), now, 0.3);
-      }
-    }
     if (!s) return;
     if (s.id !== this.scheduledId) {
       this.scheduledId = s.id;
@@ -196,10 +125,6 @@ export class ChantAudio {
     const k1 = Math.floor((horizon - s.start) / loop);
     for (let k = k0; k <= k1; k++) {
       const top = s.start + k * loop;
-      for (const note of c.notes) {
-        const t = top + note.b * beat;
-        if (t > from && t <= horizon && t < s.until) this.sing(bus, t + toCtx, ROOT[s.end] * Math.pow(2, note.p / 12), note.d * beat, note.v, lv * swell(t));
-      }
       for (const b of c.claps) {
         const t = top + b * beat;
         if (t > from && t <= horizon && t < s.until) this.clap(bus, t + toCtx, lv * swell(t));
@@ -211,8 +136,8 @@ export class ChantAudio {
     }
   }
 
-  /** A section of the crowd singing one note. */
-  private sing(bus: AudioNode, t: number, f0: number, dur: number, v: Vowel, level: number): void {
+  /** A section of the crowd shouting a vowel. */
+  private shout(bus: AudioNode, t: number, dur: number, v: Vowel, level: number): void {
     const ctx = this.ctx;
     const [f1, f2] = FORMANTS[v];
     const g = ctx.createGain();
@@ -235,38 +160,19 @@ export class ChantAudio {
     b1.connect(g);
     b2.connect(g2).connect(g);
     g.connect(bus);
-    // Voices: a spread of pitches (nobody's quite in tune), some an octave down, each
-    // section starting a few tens of ms apart, with a little scoop up into the note.
-    const voices: [number, number][] = [
-      [1, 0],
-      [1.012, 0.025],
-      [0.5, 0.01],
-      [0.503, 0.04],
-    ];
-    for (const [m, off] of voices) {
-      const o = ctx.createOscillator();
-      o.type = 'sawtooth';
-      const at = t + off + Math.random() * 0.02;
-      o.frequency.setValueAtTime(f0 * m * 0.97, at);
-      o.frequency.exponentialRampToValueAtTime(f0 * m * (1 + (Math.random() - 0.5) * 0.008), at + 0.08);
-      const vg = ctx.createGain();
-      vg.gain.value = m === 1 ? 0.6 : 0.7;
-      o.connect(vg);
-      vg.connect(b1);
-      vg.connect(b2);
-      o.start(at);
-      o.stop(end + 0.3);
-    }
-    // Breath: thousands of mouths.
-    const nz = ctx.createBufferSource();
+    this.breath(t, end + 0.3 - t, 2.4, b1, b2);
+  }
+
+  /** Breath of many mouths through formant filters, for `dur` seconds from `t`. */
+  private breath(t: number, dur: number, gain: number, ...to: AudioNode[]): void {
+    const nz = this.ctx.createBufferSource();
     nz.buffer = this.noise;
-    const ng = ctx.createGain();
-    ng.gain.value = 0.9;
+    const ng = this.ctx.createGain();
+    ng.gain.value = gain;
     nz.connect(ng);
-    ng.connect(b1);
-    ng.connect(b2);
+    for (const n of to) ng.connect(n);
     nz.start(t, Math.random() * 3);
-    nz.stop(end + 0.3);
+    nz.stop(t + dur);
   }
 
   /** A goal: the roar is the recording (GameAudio.goal); the scoring end claps after it. */
@@ -298,16 +204,7 @@ export class ChantAudio {
     f1.connect(g);
     f2.connect(g);
     g.connect(bus);
-    for (const m of [1, 1.014, 0.5, 0.497]) {
-      const o = ctx.createOscillator();
-      o.type = 'sawtooth';
-      o.frequency.setValueAtTime(200 * m, t);
-      o.frequency.exponentialRampToValueAtTime(118 * m, t + 1.4);
-      o.connect(f1);
-      o.connect(f2);
-      o.start(t);
-      o.stop(t + 2.2);
-    }
+    this.breath(t, 2.2, 2.4, f1, f2);
     this.burst(bus, t, 1.6, 'bandpass', 700, 0.6, 0.12);
   }
 
@@ -334,21 +231,21 @@ export class ChantAudio {
 
   /** Viking clap: one big "HUH!" from the end (and the clap that goes with it). */
   private huh(bus: AudioNode, t: number, level: number): void {
-    this.sing(bus, t, 98, 0.16, 'u', 0.45 * level);
+    this.shout(bus, t, 0.16, 'u', 0.45 * level);
     this.clap(bus, t, 0.5 * level);
   }
 
   /** The release: a huge cheer. */
   private roar(bus: AudioNode, t: number): void {
     this.burst(bus, t, 2.6, 'bandpass', 900, 0.5, 0.22);
-    this.sing(bus, t, 165, 2.2, 'a', 0.5);
+    this.shout(bus, t, 2.2, 'a', 0.5);
   }
 
   /** The referee's given a foul against them: a long, low boo, and the whistlers. */
   private boo(end: 0 | 1, t: number): void {
     const bus = this.ends[end];
-    this.sing(bus, t, 110, 1.8, 'u', 1.5);
-    this.sing(bus, t + 0.1, 104, 1.6, 'o', 1.0);
+    this.shout(bus, t, 1.8, 'u', 1.5);
+    this.shout(bus, t + 0.1, 1.6, 'o', 1.0);
     const ctx = this.ctx;
     for (let i = 0; i < 6; i++) {
       const o = ctx.createOscillator();
@@ -387,18 +284,7 @@ export class ChantAudio {
       b1.connect(g);
       b2.connect(g);
       g.connect(bus);
-      for (const m of [1, 1.013, 0.5, 0.99]) {
-        const o = ctx.createOscillator();
-        o.type = 'sawtooth';
-        const f = 150 * m;
-        o.frequency.setValueAtTime(f, t);
-        o.frequency.exponentialRampToValueAtTime(f * 1.35, t + 0.45);
-        o.frequency.exponentialRampToValueAtTime(f * 0.95, t + 1.5);
-        o.connect(b1);
-        o.connect(b2);
-        o.start(t);
-        o.stop(t + 2.2);
-      }
+      this.breath(t, 2.2, 2.4, b1, b2);
     }
   }
 
