@@ -939,6 +939,7 @@ let frameAvg = 16.7;
 /** Frame pacing: the display's refresh interval, and the interval we actually draw at. */
 let rafAvg = 16.7;
 let lastRaf = performance.now();
+let screenHz = 0;
 /** The frame-rate cap, everywhere in the app (matches, menus, pause, cutscenes, drills). */
 const TARGET_MS = 1000 / 120;
 
@@ -1128,6 +1129,9 @@ function frame(now: number): void {
   // skipped evenly to hold it; on a slower one every refresh is drawn.
   rafAvg += (Math.min(50, now - lastRaf) - rafAvg) * 0.1;
   lastRaf = now;
+  // The fastest the browser has ever offered frames (menus draw nothing, so there it's the
+  // screen's own rate): tells a slow game apart from a screen held at 60 or 90 Hz.
+  screenHz = Math.max(screenHz, Math.min(240, Math.round(1000 / rafAvg)));
   const hidden = home.opaque && !playing;
   if (now < nextFrameAt - rafAvg * 0.5) return;
   nextFrameAt = now - nextFrameAt > TARGET_MS ? now + TARGET_MS : nextFrameAt + TARGET_MS;
@@ -1259,6 +1263,7 @@ function frame(now: number): void {
     renderer.shadowMap.needsUpdate = true;
     renderer.render(scene, rig.camera);
   }
+  if (!home.opaque) minimap.draw(renderer);
   adaptQuality(frameMs, now);
 
   if (showStats) {
@@ -1269,8 +1274,8 @@ function frame(now: number): void {
       // Totals since the last readout (all passes: shadow, world, post, blit), per frame.
       const info = renderer.info.render;
       fpsEl.textContent = DEBUG
-        ? `${fps} fps · ${ms} ms · ${Math.round(info.calls / fpsFrames)} calls · ${(info.triangles / fpsFrames / 1000).toFixed(0)}k tris · dpr ${dpr.toFixed(2)}`
-        : `${fps} fps · ${ms} ms`;
+        ? `${fps} fps · ${ms} ms · screen ${screenHz} Hz · ${Math.round(info.calls / fpsFrames)} calls · ${(info.triangles / fpsFrames / 1000).toFixed(0)}k tris · dpr ${dpr.toFixed(2)}`
+        : `${fps} fps · ${ms} ms · screen ${screenHz} Hz`;
       fpsFrames = 0;
       fpsT = now;
       renderer.info.reset();

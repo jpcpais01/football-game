@@ -458,7 +458,6 @@ html, body {
   width: clamp(92px, 14vw, 150px); pointer-events: none; border-radius: 6px; overflow: hidden;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35), 0 0 0 1.5px rgba(244, 239, 227, 0.25);
 }
-.minimap canvas { display: block; width: 100%; }
 
 /* Pre-match cutscene: letterbox bars, a caption low on the left, a skip hint. Tap anywhere. */
 .cutscene { position: absolute; inset: 0; z-index: 20; cursor: pointer; touch-action: none; }
