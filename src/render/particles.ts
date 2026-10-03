@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { flipAttribute } from './pingPong';
 import { PITCH } from '../sim/constants';
 import type { Match } from '../sim/match';
 import { SHARED } from './look';
@@ -42,8 +43,8 @@ export class Particles {
   private live = 0;
   /** One past the highest slot that is alive (or just died and still needs its alpha zeroed). */
   private hi = MOTES;
-  /** New particles were spawned: their colours need uploading. */
-  private colDirty = false;
+  /** New particles were spawned: frames left in which the colours are uploaded whole (one per buffer). */
+  private colDirty = 0;
   private gPos = new Float32Array(GROUND * 3);
   private gCol = new Float32Array(GROUND * 3);
   private gSize = new Float32Array(GROUND);
@@ -58,7 +59,6 @@ export class Particles {
   private geo: THREE.BufferGeometry;
   private c = new THREE.Color();
   private breathT = new Float32Array(22);
-  private attrs: THREE.BufferAttribute[];
   private home: number;
   private away: number;
 
@@ -71,7 +71,6 @@ export class Particles {
     g.setAttribute('aSize', new THREE.BufferAttribute(this.size, 1).setUsage(THREE.DynamicDrawUsage));
     g.setAttribute('aAlpha', new THREE.BufferAttribute(this.alpha, 1).setUsage(THREE.DynamicDrawUsage));
     this.geo = g;
-    this.attrs = [g.attributes.position, g.attributes.aSize, g.attributes.aAlpha, g.attributes.color] as THREE.BufferAttribute[];
     this.mat = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
@@ -152,7 +151,7 @@ export class Particles {
   private spawn(kind: Kind, x: number, y: number, z: number, vx: number, vy: number, vz: number, life: number, size: number, color: number): void {
     const i = this.alloc();
     if (this.life[i] <= 0) this.live++;
-    this.colDirty = true;
+    this.colDirty = 2;
     this.kind[i] = kind;
     const i3 = i * 3;
     this.pos[i3] = x;
@@ -427,13 +426,9 @@ export class Particles {
     // Upload (and draw) only what's in use: the motes, plus the rest while any is alive.
     this.hi = hi;
     this.geo.setDrawRange(0, end);
-    for (const attr of this.attrs) {
-      // Colours change only for the motes' tint, and when something new is spawned.
-      const count = attr === this.attrs[3] && !this.colDirty ? MOTES : end;
-      attr.clearUpdateRanges();
-      attr.addUpdateRange(0, count * attr.itemSize);
-      attr.needsUpdate = true;
-    }
-    this.colDirty = false;
+    // Into the buffers not in use (see pingPong); new colours go to both, one a frame.
+    const names = ['position', 'aSize', 'aAlpha', 'color'];
+    for (let k = 0; k < 4; k++) flipAttribute(this.geo, names[k], k === 3 && this.colDirty === 0 ? MOTES : end);
+    if (this.colDirty > 0) this.colDirty--;
   }
 }

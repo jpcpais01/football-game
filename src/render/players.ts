@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { flipAttribute, flipInstances } from './pingPong';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { GOAL_SEQ, PLAYER } from '../sim/constants';
 import type { Match } from '../sim/match';
@@ -935,17 +936,9 @@ export class PlayersView {
       mesh.count = count;
       // three still issues a draw for an instanced mesh with nothing in it.
       mesh.visible = count > 0;
-      // Per-frame data: upload only the part that's drawn.
-      mesh.instanceMatrix.clearUpdateRanges();
-      mesh.instanceMatrix.addUpdateRange(0, count * 16);
-      mesh.instanceMatrix.needsUpdate = true;
-      for (const k of POSE_ATTRS) {
-        const b = mesh.geometry.getAttribute(k) as THREE.BufferAttribute | undefined;
-        if (!b) continue;
-        b.clearUpdateRanges();
-        b.addUpdateRange(0, count * b.itemSize);
-        b.needsUpdate = true;
-      }
+      // Per-frame data: upload only the part that's drawn, into the buffer not in use.
+      flipInstances(mesh, count);
+      for (const k of POSE_ATTRS) flipAttribute(mesh.geometry, k, count);
     }
     // Kit attributes: copied from the master in the same order — only when the visible set
     // changes (they don't change otherwise, so there's nothing to upload).
@@ -971,11 +964,7 @@ export class PlayersView {
     this.contact.visible = n > 0;
     this.contact.count = n;
     this.flood.count = flood ? n * PYLONS.length : 0;
-    for (const m of [this.contact, this.flood]) {
-      m.instanceMatrix.clearUpdateRanges();
-      m.instanceMatrix.addUpdateRange(0, m.count * 16);
-      m.instanceMatrix.needsUpdate = true;
-    }
+    for (const m of [this.contact, this.flood]) flipInstances(m, m.count);
   }
 
   /** out = parent * T(x,y,z) (no rotation). Safe with out === parent. */
