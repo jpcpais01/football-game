@@ -127,6 +127,9 @@ const tmpK = new V3();
 const STRETCH = 0.4;
 const STRETCH_DUR = 0.36;
 /** Look-ahead samples for deciding a stretch (every 0.05 s). */
+/** A dropping ball is let down onto the chest from above CHEST_TOP; above CHEST_MAX it can only be headed. */
+const CHEST_TOP = 1.55;
+const CHEST_MAX = 1.95;
 const STRETCH_N = 7;
 const stretchX = new Float32Array(STRETCH_N);
 const stretchY = new Float32Array(STRETCH_N);
@@ -223,6 +226,9 @@ export class Match {
   private lastTackleTap = -10;
   /** Sprint-swipe tackle: committed, waiting for the moment to strike. */
   private lunge: { slide: boolean; until: number } | null = null;
+  /** Pressing: how long he's been tight on the carrier (s), and when he can next go in. */
+  private pressTight = 0;
+  private pokeReady = 0;
   /** Seconds the stick has been idle (read by the AI for auto-switching). */
   noInputT = 0;
   /** Seconds since the controlled player changed (UI flash). */
@@ -1150,7 +1156,13 @@ export class Match {
       // Goal-side, moving with the ball: its pace plus a pull onto the spot, so he neither
       // trails the carrier nor runs past him. Sprint presses tighter, up against him; a
       // touch that gets away from the carrier is pounced on (see AI.pressPoint).
-      const onBall = this.ai.pressPoint(c, carrier, tmpV, input.sprint ? 0.8 : 1.2);
+      // Held tight on him, he doesn't settle at that distance: he squeezes in onto the ball
+      // (sooner on Sprint), so the carrier has to beat him or lose it.
+      const d = this.ballDist(c);
+      this.pressTight = d < 2.2 ? this.pressTight + DT : 0;
+      const squeeze = smoothstep(0.25, 0.9, this.pressTight * (input.sprint ? 1.6 : 1));
+      const keep = (input.sprint ? 0.8 : 1.2) * (1 - squeeze) + 0.45 * squeeze;
+      const onBall = this.ai.pressPoint(c, carrier, tmpV, keep);
       const pull = onBall ? 5 : 3;
       const vx = this.ball.vel.x * 0.9 + (tmpV.x - c.pos.x) * pull;
       const vz = this.ball.vel.z * 0.9 + (tmpV.z - c.pos.z) * pull;
@@ -1166,7 +1178,18 @@ export class Match {
       // than he can backpedal, he opens his hips and runs with him instead.
       c.squareUp = !onBall && v < 4.5;
       c.burst = onBall;
-    }
+      // Going in: the moment the ball shows (a heavy touch, the near side, him turned away
+      // from us) and a foot can get to it, he pokes at it. Kept out for long enough, he goes
+      // through anyway, shield or not, and takes his chances.
+      if (this.owner === carrier && !c.isBusy() && !this.lunge && this.time > this.pokeReady && this.ball.pos.y < 0.6 && d < 1.35) {
+        const forced = this.pressTight > (input.sprint ? 1.0 : 1.6) && d < 0.95;
+        if (this.ballOpen(c, carrier, d) || forced) {
+          this.lungeAt(c, false);
+          this.pokeReady = this.time + 0.8;
+          this.pressTight = 0;
+        }
+      }
+    } else this.pressTight = 0;
 
     // Ball seeking: the active player always hunts the ball (meets loose balls and
     // passes, closes down the carrier). The stick bends the run (up to 70%) while he has
@@ -1380,19 +1403,24 @@ export class Match {
     const reach = L.slide ? 2.8 : 1.5;
     if (d > reach || b.y > 0.7) return;
     const carrier = this.owner;
-    let open = true;
-    if (carrier && carrier.team !== c.team) {
-      // Shielded: the carrier's body is between us and the ball.
-      const cx = carrier.pos.x - c.pos.x;
-      const cz = carrier.pos.z - c.pos.z;
-      const cd = Math.hypot(cx, cz);
-      const behind = cd < d && ((cx * (b.x - c.pos.x) + cz * (b.z - c.pos.z)) / (cd * d + 1e-6)) > 0.85;
-      open = !behind || this.ballDist(carrier) > 0.5;
-    }
+    const open = !carrier || carrier.team === c.team || this.ballOpen(c, carrier, d);
     if (open || d < reach * 0.6) {
       this.lungeAt(c, L.slide);
       this.lunge = null;
     }
+  }
+
+  /**
+   * Whether a challenger at ball distance `d` can get a foot to the carrier's ball: it isn't
+   * tucked away behind the carrier's body (or it's run out from under him).
+   */
+  ballOpen(c: Player, carrier: Player, d: number): boolean {
+    const b = this.ball.pos;
+    const cx = carrier.pos.x - c.pos.x;
+    const cz = carrier.pos.z - c.pos.z;
+    const cd = Math.hypot(cx, cz);
+    const behind = cd < d && (cx * (b.x - c.pos.x) + cz * (b.z - c.pos.z)) / (cd * d + 1e-6) > 0.85;
+    return !behind || this.ballDist(carrier) > 0.5;
   }
 
   /** Strike toward where the ball will be as the foot arrives. */
@@ -2215,10 +2243,10 @@ export class Match {
         this.ai.setRun(receiver, tp.x, tp.z, tp.time + 1.2);
       } else {
         // No runner: weighted into space along the stick.
-        const len = 10 + 12 * plan.power;
+        const len = 12 + 18 * plan.power;
         const tx = clamp(b.pos.x + plan.dirX * len, -PITCH.halfL + 2, PITCH.halfL - 2);
         const tz = clamp(b.pos.z + plan.dirZ * len, -PITCH.halfW + 2, PITCH.halfW - 2);
-        r = lofted ? solveLofted(b.pos, tx, tz, 30, 40, 0) : solveGroundPass(b.pos, tx, tz, 2);
+        r = lofted ? solveLofted(b.pos, tx, tz, 30, 40, 0) : solveGroundPass(b.pos, tx, tz, 2.5 + 1.5 * plan.power);
       }
       vel = r.vel;
       spin = r.spin;
@@ -2230,12 +2258,25 @@ export class Match {
           ? this.all[plan.targetId]
           : plan.aimed === false
             ? this.ai.bestReceiver(p, false)
-            : this.ai.pickReceiver(p, plan.dirX, plan.dirZ, false, plan.aimed ? AIM_CONE : undefined);
-      if (!receiver) {
-        // Nobody there: play it into space.
-        const tx = clamp(b.pos.x + plan.dirX * 15, -PITCH.halfL, PITCH.halfL);
-        const tz = clamp(b.pos.z + plan.dirZ * 15, -PITCH.halfW, PITCH.halfW);
-        const r = solveGroundPass(b.pos, tx, tz, 4);
+            : this.ai.pickReceiver(p, plan.dirX, plan.dirZ, false, plan.aimed ? AIM_CONE : undefined, plan.aimed ? plan.power : undefined);
+      const lob = plan.type === 'lob';
+      // Nobody to feet where the stick points: into the path of a team-mate who gets there
+      // first along it (the through-ball planner, held to the stick).
+      const space = !receiver && plan.aimed && (plan.type === 'pass' || lob) ? this.ai.planThrough(p, plan.dirX, plan.dirZ, true, plan.power, lob, null) : null;
+      if (space) {
+        receiver = space.receiver;
+        const r = lob ? solveLofted(b.pos, space.landX, space.landZ, clamp(22 + dist2D(b.pos.x, b.pos.z, space.landX, space.landZ) * 0.3, 26, 40), 45, 0) : groundKick(space.dx, space.dz, space.v0);
+        this.ai.setRun(receiver, space.x, space.z, space.time + 1.2);
+        vel = r.vel;
+        spin = r.spin;
+        base = lob ? 0.04 : 0.028;
+        strength = lob ? 0.6 : 0.4;
+      } else if (!receiver) {
+        // Nobody at all: into space along the stick, as hard as it was charged.
+        const len = 12 + 23 * (plan.aimed === undefined ? 0.5 : plan.power);
+        const tx = clamp(b.pos.x + plan.dirX * len, -PITCH.halfL, PITCH.halfL);
+        const tz = clamp(b.pos.z + plan.dirZ * len, -PITCH.halfW, PITCH.halfW);
+        const r = lob ? solveLofted(b.pos, tx, tz, 30, 40, 0) : solveGroundPass(b.pos, tx, tz, 3 + 2 * plan.power);
         vel = r.vel;
         spin = r.spin;
       } else {
@@ -2301,6 +2342,7 @@ export class Match {
     this.shotBy = plan.type === 'shot' ? p : null;
     p.touchCooldown = 0.35;
     p.sinceTouch = 0;
+    p.touchH = 0;
     if (this.setPiece) {
       // The wall jumps as the ball's struck (most of them) and holds its shape for a moment.
       for (const w of this.setPiece.wall?.players ?? []) {
@@ -2406,8 +2448,12 @@ export class Match {
     }
     if (this.offsideTouch(p)) return;
     if (h > PLAYER.controlHeight) {
-      // Head it only when it makes sense; otherwise take it down on the chest.
+      // Head it only when he means to (or must); otherwise he takes it down. A ball dropping
+      // onto him from above chest height he lets come down onto the chest, rather than
+      // meeting it at the first moment it's in reach of his head.
       if (challenged || this.shouldHead(p)) this.header(p, challenged);
+      else if (h > CHEST_TOP && this.ball.vel.y < -0.5 && this.dropsOnto(p)) return;
+      else if (h > CHEST_MAX) this.header(p, false);
       else this.controlTouch(p);
       return;
     }
@@ -2502,6 +2548,7 @@ export class Match {
       p.touchCooldown = 0.25;
     }
     p.sinceTouch = 0;
+    p.touchH = 0;
     this.lastTouch = p;
     this.judgeOffside(p);
     this.events.kicks.push(0.08);
@@ -2577,7 +2624,8 @@ export class Match {
     const b = this.ball;
     const h = b.pos.y;
     const relX = b.vel.x - p.vel.x;
-    const relY = b.vel.y;
+    // Chest and thigh give way under a dropping ball: they soak up half its fall.
+    const relY = b.vel.y * (h > 0.5 ? 0.5 : 1);
     const relZ = b.vel.z - p.vel.z;
     const rel = Math.sqrt(relX * relX + relY * relY + relZ * relZ);
     const q = p.attrs.control;
@@ -2596,6 +2644,9 @@ export class Match {
     }
     p.touchCooldown = 0.18;
     p.sinceTouch = 0;
+    p.touchH = h;
+    // (The leg on the ball's side takes it, if it's a thigh.)
+    p.kickLeg = -Math.sin(p.facing) * (b.pos.x - p.pos.x) + Math.cos(p.facing) * (b.pos.z - p.pos.z) >= 0 ? 1 : -1;
     this.owner = p;
     this.lastTouch = p;
     this.judgeOffside(p);
@@ -2612,7 +2663,6 @@ export class Match {
    */
   private shouldHead(p: Player): boolean {
     const b = this.ball;
-    if (b.pos.y > 1.95) return true; // too high to chest
     if (p.plan) return true;
     const team = this.teams[p.team];
     const distGoal = dist2D(b.pos.x, b.pos.z, PITCH.halfL * team.dir, 0);
@@ -2621,6 +2671,15 @@ export class Match {
     const ownThird = b.pos.x * team.dir < -PITCH.halfL / 3;
     if (ownThird && press < 4) return true;
     return press < 1.8;
+  }
+
+  /** Whether a ball coming down will still be on him by the time it's at chest height. */
+  private dropsOnto(p: Player): boolean {
+    const b = this.ball;
+    const t = (b.pos.y - 1.35) / -b.vel.y;
+    const dx = b.pos.x + b.vel.x * t - (p.pos.x + p.vel.x * t);
+    const dz = b.pos.z + b.vel.z * t - (p.pos.z + p.vel.z * t);
+    return Math.hypot(dx, dz) < 0.75;
   }
 
   private header(p: Player, challenged = false): void {
@@ -2664,6 +2723,7 @@ export class Match {
     p.plan = null;
     p.touchCooldown = 0.4;
     p.sinceTouch = 0;
+    p.touchH = 0;
     this.owner = null;
     this.lastTouch = p;
     this.lastKicker = p;

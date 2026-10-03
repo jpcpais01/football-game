@@ -191,16 +191,16 @@ html, body {
 .btn span { text-align: center; line-height: 1.05; }
 
 /* Big main button: Sprint (attack) / Sprint + Press (defence). The three action buttons
-   sit around its upper-left edge: Through/Switch on top, Shoot/Press on the diagonal,
+   sit around its upper-left edge: Kick/Press on top, Through/Switch on the diagonal,
    Pass/Tackle on the left. */
 .btn-sprint {
   right: calc(24px + var(--safe-r)); bottom: calc(24px + var(--safe-b)); width: 108px; height: 108px; font-size: 17px;
   background: rgba(20, 26, 22, 0.55); border-color: rgba(244, 239, 227, 0.55);
 }
 .btn-sprint.defend { background: rgba(35, 52, 94, 0.6); border-color: rgba(200, 215, 255, 0.55); }
-.btn-b { right: calc(42px + var(--safe-r)); bottom: calc(146px + var(--safe-b)); width: 70px; height: 70px; font-size: 12px; }
+.btn-b { right: calc(124px + var(--safe-r)); bottom: calc(114px + var(--safe-b)); width: 70px; height: 70px; font-size: 12px; }
 .btn-c {
-  right: calc(122px + var(--safe-r)); bottom: calc(112px + var(--safe-b)); width: 74px; height: 74px; font-size: 14px;
+  right: calc(40px + var(--safe-r)); bottom: calc(144px + var(--safe-b)); width: 74px; height: 74px; font-size: 14px;
   background: rgba(200, 57, 59, 0.6); border-color: rgba(255, 220, 210, 0.6);
 }
 .btn-c.defend { background: rgba(20, 26, 22, 0.55); border-color: rgba(244, 239, 227, 0.4); }
@@ -249,8 +249,8 @@ html, body {
   .btn-sprint { width: 94px; height: 94px; font-size: 15px; }
   .btn-a, .btn-b { width: 60px; height: 60px; }
   .btn-c { width: 64px; height: 64px; }
-  .btn-b { right: calc(36px + var(--safe-r)); bottom: calc(126px + var(--safe-b)); }
-  .btn-c { right: calc(106px + var(--safe-r)); bottom: calc(96px + var(--safe-b)); }
+  .btn-b { right: calc(108px + var(--safe-r)); bottom: calc(98px + var(--safe-b)); }
+  .btn-c { right: calc(34px + var(--safe-r)); bottom: calc(124px + var(--safe-b)); }
   .btn-a { right: calc(128px + var(--safe-r)); bottom: calc(22px + var(--safe-b)); }
   .btn-c .power { -webkit-mask: radial-gradient(circle, transparent 38px, #000 39px); mask: radial-gradient(circle, transparent 38px, #000 39px); }
 }

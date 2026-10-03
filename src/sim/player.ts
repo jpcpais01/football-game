@@ -122,6 +122,8 @@ export class Player {
   sprinting = false;
   /** Seconds since this player last touched the ball. */
   sinceTouch = 99;
+  /** Height (m) of the ball when he last cushioned it (0 for a ground touch, a strike or a header). */
+  touchH = 0;
   /** Close control's pull on the ball (m/s it is being steered by, x/z) and when it was
    * last applied (match time): for the renderer, which shows it as a foot dragging the ball. */
   pullX = 0;

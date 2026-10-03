@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { PITCH } from '../sim/constants';
 import type { Match, MatchEvents } from '../sim/match';
 import type { Player } from '../sim/player';
-import { clamp, lerp, smoothstep } from '../sim/vec';
+import { clamp, lerp } from '../sim/vec';
 import type { CameraRig } from '../render/cameraRig';
 
 /** Recorded frames per second (every other sim step), and how many seconds are kept. */
@@ -10,10 +10,7 @@ const HZ = 60;
 const CAP = HZ * 8;
 /** The replay: this long before the ball crosses the line, and this long after it. */
 const BEFORE = 4;
-const AFTER = 1;
-/** The finish, from this long before the goal, in slow motion at this speed. */
-const SLOW_LEAD = 0.9;
-const SLOW = 0.45;
+const AFTER = 1.5;
 /** A ball that moves further than this between frames was placed (a restart): the tape starts after. */
 const JUMP = 2;
 
@@ -25,7 +22,7 @@ const LERPED = [
   'leanSide', 'slideV0', 'slideStop', 'legX', 'legZ',
 ] as const satisfies readonly Keys<number>[];
 /** ...and taken from the nearer frame. */
-const STEPPED = ['kickLeg', 'pullX', 'pullZ', 'pullT'] as const satisfies readonly Keys<number>[];
+const STEPPED = ['kickLeg', 'pullX', 'pullZ', 'pullT', 'touchH', 'stamina'] as const satisfies readonly Keys<number>[];
 const FLAGS = ['kickLofted', 'throwIn'] as const satisfies readonly Keys<boolean>[];
 
 // Frame layout. A body: pos, prevPos, vel, facing, prevFacing, action, kickType, the keeper's
@@ -51,8 +48,9 @@ type Buf = Float32Array | Float64Array;
 /**
  * Goal replays. A small tape records what the renderer draws — the ball, the players and the
  * officials — 60 times a second, keeping the last 8 seconds. At the cut after a goal (camera
- * on the crowd) the match stops and the tape plays the goal back: the build-up on a reverse
- * angle from the far touchline, then the finish from behind the net, slowed down. The
+ * on the crowd) the match stops and the tape plays the goal back: from a reverse angle on the
+ * far touchline until 1.5 s after the ball crosses the line, then the whole move again over
+ * the scorer's shoulder. The
  * renderer draws it exactly as it draws the match. Tap to skip. Purely presentational: the
  * match isn't stepped meanwhile, and every body is handed back exactly as the match left it.
  */
@@ -80,16 +78,17 @@ export class Replay {
   private to = 0;
   private fired = 0;
   private autoPlay = false;
-  private side = 1;
-  private goalZ = 0;
-  private shot = -1;
+  /** Which pass of the tape: 0 the far touchline, 1 behind the scorer. */
+  private pass = 0;
+  private scorer: Player | null = null;
+  private heading = 0;
   private focus = new THREE.Vector3();
   private cam = { pos: new THREE.Vector3(), look: new THREE.Vector3(), fov: 30 };
   private onDone: () => void = () => {};
   /** Interpolation between the two frames on show (the renderer's alpha). */
   alpha = 0;
-  /** Playback speed (1, or slow motion at the finish). */
-  speed = 1;
+  /** Every body jumped (the tape rewound): settle feet and secondary motion afresh. */
+  onRewind: () => void = () => {};
 
   constructor(
     parent: HTMLElement,
@@ -169,24 +168,21 @@ export class Replay {
     this.autoPlay = m.autoPlay;
     m.autoPlay = true;
     this.onDone = onDone;
-    const g = this.slot(this.goal) + this.bodies.length * BODY;
-    this.side = Math.sign(this.tape[g]) || 1;
-    this.goalZ = this.tape[g + 2];
-    this.u = this.from;
-    this.fired = this.from;
-    this.shot = -1;
-    this.alpha = 0;
-    this.show(this.from, this.from + 1, 0);
+    this.scorer = m.scorer;
+    this.play(0);
     this.el.classList.remove('hidden');
     return true;
   }
 
   update(dt: number, rig: CameraRig): void {
     if (!this.active) return;
-    const slowAt = this.goal - SLOW_LEAD * HZ;
-    this.speed = lerp(1, SLOW, smoothstep(slowAt, slowAt + 0.2 * HZ, this.u));
-    this.u += dt * HZ * this.speed;
-    if (this.u >= this.to) return this.finish();
+    this.u += dt * HZ;
+    if (this.u >= this.to) {
+      // Once more from behind the scorer, then back to the match.
+      if (this.pass === 1 || !this.scorer) return this.finish();
+      this.play(1);
+      this.onRewind();
+    }
     const f = Math.floor(this.u);
     this.alpha = this.u - f;
     this.show(f, Math.min(f + 1, this.to), this.alpha);
@@ -198,7 +194,24 @@ export class Replay {
         this.onEvents(t[o + E_KICK], t[o + E_NET], t[o + E_NET + 1], t[o + E_NET + 2], t[o + E_NET + 3], t[o + E_POST], t[o + M_TIME]);
       }
     }
-    this.direct(f < slowAt ? 0 : 1, dt, rig);
+    if (this.pass === 0) this.touchline(dt, rig);
+    else this.shoulder(dt, rig);
+  }
+
+  /** From the top of the tape. */
+  private play(pass: number): void {
+    this.pass = pass;
+    this.u = this.from;
+    this.fired = this.from;
+    this.alpha = 0;
+    this.show(this.from, this.from + 1, 0);
+    const b = this.m.ball;
+    this.focus.set(b.pos.x, 0, b.pos.z);
+    const s = this.scorer;
+    if (pass === 1 && s) {
+      this.heading = s.speed > 1.5 ? Math.atan2(s.vel.z, s.vel.x) : s.facing;
+      this.focus.set(lerp(s.pos.x + Math.cos(this.heading) * 7, b.pos.x, 0.3), 0, lerp(s.pos.z + Math.sin(this.heading) * 7, b.pos.z, 0.3));
+    }
   }
 
   /** Skip, or the end of the tape: the match comes back exactly as it was. */
@@ -220,33 +233,43 @@ export class Replay {
 
   // ------------------------------------------------------------------ the camera
 
-  /** Shot 0: the reverse angle, high on the far touchline. Shot 1: low behind the net. */
-  private direct(shot: number, dt: number, rig: CameraRig): void {
-    const b = this.match!.ball;
-    const bx = lerp(b.prevPos.x, b.pos.x, this.alpha);
-    const by = lerp(b.prevPos.y, b.pos.y, this.alpha);
-    const bz = lerp(b.prevPos.z, b.pos.z, this.alpha);
-    if (shot !== this.shot) {
-      this.shot = shot;
-      this.focus.set(bx, by, bz);
-    }
-    const k = 1 - Math.exp(-dt * (shot ? 3 : 2.5));
-    this.focus.x += (bx - this.focus.x) * k;
-    this.focus.y += (by - this.focus.y) * k;
-    this.focus.z += (bz - this.focus.z) * k;
+  /** The first pass: the reverse angle, high on the far touchline, following the ball. */
+  private touchline(dt: number, rig: CameraRig): void {
+    const b = this.m.ball;
+    const k = 1 - Math.exp(-dt * 2.5);
+    this.focus.x += (lerp(b.prevPos.x, b.pos.x, this.alpha) - this.focus.x) * k;
+    this.focus.z += (lerp(b.prevPos.z, b.pos.z, this.alpha) - this.focus.z) * k;
     const c = this.cam;
-    if (shot === 0) {
-      const x = clamp(this.focus.x, -PITCH.halfL + 10, PITCH.halfL - 10);
-      c.pos.set(x, 8, -(PITCH.halfW + 3));
-      c.look.set(x, 0.6, this.focus.z * 0.8);
-      c.fov = 28;
-    } else {
-      const s = this.side;
-      c.pos.set(s * (PITCH.halfL + 4.2), 1.5, clamp(this.goalZ * 0.5, -2.5, 2.5));
-      // Never looking down into the net: the frame stays on the box in front of it.
-      c.look.set(s * Math.min(s * this.focus.x, PITCH.halfL - 5), Math.max(0.5, this.focus.y * 0.7), this.focus.z);
-      c.fov = 36;
-    }
+    const x = clamp(this.focus.x, -PITCH.halfL + 10, PITCH.halfL - 10);
+    c.pos.set(x, 8, -(PITCH.halfW + 3));
+    c.look.set(x, 0.6, this.focus.z * 0.8);
+    c.fov = 28;
+    rig.cut = c;
+  }
+
+  /** The second pass: third person, over the scorer's shoulder, looking where he's going
+   * (and a little toward the ball). The heading follows his run, smoothed, not every twist
+   * of a strike. */
+  private shoulder(dt: number, rig: CameraRig): void {
+    const s = this.scorer!;
+    const b = this.m.ball;
+    const x = lerp(s.prevPos.x, s.pos.x, this.alpha);
+    const z = lerp(s.prevPos.z, s.pos.z, this.alpha);
+    const want = s.speed > 1.5 ? Math.atan2(s.vel.z, s.vel.x) : s.facing;
+    let d = want - this.heading;
+    d -= Math.round(d / (Math.PI * 2)) * Math.PI * 2;
+    this.heading += d * (1 - Math.exp(-dt * 2.2));
+    const cx = Math.cos(this.heading);
+    const cz = Math.sin(this.heading);
+    const h = s.look.height;
+    const k = 1 - Math.exp(-dt * 4);
+    this.focus.x += (lerp(x + cx * 7, b.pos.x, 0.3) - this.focus.x) * k;
+    this.focus.z += (lerp(z + cz * 7, b.pos.z, 0.3) - this.focus.z) * k;
+    const c = this.cam;
+    // Behind him and a little off his right shoulder.
+    c.pos.set(x - cx * 3.6 + cz * 0.7, 1.75 * h, z - cz * 3.6 - cx * 0.7);
+    c.look.set(this.focus.x, 0.9 * h, this.focus.z);
+    c.fov = 42;
     rig.cut = c;
   }
 
