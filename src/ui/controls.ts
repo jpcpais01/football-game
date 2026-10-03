@@ -8,11 +8,14 @@ import { Btn, type InputState, makeInput } from '../sim/input';
 
 const LABELS = {
   attack: ['PASS', 'THROUGH', 'SHOOT', 'SPRINT'],
+  // Lining up your corner / goal kick: what each button does with the ball on the ring.
+  corner: ['WHIP', 'SHORT', 'FLOAT', 'SPRINT'],
+  goalkick: ['DRIVE', 'SHORT', 'FLOAT', 'SPRINT'],
   defend: ['TACKLE', 'SWITCH', 'PRESS', 'SPRINT<br><small>▼ TACKLE · ◀ SLIDE</small>'],
   // After your goal (same order as CELEBRATIONS in the match).
   celebrate: ['KNEE<br>SLIDE', 'AERO<br>PLANE', 'SIUU', 'BACK<br>FLIP'],
 };
-type Mode = keyof typeof LABELS;
+export type Mode = keyof typeof LABELS;
 
 export class Controls {
   readonly input: InputState = makeInput();

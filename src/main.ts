@@ -980,6 +980,8 @@ function frame(now: number): void {
     const mine = match.phase === 'goal' && match.scorer?.team === match.humanTeam && !match.autoPlay;
     if (match.celebrationOpen) controls.setMode('celebrate');
     else if (mine && cel && match.phaseT < cel.at + 1.6) controls.setMode('celebrate', CELEBRATIONS.indexOf(cel.kind));
+    else if (match.aimingCorner) controls.setMode('corner');
+    else if (match.aimingGoalKick) controls.setMode('goalkick');
     else controls.setMode(match.humanAttacking() ? 'attack' : 'defend');
     acc += dt;
     let steps = 0;
