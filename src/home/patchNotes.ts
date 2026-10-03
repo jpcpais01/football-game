@@ -1,5 +1,6 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.72', note: 'Running arms like a real player: they swing a beat behind the legs, further forward than back. On the forward swing the elbow closes and the hand comes up across the chest; on the back swing the arm opens and tucks by the hip. Walking arms hang looser.' },
   { v: '0.71.1', note: 'Softer goal nets: a shot now bulges the net out deeper and wider, and it takes longer to settle, with a slower, looser ripple. Gentler finishes move it more than before too.' },
   { v: '0.71', note: 'Turns that flow: players look into a new direction first, hips lead the shoulders round and feet point into the turn. Cutting at speed they sink, fold the inside knee, push the outside leg wide and lean the trunk in; arms swing out to balance.' },
   { v: '0.70', note: 'Aimed goal kicks, like corners: a gold ring and the ball’s flight on the grass. Steer the ring anywhere upfield, then Pass drives it there low and quick, Shoot floats it high, and Through rolls it short to the nearest team-mate. Your nearest player runs to meet it.' },
