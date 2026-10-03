@@ -1,5 +1,6 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.80.5', note: 'Rain is half as loud.' },
   { v: '0.80.4', note: 'Fixed the fans’ flags in the stands shaking faster and faster the longer you played until they flickered. Their ripple now speeds up mid-swing and settles at the turn, at the same gentle pace all match.' },
   { v: '0.80.3', note: 'No more sparkle on the grass late in the match: the dew no longer throws twinkling floodlight glints across the pitch. The soft evening sheen on the turf stays.' },
   { v: '0.80.2', note: 'The buttons say what they do while you line up a corner (Whip, Short, Float) or a goal kick (Drive, Short, Float), and go back to Pass, Through and Shoot once the ball is struck.' },

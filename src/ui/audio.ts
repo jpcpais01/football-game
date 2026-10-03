@@ -111,7 +111,7 @@ export class GameAudio {
     shelf.frequency.value = 4200;
     shelf.gain.value = 5;
     this.rainGain = ctx.createGain();
-    this.rainGain.gain.value = this.raining ? 0.22 : 0;
+    this.rainGain.gain.value = this.raining ? 0.11 : 0;
     rain.connect(hp).connect(shelf).connect(this.rainGain);
     if (this.raining) this.rainGain.connect(this.master);
     rain.start();
@@ -127,7 +127,7 @@ export class GameAudio {
     // A dry ground unplugs the rain chain once it has faded (nothing left to compute).
     if (on) g.connect(this.master);
     else this.rainOff = setTimeout(() => !this.raining && g.disconnect(), 4000);
-    g.gain.setTargetAtTime(on ? 0.22 : 0, this.ctx.currentTime, 0.6);
+    g.gain.setTargetAtTime(on ? 0.11 : 0, this.ctx.currentTime, 0.6);
   }
 
   /** A ground with or without a crowd. Without, the crowd's whole chain is unplugged
