@@ -1,5 +1,6 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.71.1', note: 'Softer goal nets: a shot now bulges the net out deeper and wider, and it takes longer to settle, with a slower, looser ripple. Gentler finishes move it more than before too.' },
   { v: '0.71', note: 'Turns that flow: players look into a new direction first, hips lead the shoulders round and feet point into the turn. Cutting at speed they sink, fold the inside knee, push the outside leg wide and lean the trunk in; arms swing out to balance.' },
   { v: '0.70', note: 'Aimed goal kicks, like corners: a gold ring and the ball’s flight on the grass. Steer the ring anywhere upfield, then Pass drives it there low and quick, Shoot floats it high, and Through rolls it short to the nearest team-mate. Your nearest player runs to meet it.' },
   { v: '0.69.1', note: 'The referee no longer blows for half time or full time in the middle of an attack. Once the added time is up he lets it play out, and blows when the ball leaves the final third, the defenders win it, the keeper catches it or it goes dead.' },

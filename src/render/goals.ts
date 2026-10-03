@@ -106,11 +106,13 @@ function netMaterial(): THREE.ShaderMaterial {
         vUv = uv;
         vec3 p = position;
         float t = uTime - uHit.w;
-        if (t >= 0.0 && t < 2.5) {
+        if (t >= 0.0 && t < 3.5) {
           float d = length(p - uHit.xyz);
-          float env = exp(-d * d * 1.2) * exp(-t * 3.0);
-          float wave = cos(t * 18.0 - d * 5.0);
-          p += normalize(aOut) * env * wave * uStrength * 0.5;
+          float env = exp(-d * d * 0.8) * exp(-t * 2.0);
+          // A slack bulge that swells out and lets go, with a softer ripple on top.
+          float give = 1.0 - exp(-t * 20.0);
+          float wave = cos(t * 13.0 - d * 4.0);
+          p += normalize(aOut) * env * (give * 0.45 + wave * 0.55) * uStrength * 0.75;
         }
         gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
       }
@@ -190,7 +192,7 @@ export function createGoals(): Goals {
       const lx = x > 0 ? x - PITCH.halfL : -(x + PITCH.halfL);
       const lz = x > 0 ? z : -z;
       m.uniforms.uHit.value.set(lx, y, lz, time);
-      m.uniforms.uStrength.value = Math.min(1, strength / 20);
+      m.uniforms.uStrength.value = Math.min(1, strength / 16);
     },
     update(time) {
       for (const n of nets) n.uniforms.uTime.value = time;
