@@ -1,5 +1,6 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.96.23', note: 'The loading screen ends with a blinking "Tap anywhere to start". That tap turns the game fullscreen and landscape before the home screen appears, since an installed app on some phones (Xiaomi) cannot ask for landscape by itself.' },
   { v: '0.96.22', note: 'Back out the landscape install setting: on Xiaomi phones any fixed orientation stops the installed app opening. It opens upright and turns fullscreen and landscape on your first tap. Reinstall from Chrome.' },
   { v: '0.96.21', note: 'The installed app asks to open in landscape again (in a normal app window, not the fullscreen mode that stopped it opening on Xiaomi phones). Reinstall from Chrome to get it.' },
   { v: '0.96.20', note: 'The first tap on the home screen really does go fullscreen and landscape now (on phones only the end of a tap counts as a gesture, so it was being ignored until a match started).' },

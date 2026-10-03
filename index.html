@@ -168,6 +168,14 @@
       #boot h1 { animation-delay: 0.5s; }
       #boot .bar { animation-delay: 0.65s; }
       #boot .tip { animation-delay: 0.8s; }
+      /* Ready: the bar gives way to a blinking call to tap (that tap goes fullscreen landscape). */
+      #boot.ready { cursor: pointer; }
+      #boot.ready .bar { visibility: hidden; }
+      #boot.ready .tip {
+        top: calc(var(--p) * 52); color: var(--gold); font-size: calc(var(--p) * 3.4); opacity: 1;
+        animation: boot-blink 1.1s steps(1) infinite;
+      }
+      @keyframes boot-blink { 50% { opacity: 0; } }
       /* Scanlines, as on the menus. */
       #boot .crt {
         inset: 0; pointer-events: none;
@@ -241,15 +249,29 @@
         window.__boot = function (p) {
           target = Math.max(target, Math.min(1, p));
         };
+        function lift() {
+          el.classList.add('done');
+          setTimeout(function () { el.remove(); }, 500);
+        }
         window.__bootDone = function () {
+          if (el.classList.contains('ready')) return;
           target = 1;
           shown = 1;
           draw();
           clearInterval(timer);
           clearInterval(tipTimer);
+          // An installed app may not ask for landscape (a Xiaomi will not even launch one
+          // that does), and only a tap may go fullscreen and turn the screen. So when that
+          // is possible, wait for one: "tap anywhere to start".
+          if (!document.documentElement.requestFullscreen || document.fullscreenElement) {
+            setTimeout(lift, 380);
+            return;
+          }
           setTimeout(function () {
-            el.classList.add('done');
-            setTimeout(function () { el.remove(); }, 500);
+            el.classList.add('ready');
+            tip.textContent = 'Tap anywhere to start';
+            // The game's own pointerup listener (main.ts) makes this tap go fullscreen.
+            el.addEventListener('pointerup', lift, { once: true });
           }, 380);
         };
         draw();
