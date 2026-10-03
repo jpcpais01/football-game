@@ -23,12 +23,10 @@ export default defineConfig({
         theme_color: '#14123a',
         background_color: '#14123a',
         id: '/',
-        // Standalone, like PokeGen: a WebAPK installed as fullscreen + landscape would not
-        // launch at all on a Xiaomi 17 (HyperOS). Landscape alone is kept so the home
-        // screen opens sideways; the game goes fullscreen itself (enterFullscreen in main.ts).
-        // If installs stop launching again, drop the orientation too.
+        // Standalone with no orientation, like PokeGen. On a Xiaomi 17 (HyperOS) a WebAPK
+        // with any fixed orientation never launches (tried fullscreen+landscape, then
+        // standalone+landscape). The game goes fullscreen + landscape on the first tap.
         display: 'standalone',
-        orientation: 'landscape',
         start_url: '/',
         scope: '/',
         icons: [
