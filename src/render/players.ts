@@ -1053,16 +1053,31 @@ export class PlayersView {
       // the final ankle angle itself is + = toes down).
       let ankleL = 0;
       let ankleR = 0;
-      const aArm = (0.1 + 0.7 * s) * moveAmt;
-      let armL = -aArm * sinP;
-      let armR = aArm * sinP;
-      let elbowL = 0.25 + 1.05 * s * moveAmt;
-      let elbowR = elbowL;
-      let armOutL = 0.1;
-      let armOutR = 0.1;
-      // Upper-arm rotation about its own length (+ = forearm swings outward).
-      let armRotL = 0;
-      let armRotR = 0;
+      // Arms: they swing a beat behind the legs, further forward than back. Through the
+      // forward swing the elbow closes and the hand comes in toward the middle of the
+      // chest; going back the elbow opens and the arm tucks by the side. Walking, the arms
+      // hang nearly straight; running, the elbows hold near a right angle.
+      const aArm = (0.12 + 0.68 * s) * moveAmt;
+      const swA = Math.sin(phi - 0.18);
+      const fwdL = Math.max(0, -swA);
+      const fwdR = Math.max(0, swA);
+      // (Relative to the trunk, which leans forward at speed: the swing is set forward a
+      // little to make up for it.)
+      const reachF = 1 + 0.45 * s;
+      const reachB = 1 - 0.3 * s;
+      const bias = 0.15 * s * moveAmt;
+      let armL = bias - aArm * swA * (fwdL > 0 ? reachF : reachB);
+      let armR = bias + aArm * swA * (fwdR > 0 ? reachF : reachB);
+      const elbow0 = 0.22 + 1.1 * s * moveAmt;
+      const elbowSw = 0.5 * s * moveAmt;
+      let elbowL = elbow0 + elbowSw * (fwdL - 0.6 * Math.max(0, swA));
+      let elbowR = elbow0 + elbowSw * (fwdR - 0.6 * Math.max(0, -swA));
+      let armOutL = 0.1 + 0.05 * s * moveAmt * (1 - fwdL);
+      let armOutR = 0.1 + 0.05 * s * moveAmt * (1 - fwdR);
+      // Upper-arm rotation about its own length (+ = forearm swings outward): inward on
+      // the forward swing, so the hand crosses toward the chest.
+      let armRotL = -0.3 * s * moveAmt * fwdL;
+      let armRotR = -0.3 * s * moveAmt * fwdR;
       const hip0 = this.hipBase[id];
       // (Less drop with planted feet: the knees then bend to take it instead.)
       let hipY = hip0 - (0.012 + 0.05 * s) * Math.abs(cosP) * moveAmt * (1 - 0.45 * this.ikOn[id]);
