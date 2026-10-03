@@ -216,10 +216,6 @@ export function createPitch(renderer: THREE.WebGLRenderer, marks: THREE.Texture)
           float sun = (1.0 - sh * 0.9) * (1.0 - cloudShadow(vGrassWorld) * 0.42);
           reflectedLight.directDiffuse *= sun;
           reflectedLight.directSpecular *= sun;
-          // Dew glinting under the floodlights.
-          vec2 gc = floor(vGrassWorld.xz * 7.0);
-          float glint = step(0.9975, cHash(gc + floor(uTime * 1.3 + cHash(gc) * 5.0))) * (1.0 - gLine);
-          reflectedLight.directSpecular += uFloodColor * glint * uDew * (2.5 - 1.7 * uRain);
           reflectedLight.indirectDiffuse += diffuseColor.rgb * uShadeTint * sh * 0.45;
           // Floodlight pools: a touch brighter through the middle, falling off to the corners.
           vec2 q = vGrassWorld.xz / vec2(HL, HW);

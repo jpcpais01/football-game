@@ -1,5 +1,6 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.80.3', note: 'No more sparkle on the grass late in the match: the dew no longer throws twinkling floodlight glints across the pitch. The soft evening sheen on the turf stays.' },
   { v: '0.80.2', note: 'The buttons say what they do while you line up a corner (Whip, Short, Float) or a goal kick (Drive, Short, Float), and go back to Pass, Through and Shoot once the ball is struck.' },
   { v: '0.80.1', note: 'Penalties are deafening: from the whistle, through the walk-up and the run-up, until the kick has gone in, been saved or gone wide, the whole crowd is at full cry.' },
   { v: '0.80', note: 'The stick steers your player’s chase for a loose ball much more: up to 70% of the run (was 45%), and about 35% even when the ball is tight to win. Leave the stick alone and he simply goes and meets it.' },
