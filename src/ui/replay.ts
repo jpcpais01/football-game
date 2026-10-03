@@ -25,7 +25,7 @@ const LERPED = [
   'leanSide', 'slideV0', 'slideStop', 'legX', 'legZ',
 ] as const satisfies readonly Keys<number>[];
 /** ...and taken from the nearer frame. */
-const STEPPED = ['kickLeg'] as const satisfies readonly Keys<number>[];
+const STEPPED = ['kickLeg', 'pullX', 'pullZ', 'pullT'] as const satisfies readonly Keys<number>[];
 const FLAGS = ['kickLofted', 'throwIn'] as const satisfies readonly Keys<boolean>[];
 
 // Frame layout. A body: pos, prevPos, vel, facing, prevFacing, action, kickType, the keeper's
@@ -35,9 +35,9 @@ const B_KICK = 12;
 const B_DIVE = 13;
 const B_LIST = 15;
 const BODY = B_LIST + LERPED.length + STEPPED.length + FLAGS.length;
-// The ball (pos, prevPos, spin), then the match (time, owner, holder), then what happened (kick,
+// The ball (pos, prevPos, spin, vel), then the match (time, owner, holder), then what happened (kick,
 // net strength and where, post).
-const BALL = 9;
+const BALL = 12;
 const M_TIME = BALL;
 const M_OWNER = BALL + 1;
 const M_HELD = BALL + 2;
@@ -312,6 +312,9 @@ export class Replay {
     t[o + 6] = b.spin.x;
     t[o + 7] = b.spin.y;
     t[o + 8] = b.spin.z;
+    t[o + 9] = b.vel.x;
+    t[o + 10] = b.vel.y;
+    t[o + 11] = b.vel.z;
     t[o + M_TIME] = m.time;
     t[o + M_OWNER] = m.owner ? m.owner.id : -1;
     t[o + M_HELD] = m.heldBy ? m.heldBy.id : -1;
@@ -334,6 +337,8 @@ export class Replay {
     b.pos.set(t[o], t[o + 1], t[o + 2]);
     b.prevPos.set(t[o + 3], t[o + 4], t[o + 5]);
     b.spin.set(t[o + 6], t[o + 7], t[o + 8]);
+    b.vel.set(t[o + 9], t[o + 10], t[o + 11]);
+    m.time = t[o + M_TIME];
     this.putHolders(t[o + M_OWNER], t[o + M_HELD]);
   }
 
@@ -357,6 +362,9 @@ export class Replay {
     ball.prevPos.set(t[A], t[A + 1], t[A + 2]);
     ball.pos.set(t[B], t[B + 1], t[B + 2]);
     ball.spin.set(t[A + 6], t[A + 7], t[A + 8]);
+    ball.vel.set(lerp(t[A + 9], t[B + 9], u), lerp(t[A + 10], t[B + 10], u), lerp(t[A + 11], t[B + 11], u));
+    // (The renderer times close control's foot against the match clock.)
+    this.m.time = lerp(t[A + M_TIME], t[B + M_TIME], u);
     const N = u < 0.5 ? A : B;
     this.putHolders(t[N + M_OWNER], t[N + M_HELD]);
   }
