@@ -837,6 +837,6 @@ button.tile:hover .chev { transform: translateX(4px); }
 /* While a pack opens it covers everything: don't keep animating the screen underneath. */
 .shell:has(> .opening.in) > .screen.active { visibility: hidden; }
 .name-row { position: relative; display: flex; gap: 10px; width: 100%; max-width: 420px; margin-top: 8px; }
-.name-row .name-field { margin-top: 0; }
+.name-row .name-field { margin-top: 0; min-width: 0; } /* an input's intrinsic width would otherwise shove the code field out */
 .name-row .short-field { flex: 0 0 auto; width: auto; }
-.name-row .short-field input { flex: none; width: 3.4em; text-align: center; letter-spacing: 0.12em; }
+.name-row .short-field input { flex: none; width: 4.4em; padding: 6px; text-align: center; letter-spacing: 0.12em; }
