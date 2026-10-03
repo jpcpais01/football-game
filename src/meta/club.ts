@@ -46,11 +46,22 @@ export interface ClubState {
   crest: Crest;
   /** The drop banner over the home end: its words, and which club colour it's painted in. */
   banner: { text: string; color: 'main' | 'secondary' | 'dark' };
+  /** The look saved in the club studio (name, code, kit, crest, banner), to come back to. */
+  look?: ClubLook;
   /** The captain's card (unset, or not in the XI: the best-rated starter). */
   captain?: string;
   /** The ground last played at (picked before each match): preselected next time. */
   ground?: Ground;
   freePackAt: number; // ms timestamp when the free pack is next available
+}
+
+/** Everything about how the club looks, as saved in the club studio. */
+export interface ClubLook {
+  name: string;
+  short?: string;
+  kit: ClubKit;
+  crest: Crest;
+  banner: ClubState['banner'];
 }
 
 /** Where a match is played: the big stadium, the old second-division ground, or the bare pitch. */
@@ -408,6 +419,32 @@ export class Club {
   setCrest(c: Partial<Crest>): void {
     this.state.crest = { ...this.state.crest, ...c };
     this.save();
+  }
+
+  private currentLook(): ClubLook {
+    const { name, short, kit, crest, banner } = this.state;
+    return structuredClone({ name, short, kit, crest, banner });
+  }
+
+  /** Keep how the club looks now, to come back to after trying other things. */
+  saveLook(): void {
+    this.state.look = this.currentLook();
+    this.save();
+  }
+
+  /** The look now is the saved one (nothing to restore). */
+  lookSaved(): boolean {
+    return !!this.state.look && JSON.stringify(this.state.look) === JSON.stringify(this.currentLook());
+  }
+
+  /** Back to the saved look; false if none was saved. */
+  restoreLook(): boolean {
+    const l = this.state.look;
+    if (!l) return false;
+    Object.assign(this.state, structuredClone(l));
+    if (l.short === undefined) delete this.state.short;
+    this.save();
+    return true;
   }
 
   /** The opponent's kit: their usual one, or the change kit if it would clash with ours. */

@@ -481,7 +481,6 @@ button.tile:hover .chev { transform: translateX(4px); }
 .ground-modal .kick-off { margin-left: auto; }
 .m-close { position: absolute; right: 10px; top: 10px; width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line-2); background: rgba(255, 255, 255, 0.06); font-size: 15px; z-index: 2; }
 .m-box h3 { margin: 0 0 8px; font-size: 26px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
-.m-back { margin: 0 0 6px; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--line-2); background: rgba(255, 255, 255, 0.06); font-size: 13px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-dim); }
 .tifo-list { display: flex; flex-direction: column; gap: 12px; }
 .tifo-row { display: flex; gap: 14px; align-items: center; padding: 10px; border-radius: 14px; border: 1px solid var(--line-2); background: rgba(255, 255, 255, 0.04); }
 .tifo-prev { flex: 0 0 96px; max-height: 116px; border-radius: 6px; overflow: hidden; display: grid; place-items: center; background: rgba(0, 0, 0, 0.35); border: 1px dashed var(--line-2); }
@@ -780,6 +779,12 @@ button.tile:hover .chev { transform: translateX(4px); }
 .stage-main { position: relative; flex: 1; min-height: 0; width: 100%; display: grid; place-items: center; }
 .stage-main svg { height: 100%; max-height: 100%; width: auto; max-width: 92%; filter: drop-shadow(0 14px 22px rgba(0, 0, 0, 0.55)); animation: stage-in 0.35s cubic-bezier(0.2, 1.3, 0.4, 1); }
 @keyframes stage-in { from { transform: scale(0.94); } }
+.stage-main .tifo-big { height: 92%; aspect-ratio: 432 / 512; border-radius: 4px; box-shadow: 0 14px 22px rgba(0, 0, 0, 0.55); object-fit: cover; animation: stage-in 0.35s cubic-bezier(0.2, 1.3, 0.4, 1); }
+.tifo-big.made { display: flex; flex-direction: column; align-items: center; justify-content: space-between; padding: 6% 5%; border: 5px solid #f4efe2; box-sizing: border-box; overflow: hidden; }
+.tifo-big.made b, .tifo-big.made span { width: 100%; background: #14123a; color: #ffd447; text-align: center; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tifo-big.made b { font-size: clamp(14px, 3.2vh, 26px); padding: 4px 0; }
+.tifo-big.made span { font-size: clamp(10px, 2vh, 16px); padding: 3px 0; }
+.stage-main .tifo-big.made svg { height: auto; width: 55%; max-width: 55%; filter: none; animation: none; }
 .stage-side { position: absolute; right: 12px; top: 12px; width: 18%; max-width: 70px; opacity: 0.9; }
 .stage-side svg { width: 100%; height: auto; display: block; filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.5)); }
 .name-field { position: relative; display: flex; align-items: center; gap: 8px; width: 100%; max-width: 360px; margin-top: 8px; }

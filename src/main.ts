@@ -166,10 +166,10 @@ function rebuildStadium(): void {
 
 /** A tifo picture was uploaded or taken down: the fan banner swaps in place, the others are
  * painted into the stands, so the ground is rebuilt. */
-function setTifo(kind: TifoKind, img: HTMLCanvasElement | null): void {
+function setTifo(kind: TifoKind, img: HTMLCanvasElement | null, rebuild = true): void {
   tifoArt[kind] = img;
   if (kind === 'fan') stadium.setFanBanner(img);
-  else rebuildStadium();
+  else if (rebuild) rebuildStadium();
 }
 void Promise.all(TIFOS.map((t) => loadTifo(t.id))).then((imgs) => {
   if (!imgs.some(Boolean)) return;
@@ -270,7 +270,7 @@ playersView.hideBench = !crowded;
 
 const home = new HomeUI(ui, club, audio, {
   onPlay: (seed) => startGame(seed),
-  onTifo: (kind, img) => setTifo(kind, img),
+  onTifo: (kind, img, rebuild) => setTifo(kind, img, rebuild),
   onGround: (g) => {
     if (g === ground) return;
     rebuildStadium();

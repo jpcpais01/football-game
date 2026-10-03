@@ -3,6 +3,7 @@ import { type ClubKit } from '../meta/club';
 import { CREST_BORDERS, CREST_DIVISIONS, CREST_EMBLEMS, CREST_SHAPES, CREST_TEXT_STYLES, type Crest, crestSVG } from '../meta/crest';
 import { esc } from './cardView';
 import type { HomeUI } from './home';
+import { TIFOS, type TifoKind, clearTifo, loadTifo, pickTifo, restoreTifos, saveTifos, storedTifo } from '../ui/tifos';
 
 const hex = (c: number) => '#' + c.toString(16).padStart(6, '0');
 
@@ -55,9 +56,9 @@ export function jerseySVG(k: ClubKit, crest: Crest | null, cls = 'jersey'): stri
   </svg>`;
 }
 
-type Tab = 'kit' | 'crest';
+type Tab = 'kit' | 'crest' | 'tifos';
 
-/** The club studio: name, kit designer and crest maker. */
+/** The club studio: name, kit designer, crest maker and the fans' tifos and banner. */
 export class ClubScreen {
   readonly el = document.createElement('div');
   private tab: Tab = 'kit';
@@ -83,22 +84,25 @@ export class ClubScreen {
         <div class="forms" role="tablist">
           <button class="chip ${this.tab === 'kit' ? 'on' : ''}" data-tab="kit">Kit</button>
           <button class="chip ${this.tab === 'crest' ? 'on' : ''}" data-tab="crest">Crest</button>
+          <button class="chip ${this.tab === 'tifos' ? 'on' : ''}" data-tab="tifos">Tifos</button>
         </div>
         <div class="grow"></div>
+        <button class="tool save-look" title="Keep this look to come back to">${this.club.lookSaved() ? 'Saved ✓' : 'Save look'}</button>
+        ${st.look && !this.club.lookSaved() ? '<button class="tool restore-look">Back to saved</button>' : ''}
         <button class="tool random">Surprise me</button>
         <button class="tool settings" aria-label="Club settings">⚙</button>
       </header>
       <main class="studio">
         <section class="studio-stage">
           <div class="stage-glow" style="--c1:${hex(st.kit.main)};--c2:${hex(st.crest.primary)}"></div>
-          <div class="stage-main">${this.tab === 'kit' ? jerseySVG(st.kit, st.crest, 'jersey big') : crestSVG(st.crest, 'crest big')}</div>
+          <div class="stage-main">${this.tab === 'kit' ? jerseySVG(st.kit, st.crest, 'jersey big') : this.tab === 'crest' ? crestSVG(st.crest, 'crest big') : this.tifoStage()}</div>
           <div class="stage-side">${this.tab === 'kit' ? crestSVG(st.crest, 'crest small') : jerseySVG(st.kit, st.crest, 'jersey small')}</div>
           <div class="name-row">
             <label class="name-field"><span>Club name</span><input class="club-name" maxlength="24" value="${esc(st.name)}"></label>
             <label class="name-field short-field" title="Scoreboard code"><span>Code</span><input class="club-short" maxlength="3" value="${esc(this.club.info().short)}" autocapitalize="characters" spellcheck="false"></label>
           </div>
         </section>
-        <section class="studio-panel">${this.tab === 'kit' ? this.kitPanel() : this.crestPanel()}</section>
+        <section class="studio-panel">${this.tab === 'kit' ? this.kitPanel() : this.tab === 'crest' ? this.crestPanel() : this.tifoPanel()}</section>
       </main>`;
     this.bind();
   }
@@ -119,8 +123,37 @@ export class ClubScreen {
       </div>
       <h4>Colours</h4>
       <div class="slot-row">${slots.map(([key, label, c]) => `<button class="slot ${this.kitSlot === key ? 'on' : ''}" data-kslot="${key}"><i style="background:${hex(c)}"></i>${label}</button>`).join('')}</div>
-      ${this.swatches(slots.find((x) => x[0] === this.kitSlot)![2])}
-      ${this.bannerSection()}`;
+      ${this.swatches(slots.find((x) => x[0] === this.kitSlot)![2])}`;
+  }
+
+  // ---------------------------------------------------------------- tifos
+
+  /** The giant tifo as it hangs: the uploaded picture, or the club design in miniature. */
+  private tifoStage(): string {
+    const url = storedTifo('giant');
+    if (url) return `<img class="tifo-big" src="${url}" alt="Giant tifo">`;
+    const st = this.club.state;
+    return `<div class="tifo-big made" style="background:${hex(st.kit.main)}">
+      <b>${esc(st.name)}</b>${crestSVG(st.crest, 'crest')}<span>${esc(st.banner.text || 'ONE CLUB · ONE NIGHT')}</span></div>`;
+  }
+
+  /** A picture for each tifo (or the club's own design), and the drop banner's words. */
+  private tifoPanel(): string {
+    const row = (t: (typeof TIFOS)[number]) => {
+      const url = storedTifo(t.id);
+      const none = t.id === 'fan' ? 'None' : 'Club design';
+      return `<div class="tifo-row" data-t="${t.id}">
+        <div class="tifo-prev" style="aspect-ratio:${t.w}/${t.h}">${url ? `<img src="${url}" alt="">` : `<span>${none}</span>`}</div>
+        <div class="tifo-info">
+          <b>${t.name}</b><span>${t.about}</span>
+          <div class="tifo-btns">
+            <button class="btn-ghost up">${url ? 'Change' : 'Upload'}</button>
+            ${url ? `<button class="btn-ghost off">${t.id === 'fan' ? 'Remove' : 'Use club design'}</button>` : ''}
+          </div>
+        </div>
+      </div>`;
+    };
+    return `<h4>Tifos</h4><div class="tifo-list">${TIFOS.map(row).join('')}</div>${this.bannerSection()}`;
   }
 
   /** The big drop banner the fans hang over the home end. */
@@ -198,6 +231,27 @@ export class ClubScreen {
     q('.back')!.addEventListener('click', () => this.ui.go('home'));
     all('[data-tab]').forEach((b) => b.addEventListener('click', () => ((this.tab = b.dataset.tab as Tab), this.render())));
     q('.random')!.addEventListener('click', () => this.randomize());
+    q('.save-look')?.addEventListener('click', () => {
+      this.club.saveLook();
+      saveTifos();
+      this.ui.toast('Club look saved');
+      this.render();
+    });
+    q('.restore-look')?.addEventListener('click', () => void this.restoreLook());
+    all('.tifo-row').forEach((r) => {
+      const k = r.dataset.t as TifoKind;
+      r.querySelector('.up')!.addEventListener('click', async () => {
+        const img = await pickTifo(k);
+        if (!img) return;
+        this.ui.hooks.onTifo(k, img);
+        this.render();
+      });
+      r.querySelector('.off')?.addEventListener('click', () => {
+        clearTifo(k);
+        this.ui.hooks.onTifo(k, null);
+        this.render();
+      });
+    });
     q('.settings')!.addEventListener('click', () => this.ui.clubSettings());
     const name = q('.club-name') as HTMLInputElement;
     name.addEventListener('change', () => this.club.rename(name.value));
@@ -272,13 +326,29 @@ export class ClubScreen {
     }
   }
 
+  /** Back to the saved look: name, code, kit, crest, banner and tifo pictures. */
+  private async restoreLook(): Promise<void> {
+    if (!this.club.restoreLook()) return;
+    restoreTifos();
+    const imgs = await Promise.all(TIFOS.map((t) => loadTifo(t.id)));
+    TIFOS.forEach((t, i) => this.ui.hooks.onTifo(t.id, imgs[i], false));
+    this.ui.identityChanged();
+    this.ui.toast('Back to your saved look');
+    this.render();
+  }
+
   private randomize(): void {
     const r = (n: number) => Math.floor(Math.random() * n);
     const pickC = () => PALETTE[r(PALETTE.length)];
     let a = pickC();
     let b = pickC();
     while (b === a) b = pickC();
-    if (this.tab === 'kit') this.setKit({ pattern: r(KIT_PATTERNS.length), main: a, secondary: b, shorts: Math.random() < 0.5 ? a : Math.random() < 0.5 ? b : 0xf3ede0 });
+    if (this.tab === 'tifos') {
+      const colors = ['main', 'secondary', 'dark'] as const;
+      this.club.setBanner({ color: colors[r(3)] });
+      this.ui.identityChanged();
+      this.render();
+    } else if (this.tab === 'kit') this.setKit({ pattern: r(KIT_PATTERNS.length), main: a, secondary: b, shorts: Math.random() < 0.5 ? a : Math.random() < 0.5 ? b : 0xf3ede0 });
     else {
       let acc = pickC();
       while (acc === a || acc === b) acc = pickC();

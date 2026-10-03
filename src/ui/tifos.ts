@@ -96,6 +96,32 @@ export function pickTifo(k: TifoKind): Promise<HTMLCanvasElement | null> {
   });
 }
 
+/** Keep the pictures uploaded now with the club's saved look. */
+export function saveTifos(): void {
+  try {
+    for (const t of TIFOS) {
+      const v = localStorage.getItem(t.key);
+      if (v) localStorage.setItem(`saved.${t.key}`, v);
+      else localStorage.removeItem(`saved.${t.key}`);
+    }
+  } catch {
+    /* storage full or blocked */
+  }
+}
+
+/** Put back the pictures kept with the saved look. */
+export function restoreTifos(): void {
+  try {
+    for (const t of TIFOS) {
+      const v = localStorage.getItem(`saved.${t.key}`);
+      if (v) localStorage.setItem(t.key, v);
+      else localStorage.removeItem(t.key);
+    }
+  } catch {
+    /* storage blocked */
+  }
+}
+
 export function clearTifo(k: TifoKind): void {
   try {
     localStorage.removeItem(spec(k).key);

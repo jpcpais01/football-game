@@ -13,13 +13,14 @@ import { SquadScreen } from './squad';
 import { ClubScreen } from './clubScreen';
 import { crestSVG as clubCrestSVG } from '../meta/crest';
 import { StoreScreen } from './store';
-import { TIFOS, type TifoKind, clearTifo, pickTifo, storedTifo } from '../ui/tifos';
+import type { TifoKind } from '../ui/tifos';
 
 export interface HomeHooks {
   /** Start the demo match with this seed (the opponent shown on the home screen). */
   onPlay(seed: number): void;
-  /** A tifo picture was uploaded (or taken down: null) in Club settings, Tifos. */
-  onTifo(kind: TifoKind, img: HTMLCanvasElement | null): void;
+  /** A tifo picture was uploaded (or taken down: null) in the club studio. `rebuild` false
+   * when the stadium is about to be rebuilt anyway. */
+  onTifo(kind: TifoKind, img: HTMLCanvasElement | null, rebuild?: boolean): void;
   /** Kit or crest changed: re-dress the players and the stadium. */
   onIdentity(): void;
   /** A ground was picked before kick-off: build it behind the menu (a live preview). */
@@ -61,7 +62,7 @@ export class HomeUI {
     parent: HTMLElement,
     readonly club: Club,
     readonly audio: GameAudio,
-    private hooks: HomeHooks,
+    readonly hooks: HomeHooks,
   ) {
     this.root.className = 'shell';
     this.homeEl.className = 'screen screen-home';
@@ -304,47 +305,6 @@ export class HomeUI {
     );
   }
 
-  /** Club settings, Tifos: upload a picture for each of the fans' tifos, or go back to the
-   * club's own design. */
-  tifos(): void {
-    const row = (t: (typeof TIFOS)[number]) => {
-      const url = storedTifo(t.id);
-      const none = t.id === 'fan' ? 'None' : 'Club design';
-      return `<div class="tifo-row" data-t="${t.id}">
-        <div class="tifo-prev" style="aspect-ratio:${t.w}/${t.h}">${url ? `<img src="${url}" alt="">` : `<span>${none}</span>`}</div>
-        <div class="tifo-info">
-          <b>${t.name}</b><span>${t.about}</span>
-          <div class="tifo-btns">
-            <button class="btn-ghost up">${url ? 'Change' : 'Upload'}</button>
-            ${url ? `<button class="btn-ghost off">${t.id === 'fan' ? 'Remove' : 'Use club design'}</button>` : ''}
-          </div>
-        </div>
-      </div>`;
-    };
-    const box = this.openModal(
-      `<button class="m-close" aria-label="Close">✕</button>
-      <button class="m-back">‹ Club</button>
-      <h3>Tifos</h3>
-      <div class="tifo-list">${TIFOS.map(row).join('')}</div>`,
-      'small tifo-modal',
-    );
-    box.querySelector('.m-back')!.addEventListener('click', () => this.clubSettings());
-    box.querySelectorAll<HTMLElement>('.tifo-row').forEach((r) => {
-      const k = r.dataset.t as TifoKind;
-      r.querySelector('.up')!.addEventListener('click', async () => {
-        const img = await pickTifo(k);
-        if (!img) return;
-        this.hooks.onTifo(k, img);
-        this.tifos();
-      });
-      r.querySelector('.off')?.addEventListener('click', () => {
-        clearTifo(k);
-        this.hooks.onTifo(k, null);
-        this.tifos();
-      });
-    });
-  }
-
   clubSettings(): void {
     const box = this.openModal(
       `<button class="m-close" aria-label="Close">✕</button>
@@ -353,7 +313,6 @@ export class HomeUI {
       <div class="m-row">
         <button class="btn-primary save-name">Save</button>
       </div>
-      <button class="btn-ghost tifos-btn wide">Tifos ›</button>
       <div class="m-stats">
         <span>Played <b>${this.club.state.record.played}</b></span>
         <span>Goals <b>${this.club.state.record.gf}–${this.club.state.record.ga}</b></span>
@@ -367,7 +326,6 @@ export class HomeUI {
       this.club.rename(input.value);
       this.closeModal();
     });
-    box.querySelector('.tifos-btn')!.addEventListener('click', () => this.tifos());
     const reset = box.querySelector('.reset') as HTMLButtonElement;
     reset.addEventListener('click', () => {
       if (!reset.classList.contains('armed')) {
