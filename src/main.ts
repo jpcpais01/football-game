@@ -283,7 +283,7 @@ try {
 } catch {
   /* keep default */
 }
-const pixelPass = new PixelPass();
+const pixelPass = new PixelPass(!!renderer.getContext().getExtension('EXT_color_buffer_float'));
 // Pixel fineness (pause menu slider): the art height, from chunky to fine.
 const PIXELS_MIN = 140;
 const PIXELS_MAX = 560;

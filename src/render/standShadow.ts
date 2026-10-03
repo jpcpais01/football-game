@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { FLOOD_POOL_GLSL, SHARED, STAND_EXT, STAND_HMAX, STAND_MAP_GLSL, SUN_DIR } from './look';
 import { PITCH_SIZE_X, PITCH_SIZE_Z } from './pitch';
+import { StripBake } from './stripBake';
 
 /**
  * The ground's shadow on the pitch, baked rather than shadow-mapped every frame.
@@ -19,16 +20,29 @@ const W = 2048;
 const H = 1600;
 /** Sun movement (radians) that earns a new bake: ~0.2°, well under a pixel at the touchline. */
 const REBAKE = 0.0035;
+/** The layer a bake's share of the casters is put on (the bake camera sees only it). */
+const BAKE_LAYER = 31;
 
 export class StandShadow {
-  private rt = new THREE.WebGLRenderTarget(W, H, {
-    // One channel (the height) is all that's read: a quarter of the memory and bandwidth.
-    format: THREE.RedFormat,
-    depthBuffer: false,
-    generateMipmaps: false,
-    minFilter: THREE.LinearFilter,
-    magFilter: THREE.LinearFilter,
-  });
+  // Two maps: the one shown, and the one being baked (a share of the ground a frame).
+  private rts = [0, 1].map(
+    () =>
+      new THREE.WebGLRenderTarget(W, H, {
+        // One channel (the height) is all that's read: a quarter of the memory and bandwidth.
+        format: THREE.RedFormat,
+        depthBuffer: false,
+        generateMipmaps: false,
+        minFilter: THREE.LinearFilter,
+        magFilter: THREE.LinearFilter,
+      }),
+  );
+  private front = 0;
+  /** The bake in progress: what casts, and how far through it is (-1: none). */
+  private casters: THREE.Mesh[] = [];
+  private next = -1;
+  private chunk = 1;
+  /** The last bake was for a new ground (done in one go). */
+  fresh = true;
   private uSun = { value: new THREE.Vector3() };
   private mat = new THREE.ShaderMaterial({
     side: THREE.DoubleSide,
@@ -60,7 +74,11 @@ export class StandShadow {
     `,
   });
   /** Sees the whole world: the vertex shader does its own projection. */
-  private cam = new THREE.OrthographicCamera(-1e4, 1e4, 1e4, -1e4, -1e4, 1e4);
+  private cam = (() => {
+    const c = new THREE.OrthographicCamera(-1e4, 1e4, 1e4, -1e4, -1e4, 1e4);
+    c.layers.set(BAKE_LAYER);
+    return c;
+  })();
   private group: THREE.Object3D | null = null;
   private clear = new THREE.Color();
   private saved: { o: THREE.Object3D; visible: boolean; material?: THREE.Material | THREE.Material[] }[] = [];
@@ -68,57 +86,100 @@ export class StandShadow {
   version = 0;
 
   constructor() {
-    SHARED.uStandMap.value = this.rt.texture;
+    SHARED.uStandMap.value = this.rts[0].texture;
   }
 
   /** Re-bakes if the ground or the sun has changed. `on`: false when there's no sun to cast. */
   /** Whether update() will bake this frame. */
   due(group: THREE.Object3D, on: boolean): boolean {
-    return on && (group !== this.group || this.uSun.value.angleTo(SUN_DIR) >= REBAKE);
+    return this.next >= 0 || (on && (group !== this.group || this.uSun.value.angleTo(SUN_DIR) >= REBAKE));
   }
 
+  /**
+   * Re-bakes if the ground or the sun has changed. `on`: false when there's no sun to cast.
+   * A new ground is baked at once; the sun moving on is baked into the back map a sixth of
+   * the casters a frame (max blending: the order doesn't matter), then swapped in, with the
+   * sun direction it was baked for (all at once in one frame cost a phone ~6 ms of GPU).
+   */
   update(renderer: THREE.WebGLRenderer, group: THREE.Object3D, on: boolean): void {
-    if (!this.due(group, on)) return;
-    this.group = group;
-    this.uSun.value.copy(SUN_DIR);
-    SHARED.uStandSun.value.copy(SUN_DIR);
-    this.bake(renderer, group);
+    if (this.next < 0) {
+      if (!this.due(group, on)) return;
+      this.fresh = group !== this.group;
+      this.group = group;
+      this.uSun.value.copy(SUN_DIR);
+      this.casters.length = 0;
+      this.collect(group, false);
+      this.next = 0;
+      this.chunk = this.fresh ? this.casters.length : Math.ceil(this.casters.length / 6);
+    } else if (group !== this.group) {
+      // The ground changed mid-bake: start again for the new one.
+      this.next = -1;
+      return this.update(renderer, group, on);
+    }
+    const back = this.rts[1 - this.front];
+    this.draw(renderer, back, this.next === 0, this.next, Math.min(this.casters.length, this.next + this.chunk));
+    this.next += this.chunk;
+    if (this.next < this.casters.length) return;
+    this.next = -1;
+    this.front = 1 - this.front;
+    SHARED.uStandMap.value = back.texture;
+    SHARED.uStandSun.value.copy(this.uSun.value);
     this.version++;
   }
 
-  private bake(renderer: THREE.WebGLRenderer, group: THREE.Object3D): void {
-    // What's solid and showing casts (userData.noStandShadow opts out), and so does what's
-    // only hidden from the camera (userData.castsHidden: the near stand while the view is at
-    // ground level): its shadow is there either way.
+  /**
+   * What casts: what's solid and showing (userData.noStandShadow opts out), and what's only
+   * hidden from the camera (userData.castsHidden: the near stand while the view is at
+   * ground level): its shadow is there either way.
+   */
+  private collect(o: THREE.Object3D, parentShown: boolean | null): void {
+    let show = (parentShown !== false || o === this.group) && (o.visible || !!o.userData.castsHidden);
+    if (o.userData.noStandShadow) show = false;
+    if (!show) return;
+    const mesh = o as THREE.Mesh;
+    if (mesh.isMesh) {
+      const m = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+      if (!m.transparent && m.depthWrite) this.casters.push(mesh);
+    }
+    if ((o as THREE.Points).isPoints || (o as THREE.Line).isLine || (o as THREE.Sprite).isSprite) return;
+    for (const c of o.children) this.collect(c, true);
+  }
+
+  /** Casters [from, to) into `rt` (cleared first with `clear`). */
+  private draw(renderer: THREE.WebGLRenderer, rt: THREE.WebGLRenderTarget, clear: boolean, from: number, to: number): void {
+    const group = this.group!;
+    // Only this share of the casters is drawn (on the bake camera's layer, in the bake
+    // material); everything is made visible so the walk reaches them wherever they sit.
     group.traverse((o) => {
-      const mesh = o as THREE.Mesh;
-      let show = o.visible || !!o.userData.castsHidden;
-      if (o.userData.noStandShadow) show = false;
-      if (mesh.isMesh) {
-        const m = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
-        this.saved.push({ o, visible: o.visible, material: mesh.material });
-        o.visible = show && !m.transparent && m.depthWrite;
-        mesh.material = this.mat;
-      } else {
-        this.saved.push({ o, visible: o.visible });
-        o.visible = show && !(o as THREE.Points).isPoints && !(o as THREE.Line).isLine && !(o as THREE.Sprite).isSprite;
-      }
+      this.saved.push({ o, visible: o.visible });
+      o.visible = true;
     });
+    for (let i = from; i < to; i++) {
+      const c = this.casters[i];
+      this.saved.push({ o: c, visible: true, material: c.material });
+      c.material = this.mat;
+      c.layers.enable(BAKE_LAYER);
+    }
     const prevTarget = renderer.getRenderTarget();
     const prevAlpha = renderer.getClearAlpha();
     renderer.getClearColor(this.clear);
-    renderer.setRenderTarget(this.rt);
-    renderer.setClearColor(0x000000, 1);
-    renderer.clear(true, false, false);
+    renderer.setRenderTarget(rt);
+    if (clear) {
+      renderer.setClearColor(0x000000, 1);
+      renderer.clear(true, false, false);
+    }
     const autoClear = renderer.autoClear;
     renderer.autoClear = false;
     renderer.render(group, this.cam);
     renderer.autoClear = autoClear;
     renderer.setRenderTarget(prevTarget);
     renderer.setClearColor(this.clear, prevAlpha);
-    for (const s of this.saved) {
-      s.o.visible = s.visible;
-      if (s.material) (s.o as THREE.Mesh).material = s.material;
+    for (let i = this.saved.length - 1; i >= 0; i--) {
+      const s = this.saved[i];
+      if (s.material) {
+        (s.o as THREE.Mesh).material = s.material;
+        s.o.layers.disable(BAKE_LAYER);
+      } else s.o.visible = s.visible;
     }
     this.saved.length = 0;
   }
@@ -133,20 +194,29 @@ export class StandShadow {
  */
 export class GroundLight {
   // ~11 cm texels: well inside the 0.3-1.5 m penumbra and the 10-15 m pool ramps.
-  private rt = new THREE.WebGLRenderTarget(1120, 784, {
-    type: THREE.HalfFloatType,
-    format: THREE.RGFormat,
-    depthBuffer: false,
-    generateMipmaps: false,
-    minFilter: THREE.LinearFilter,
-    magFilter: THREE.LinearFilter,
-  });
   private scene = new THREE.Scene();
   private cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  // Six bands, one a frame (a whole bake in one frame cost a phone ~6 ms of GPU).
+  private bake = new StripBake(
+    () =>
+      new THREE.WebGLRenderTarget(1120, 784, {
+        type: THREE.HalfFloatType,
+        format: THREE.RGFormat,
+        depthBuffer: false,
+        generateMipmaps: false,
+        minFilter: THREE.LinearFilter,
+        magFilter: THREE.LinearFilter,
+      }),
+    6,
+    this.scene,
+    this.cam,
+  );
+  /** The bake in progress is for new floodlights (or the first): done in one go. */
+  private all = true;
   private key = { version: -1, soft: -1, lamps: null as unknown, n: -1, norm: -1 };
 
   constructor() {
-    SHARED.uGroundLight.value = this.rt.texture;
+    SHARED.uGroundLight.value = this.bake.texture;
     const mat = new THREE.ShaderMaterial({
       depthTest: false,
       depthWrite: false,
@@ -171,21 +241,23 @@ export class GroundLight {
   /** Whether update() will bake this frame (given the stands as they are now). */
   due(stands: StandShadow): boolean {
     const k = this.key;
-    return !(k.version === stands.version && Math.abs(SHARED.uStandSoft.value - k.soft) < 0.02 && k.lamps === SHARED.uLamps.value && k.n === SHARED.uLampN.value && k.norm === SHARED.uLampNorm.value);
+    return this.bake.busy || !(k.version === stands.version && Math.abs(SHARED.uStandSoft.value - k.soft) < 0.02 && k.lamps === SHARED.uLamps.value && k.n === SHARED.uLampN.value && k.norm === SHARED.uLampNorm.value);
   }
 
   update(renderer: THREE.WebGLRenderer, stands: StandShadow): void {
-    if (!this.due(stands)) return;
-    const k = this.key;
-    const soft = SHARED.uStandSoft.value;
-    k.version = stands.version;
-    k.soft = soft;
-    k.lamps = SHARED.uLamps.value;
-    k.n = SHARED.uLampN.value;
-    k.norm = SHARED.uLampNorm.value;
-    const prev = renderer.getRenderTarget();
-    renderer.setRenderTarget(this.rt);
-    renderer.render(this.scene, this.cam);
-    renderer.setRenderTarget(prev);
+    if (!this.bake.busy) {
+      if (!this.due(stands)) return;
+      const k = this.key;
+      // A new ground or new floodlights: all at once (it shows straight away). The sun
+      // moving on: a band a frame.
+      this.all = k.lamps !== SHARED.uLamps.value || k.n !== SHARED.uLampN.value || k.norm !== SHARED.uLampNorm.value || stands.fresh;
+      k.version = stands.version;
+      k.soft = SHARED.uStandSoft.value;
+      k.lamps = SHARED.uLamps.value;
+      k.n = SHARED.uLampN.value;
+      k.norm = SHARED.uLampNorm.value;
+      this.bake.start();
+    }
+    if (this.bake.step(renderer, this.all)) SHARED.uGroundLight.value = this.bake.texture;
   }
 }

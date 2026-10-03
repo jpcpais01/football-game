@@ -42,9 +42,16 @@ export class PixelPass {
   private devW = 4;
   private devH = 4;
 
-  constructor() {
+  /**
+   * `compact`: the world target as packed floats (R11G11B10F, 4 bytes a pixel) instead of
+   * half floats (RGBA16F, 8): the same HDR range for the bloom and tone map, half the memory
+   * traffic in the world pass and in every one of the post pass's dozen reads. Only where
+   * the GPU can render to it (EXT_color_buffer_float).
+   */
+  constructor(compact = false) {
     this.target = new THREE.WebGLRenderTarget(4, 4, {
-      type: THREE.HalfFloatType,
+      type: compact ? THREE.UnsignedInt101111Type : THREE.HalfFloatType,
+      format: compact ? THREE.RGBFormat : THREE.RGBAFormat,
       minFilter: THREE.NearestFilter,
       magFilter: THREE.NearestFilter,
       depthBuffer: true,
