@@ -46,10 +46,18 @@ export interface ClubState {
   crest: Crest;
   /** The drop banner over the home end: its words, and which club colour it's painted in. */
   banner: { text: string; color: 'main' | 'secondary' | 'dark' };
-  /** Home ground: the big stadium, or the old second-division ground. */
-  ground?: 'stadium' | 'old';
+  /** The ground last played at (picked before each match): preselected next time. */
+  ground?: Ground;
   freePackAt: number; // ms timestamp when the free pack is next available
 }
+
+/** Where a match is played: the big stadium, the old second-division ground, or the bare pitch. */
+export type Ground = 'stadium' | 'old' | 'bare';
+export const GROUNDS: { id: Ground; name: string; about: string }[] = [
+  { id: 'stadium', name: 'Big stadium', about: 'Four stands, floodlit roofs, a full house' },
+  { id: 'old', name: 'Old Ground', about: 'Terraces, the Shed, pylons and the town beyond' },
+  { id: 'bare', name: 'Bare pitch', about: 'Just the field: no stands, no crowd' },
+];
 
 type Listener = () => void;
 
@@ -357,7 +365,7 @@ export class Club {
     this.save();
   }
 
-  setGround(g: NonNullable<ClubState['ground']>): void {
+  setGround(g: Ground): void {
     this.state.ground = g;
     this.save();
   }

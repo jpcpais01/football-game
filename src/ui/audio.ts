@@ -9,6 +9,10 @@ export class GameAudio {
   private ctx: AudioContext | null = null;
   private master!: GainNode;
   private crowdGain!: GainNode;
+  /** Everything the crowd makes (bed, chatter, chants, gasps, roars): off at the bare pitch. */
+  private crowdBus!: GainNode;
+  private crowdOn = true;
+  private crowdOff: ReturnType<typeof setTimeout> | undefined;
   private chatterGain!: GainNode;
   private noise!: AudioBuffer;
   private chants: ChantAudio | null = null;
@@ -35,6 +39,10 @@ export class GameAudio {
     this.master.gain.value = this.muted ? 0 : 0.9;
     this.master.connect(comp).connect(ctx.destination);
 
+    this.crowdBus = ctx.createGain();
+    this.crowdBus.gain.value = this.crowdOn ? 1 : 0;
+    if (this.crowdOn) this.crowdBus.connect(this.master);
+
     // Pink-ish noise buffer, shared by everything.
     const len = ctx.sampleRate * 4;
     this.noise = ctx.createBuffer(1, len, ctx.sampleRate);
@@ -57,7 +65,7 @@ export class GameAudio {
     lp.frequency.value = 900;
     this.crowdGain = ctx.createGain();
     this.crowdGain.gain.value = 0.15;
-    bed.connect(lp).connect(this.crowdGain).connect(this.master);
+    bed.connect(lp).connect(this.crowdGain).connect(this.crowdBus);
     bed.start();
 
     const chat = ctx.createBufferSource();
@@ -76,11 +84,11 @@ export class GameAudio {
     lfoGain.gain.value = 0.025;
     lfo.connect(lfoGain).connect(this.chatterGain.gain);
     lfo.start();
-    chat.connect(bp).connect(this.chatterGain).connect(this.master);
+    chat.connect(bp).connect(this.chatterGain).connect(this.crowdBus);
     chat.start();
 
     // The terraces: chants, drums, claps (see ChantAudio).
-    this.chants = new ChantAudio(ctx, this.master, this.noise);
+    this.chants = new ChantAudio(ctx, this.crowdBus, this.noise);
 
     // Rain: a hiss of drops on the roofs and the turf, with a softer low rumble under it.
     const rain = ctx.createBufferSource();
@@ -114,6 +122,18 @@ export class GameAudio {
     g.gain.setTargetAtTime(on ? 0.22 : 0, this.ctx.currentTime, 0.6);
   }
 
+  /** A ground with or without a crowd. Without, the crowd's whole chain is unplugged
+   * once it has faded (nothing left to compute). */
+  setCrowd(on: boolean): void {
+    this.crowdOn = on;
+    if (!this.ctx) return;
+    const g = this.crowdBus;
+    clearTimeout(this.crowdOff);
+    if (on) g.connect(this.master);
+    else this.crowdOff = setTimeout(() => !this.crowdOn && g.disconnect(), 1500);
+    g.gain.setTargetAtTime(on ? 1 : 0, this.ctx.currentTime, 0.2);
+  }
+
   /** Sing what the terraces are singing (call every frame). */
   terraces(dir: Terraces): void {
     if (this.ctx && this.chants && this.ctx.state === 'running') this.chants.update(dir);
@@ -142,7 +162,7 @@ export class GameAudio {
     this.chatterGain.gain.setTargetAtTime(0.04 + e * 0.1, t, 0.4);
   }
 
-  private noiseBurst(t: number, dur: number, type: BiquadFilterType, freq: number, q: number, gain: number, rate = 1): void {
+  private noiseBurst(t: number, dur: number, type: BiquadFilterType, freq: number, q: number, gain: number, rate = 1, out: AudioNode = this.master): void {
     const ctx = this.ctx!;
     const src = ctx.createBufferSource();
     src.buffer = this.noise;
@@ -155,7 +175,7 @@ export class GameAudio {
     g.gain.setValueAtTime(0.0001, t);
     g.gain.exponentialRampToValueAtTime(gain, t + 0.005);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    src.connect(f).connect(g).connect(this.master);
+    src.connect(f).connect(g).connect(out);
     src.start(t, Math.random() * 3);
     src.stop(t + dur + 0.05);
   }
@@ -259,10 +279,11 @@ export class GameAudio {
 
   crowdGasp(): void {
     if (!this.ctx) return;
-    this.noiseBurst(this.ctx.currentTime, 1.4, 'bandpass', 700, 0.6, 0.35, 0.9);
+    this.noiseBurst(this.ctx.currentTime, 1.4, 'bandpass', 700, 0.6, 0.35, 0.9, this.crowdBus);
   }
 
-  goal(): void {
+  /** The roar (the pack reveal borrows it, crowd or no crowd). */
+  goal(out: AudioNode = this.crowdBus): void {
     if (!this.ctx) return;
     const ctx = this.ctx;
     const t = ctx.currentTime;
@@ -277,7 +298,7 @@ export class GameAudio {
     g.gain.setValueAtTime(0.0001, t);
     g.gain.exponentialRampToValueAtTime(0.9, t + 0.35);
     g.gain.setTargetAtTime(0.0001, t + 2.2, 1.1);
-    src.connect(f).connect(g).connect(this.master);
+    src.connect(f).connect(g).connect(out);
     src.start(t);
     src.stop(t + 7);
   }
@@ -372,7 +393,7 @@ export class GameAudio {
     if (tier >= 2) this.noiseBurst(t, 0.9 + tier * 0.3, 'highpass', 6000, 0.5, 0.12 + tier * 0.04, 1.2);
     if (tier >= 3) {
       this.tone(t, 98, 2, 'sine', 0.4, 49);
-      this.goal();
+      this.goal(this.master);
     }
   }
 }

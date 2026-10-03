@@ -465,6 +465,14 @@ button.tile:hover .chev { transform: translateX(4px); }
 @keyframes pop-in { from { transform: scale(0.9); opacity: 0; } }
 .modal.small .m-box { width: min(420px, 100%); }
 .modal.player .m-box { width: min(820px, 100%); }
+/* The ground picker: light backdrop, so the ground being picked shows behind it. */
+.modal.ground-modal { background: rgba(4, 6, 12, 0.3); }
+.modal.ground-modal .m-box { width: min(620px, 100%); }
+.ground-modal .kicker { color: var(--gold); font-size: 12px; letter-spacing: 0.25em; }
+.ground-list { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 6px; }
+.chip.ground-opt { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; text-align: left; white-space: normal; padding: 10px 12px; }
+.ground-opt span { font-size: 11px; font-weight: 600; letter-spacing: 0.02em; opacity: 0.8; line-height: 1.25; font-family: var(--font); }
+.ground-modal .kick-off { margin-left: auto; }
 .m-close { position: absolute; right: 10px; top: 10px; width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line-2); background: rgba(255, 255, 255, 0.06); font-size: 15px; z-index: 2; }
 .m-box h3 { margin: 0 0 8px; font-size: 26px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
 .m-row { display: flex; gap: 8px; align-items: center; margin-top: 12px; }

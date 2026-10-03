@@ -586,6 +586,8 @@ export class PlayersView {
   officials: Officials | null = null;
   /** The substitutes' benches (their sitting, squatting and reactions). */
   bench: Benches | null = null;
+  /** No dugouts at this ground: the substitutes aren't drawn. */
+  hideBench = false;
   private lastTime = 0;
 
   constructor(match: Match, extra: Player[] = []) {
@@ -834,11 +836,13 @@ export class PlayersView {
     this.flagSlot.fill(-1);
     for (const part of this.partList) part.order.length = 0;
     const lines = this.officials?.lines;
+    const benchFrom = this.hideBench && this.bench ? this.bench.all[0].id : Infinity;
     for (let i = 0; i < this.list.length; i++) {
       const p = this.list[i];
       this.sphere.center.set(p.pos.x, 1, p.pos.z);
       this.sphere.radius = 7; // a margin for long evening shadows thrown into view
       if (cam && !this.frustum.intersectsSphere(this.sphere)) continue;
+      if (p.id >= benchFrom) continue;
       this.slot[p.id] = vis.length;
       vis.push(p.id);
       const hair = this.parts[HAIR_OF_STYLE[p.look.hairStyle] ?? 'hairBun'];

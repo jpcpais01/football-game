@@ -1392,7 +1392,7 @@ export function windCloth<T extends THREE.Material>(mat: T, amp: number, pin: Cl
 }
 
 /** Corner flags and the two dugouts on the far touchline (the substitutes are in render/bench). */
-export function pitchside(home: number, away: number): THREE.Group {
+export function pitchside(home: number, away: number, dugouts = true): THREE.Group {
   const g = new THREE.Group();
   const pole = litMaterial({ color: 0xf2f0e8, roughness: 0.5 });
   const flagMat = windCloth(litMaterial({ color: 0xffd447, roughness: 0.8 }), 0.1, 'left', 0.4, 0.3);
@@ -1409,6 +1409,7 @@ export function pitchside(home: number, away: number): THREE.Group {
     }
   }
   g.add(flags);
+  if (!dugouts) return g;
   const shell = litMaterial({ color: 0x2b3038, roughness: 0.6 });
   const roofGlass = new THREE.MeshStandardMaterial({ color: 0x9fb4c8, roughness: 0.2, metalness: 0.1, transparent: true, opacity: 0.35 });
   const bench = litMaterial({ color: 0x46505c, roughness: 0.7 });

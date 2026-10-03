@@ -9,6 +9,7 @@ import { createPitch } from './render/pitch';
 import { TurfMarks } from './render/turfMarks';
 import { createStadium } from './render/stadium';
 import { createOldGround } from './render/oldGround';
+import { createBarePitch } from './render/barePitch';
 import { clearFanBanner, loadFanBanner, pickFanBanner } from './ui/fanBanner';
 import { createGoals } from './render/goals';
 import { PlayersView } from './render/players';
@@ -103,14 +104,24 @@ const rain = new Rain();
 const terraces = new Terraces();
 scene.add(rain.group);
 scene.add(freeze(createPitch(renderer, turfMarks.texture)));
-// The stands wear the club's colours and crest; rebuilt when the kit or crest changes.
+// The stands wear the club's colours and crest; rebuilt when the kit, crest or ground changes.
+/** The ground standing now. The bare pitch has no crowd: no terraces, chants or bench run. */
+let ground = club.state.ground ?? 'stadium';
+let crowded = ground !== 'bare';
 const makeStadium = () => {
-  const st = (club.state.ground === 'old' ? createOldGround : createStadium)(club.info().kit.shirt, club.opponentInfo().kit.shirt, {
-    crest: crestCanvas(club.state.crest, 256),
-    name: club.info().name,
-    motto: club.bannerColors(),
-    founded: club.state.crest.year,
-  });
+  ground = club.state.ground ?? 'stadium';
+  crowded = ground !== 'bare';
+  const home = club.info().kit.shirt;
+  const away = club.opponentInfo().kit.shirt;
+  const st =
+    ground === 'bare'
+      ? createBarePitch(home, away)
+      : (ground === 'old' ? createOldGround : createStadium)(home, away, {
+          crest: crestCanvas(club.state.crest, 256),
+          name: club.info().name,
+          motto: club.bannerColors(),
+          founded: club.state.crest.year,
+        });
   // The crowd (the costliest shader) draws after the rest of the opaque scene, so whatever
   // stands in front of it has already filled the depth buffer and hides those pixels.
   st.group.traverse((o) => {
@@ -232,12 +243,21 @@ const vignette = document.createElement('div');
 vignette.className = 'vignette';
 app.insertBefore(vignette, ui);
 
+audio.setCrowd(crowded);
+playersView.hideBench = !crowded;
+
 const home = new HomeUI(ui, club, audio, {
   onPlay: (seed) => startGame(seed),
   bannerLabel: () => (hasFanBanner ? 'Change your banner' : 'Your banner: add a photo'),
   onBanner: async () => {
     const photo = await pickFanBanner();
     if (photo) setFanBanner(photo);
+  },
+  onGround: (g) => {
+    if (g === ground) return;
+    rebuildStadium();
+    audio.setCrowd(crowded);
+    playersView.hideBench = !crowded;
   },
   onIdentity: () => {
     rebuildStadium();
@@ -724,7 +744,7 @@ let lastPhase = match.phase;
 
 function handleEvents(now: number): void {
   const e = match.takeEvents();
-  terraces.onEvents(e, match);
+  if (crowded) terraces.onEvents(e, match);
   if (playing) {
     for (const k of e.kicks) audio.kick(k);
     if (e.bounce > 1.5) audio.bounce(e.bounce);
@@ -735,7 +755,7 @@ function handleEvents(now: number): void {
     }
     if (e.net > 0) audio.net(e.net);
     if (e.goal >= 0) {
-      particles.confetti(rig.focusX, e.goal as 0 | 1);
+      if (crowded) particles.confetti(rig.focusX, e.goal as 0 | 1);
       audio.goal();
       rig.bump(0.4);
       const scorer = match.scorer;
@@ -868,8 +888,10 @@ function frame(now: number): void {
   // A full-screen menu covers the stadium: keep only the crowd's songs going behind it (the
   // attract match waits where it is).
   if (hidden) {
-    terraces.update(dt, match);
-    audio.terraces(terraces);
+    if (crowded) {
+      terraces.update(dt, match);
+      audio.terraces(terraces);
+    }
     return;
   }
   // 120 fps that keeps missing (frames well over 9 ms for a few seconds on a display that
@@ -908,10 +930,10 @@ function frame(now: number): void {
   handleEvents(now / 1000);
 
   officials.update(match, running ? dt : 0);
-  benches.update(match, running ? dt : 0);
+  if (crowded) benches.update(match, running ? dt : 0);
   rig.cinematic = !playing || match.phase === 'halftime' || match.phase === 'fulltime';
   // A 4-second shot of the scoring side's fans going wild after each goal.
-  rig.crowdShot = CROWD_SHOT || (playing && match.phase === 'goal' && match.phaseT >= GOAL_SEQ.crowd && match.phaseT < GOAL_SEQ.back && match.scorer ? (match.scorer.team === 0 ? -1 : 1) : 0);
+  rig.crowdShot = !crowded ? 0 : CROWD_SHOT || (playing && match.phase === 'goal' && match.phaseT >= GOAL_SEQ.crowd && match.phaseT < GOAL_SEQ.back && match.scorer ? (match.scorer.team === 0 ? -1 : 1) : 0);
   rig.update(match, alpha, dt, now / 1000);
   playersView.update(match, alpha, now / 1000);
   ballView.update(match, alpha, running ? dt : 0);
@@ -933,7 +955,7 @@ function frame(now: number): void {
     else if (DEBUG_CORNER === 'fk-opp') match.startSetPiece('freekick', o, PITCH.halfL * match.teams[o].dir - match.teams[o].dir * 22, 6);
     else match.startSetPiece('corner', t, PITCH.halfL * match.teams[t].dir, (DEBUG_CORNER === 'far' ? -1 : 1) * PITCH.halfW);
   }
-  terraces.update(running ? dt : 0, match);
+  if (crowded) terraces.update(running ? dt : 0, match);
   stadium.update(now / 1000, match.excitement, atmo, tifo, terraces);
   turfMarks.update(match, renderer);
   if (playing) hud.update(match, now / 1000);
@@ -944,10 +966,10 @@ function frame(now: number): void {
   updateCharge(alpha);
 
   particles.setScale(pixelLook() ? pixelPass.pixelHeight : renderer.domElement.height, rig.camera.fov);
-  particles.update(running ? dt : 0, now / 1000, match, rig.focusX, rig.focusZ, terraces);
+  particles.update(running ? dt : 0, now / 1000, match, rig.focusX, rig.focusZ, crowded ? terraces : undefined);
   rain.update(atmo.weather === 'rain', rig.camera, rig.focusX, rig.focusZ, pixelLook() ? pixelPass.pixelHeight : renderer.domElement.height);
   audio.setRain(atmo.weather === 'rain');
-  audio.terraces(terraces);
+  if (crowded) audio.terraces(terraces);
   // A full-screen menu covers the stadium: don't spend the battery drawing it.
   if (home.opaque) {
     /* skip */

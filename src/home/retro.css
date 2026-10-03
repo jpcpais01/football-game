@@ -218,3 +218,8 @@ button.tile:active { transform: translate(3px, 3px); --ps: transparent; }
   .home-grid { gap: 14px; margin: 8px 6px 8px 3px; }
   .club-btn b { font-size: 18px; }
 }
+
+/* ---------------------------------------------------------------- ground picker */
+.shell .ground-opt b { font-size: 22px; font-weight: 400; }
+.shell .ground-opt span { font-family: var(--pixel-sm); font-size: 9px; letter-spacing: 0.04em; line-height: 1.5; }
+.shell .ground-modal .kicker { font-family: var(--pixel-sm); color: var(--cyan); font-size: 10px; }

@@ -4,7 +4,7 @@ import '@fontsource/silkscreen/latin-400.css';
 import './home.css';
 import './retro.css';
 import type { Club } from '../meta/club';
-import { FREE_PACK_HOURS } from '../meta/club';
+import { FREE_PACK_HOURS, GROUNDS, type Ground } from '../meta/club';
 import { type Card, STAT_LABEL, type StatKey, overall, sellValue, traitsOf, RARITY_LABEL, bodyName } from '../meta/cards';
 import type { TeamInfo } from '../sim/teams';
 import type { GameAudio } from '../ui/audio';
@@ -22,6 +22,8 @@ export interface HomeHooks {
   onBanner(): Promise<void>;
   /** Kit or crest changed: re-dress the players and the stadium. */
   onIdentity(): void;
+  /** A ground was picked before kick-off: build it behind the menu (a live preview). */
+  onGround(g: Ground): void;
 }
 
 type ScreenName = 'home' | 'squad' | 'store' | 'club';
@@ -249,7 +251,7 @@ export class HomeUI {
         <button class="update" aria-label="Check for update">Update ⟳</button>
       </footer>`;
     const q = (s: string) => this.homeEl.querySelector(s) as HTMLElement;
-    q('.play-btn').addEventListener('click', () => this.hooks.onPlay(this.nextSeed));
+    q('.play-btn').addEventListener('click', () => this.pickGround());
     q('.squad-tile').addEventListener('click', () => this.go('squad'));
     q('.store-tile').addEventListener('click', () => this.go('store'));
     q('.club-btn').addEventListener('click', () => this.go('club'));
@@ -263,6 +265,32 @@ export class HomeUI {
       } finally {
         location.reload();
       }
+    });
+  }
+
+  /** Before kick-off: where to play. The last ground played at is preselected, and each
+   * pick is built behind the menu so you see it before you start. */
+  pickGround(): void {
+    const pick = (g: Ground) => {
+      this.club.setGround(g);
+      this.hooks.onGround(g);
+      box.querySelectorAll<HTMLElement>('[data-g]').forEach((b) => b.classList.toggle('on', b.dataset.g === g));
+    };
+    const cur = this.club.state.ground ?? 'stadium';
+    const box = this.openModal(
+      `<button class="m-close" aria-label="Close">✕</button>
+      <div class="kicker">Before kick-off</div>
+      <h3>Choose ground</h3>
+      <div class="ground-list">${GROUNDS.map(
+        (g) => `<button class="chip ground-opt ${g.id === cur ? 'on' : ''}" data-g="${g.id}"><b>${g.name}</b><span>${g.about}</span></button>`,
+      ).join('')}</div>
+      <div class="m-row"><button class="btn-primary kick-off">Kick off ▶</button></div>`,
+      'small ground-modal',
+    );
+    box.querySelectorAll<HTMLElement>('[data-g]').forEach((b) => b.addEventListener('click', () => pick(b.dataset.g as Ground)));
+    box.querySelector('.kick-off')!.addEventListener('click', () => {
+      this.closeModal();
+      this.hooks.onPlay(this.nextSeed);
     });
   }
 
