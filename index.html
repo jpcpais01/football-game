@@ -38,6 +38,14 @@
         -webkit-user-select: none; user-select: none;
       }
       #boot.done { opacity: 0; visibility: hidden; }
+      /* Held upright (an installed app may not ask for landscape), draw the screen sideways
+         so it reads as landscape with the phone turned, like the game after the first tap. */
+      @media (orientation: portrait) {
+        #boot {
+          inset: auto; top: 0; left: 100vw; width: 100vh; height: 100vw;
+          transform: rotate(90deg); transform-origin: 0 0;
+        }
+      }
       #boot *, #boot *::before, #boot *::after { position: absolute; box-sizing: border-box; }
 
       /* ---- the ground, switched on around the logo */
