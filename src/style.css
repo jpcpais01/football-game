@@ -316,8 +316,8 @@ html, body {
 
 .fps {
   position: absolute; top: calc(52px + var(--safe-t)); left: calc(14px + var(--safe-l)); font: 600 12px/1 monospace;
-  font-variant-numeric: tabular-nums; color: var(--ink);
-  background: rgba(0, 0, 0, 0.45); padding: 4px 6px; border-radius: 3px; pointer-events: none;
+  font-variant-numeric: tabular-nums; color: var(--ink); white-space: pre; line-height: 1.25;
+  background: rgba(0, 0, 0, 0.55); padding: 4px 6px; border-radius: 3px; pointer-events: none; z-index: 5;
 }
 
 /* ---------------------------------------------------------------- Stamina */
