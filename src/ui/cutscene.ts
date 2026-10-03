@@ -43,6 +43,11 @@ const WIDE: Record<Ground, Shot[]> = {
     // The Shed, packed and bouncing.
     { kind: 'wide', dur: 5, from: [[-30, 2.5, 14], [-80, 9, 0]], to: [[-36, 3, -10], [-80, 10, 2]], fov: 40 },
   ],
+  training: [
+    { kind: 'wide', dur: 3, from: [[-72, 24, 54], [10, 3, -12]], to: [[-50, 20, 60], [18, 4, -18]], fov: 40 },
+    // The training centre, its name over the doors.
+    { kind: 'wide', dur: 4, from: [[16, 2.6, 16], [0, 5, -50]], to: [[-6, 2.8, 12], [0, 5.5, -50]], fov: 40 },
+  ],
   bare: [],
 };
 

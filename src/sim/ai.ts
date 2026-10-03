@@ -724,7 +724,7 @@ export class AI {
     // A keeper without the ball shouldn't stay human-controlled.
     // (Unless he's playing it with his feet: a pass to him from a team-mate, or the ball at his feet.)
     const keeperFeet = m.owner === m.controlled || (m.passTarget === m.controlled && m.lastKicker?.team === m.controlled.team);
-    if (m.controlled.role === 'GK' && m.heldBy !== m.controlled && !keeperFeet && m.phase === 'play' && !(m.setPiece && m.setPiece.taker === m.controlled)) {
+    if (m.controlled.role === 'GK' && !m.keeperHuman && m.heldBy !== m.controlled && !keeperFeet && m.phase === 'play' && !(m.setPiece && m.setPiece.taker === m.controlled)) {
       const ch = this.chaser[m.humanTeam];
       if (ch && ch.role !== 'GK') m.setControlled(ch);
     }
@@ -1171,25 +1171,52 @@ export class AI {
     return out.set(x * dir, 0, z * dir);
   }
 
+  /**
+   * Where a presser goes on the carrier. Goal-side of the ball, `keep` metres off it, and
+   * where it will be a moment from now rather than where it is, so he moves with the
+   * carrier instead of a step behind him. Except when the carrier's touch has put the ball
+   * nearer the presser than him: then it's there to be won and he goes straight onto it
+   * (returns true). Nobody is ever just stood off a loose touch.
+   */
+  pressPoint(p: Player, carrier: Player, out: V3, keep = 1.3): boolean {
+    const b = this.m.ball;
+    const bx = b.pos.x + b.vel.x * 0.25;
+    const bz = b.pos.z + b.vel.z * 0.25;
+    // Both of them a moment on too: a carrier running onto his own touch isn't exposed.
+    const mine = dist2D(p.pos.x + p.vel.x * 0.25, p.pos.z + p.vel.z * 0.25, bx, bz);
+    const his = dist2D(carrier.pos.x + carrier.vel.x * 0.25, carrier.pos.z + carrier.vel.z * 0.25, bx, bz);
+    if (b.pos.y < 0.7 && mine < 2 && mine < his - 0.2) {
+      out.set(bx, 0, bz);
+      return true;
+    }
+    return this.containAt(p, bx, bz, out, keep);
+  }
+
   /** Goal-side point from which to contain the ball carrier. */
   containTarget(p: Player, out: V3, keep = 1.3): V3 {
-    const m = this.m;
-    const b = m.ball.pos;
-    const gx = -m.teams[p.team].dir * PITCH.halfL;
-    const dx = gx - b.x;
-    const dz = -b.z * 0.5;
+    const b = this.m.ball.pos;
+    this.containAt(p, b.x, b.z, out, keep);
+    return out;
+  }
+
+  private containAt(p: Player, bx: number, bz: number, out: V3, keep: number): false {
+    const gx = -this.m.teams[p.team].dir * PITCH.halfL;
+    const dx = gx - bx;
+    const dz = -bz * 0.5;
     const d = Math.max(0.1, Math.hypot(dx, dz));
-    return out.set(b.x + (dx / d) * keep, 0, b.z + (dz / d) * keep);
+    out.set(bx + (dx / d) * keep, 0, bz + (dz / d) * keep);
+    return false;
   }
 
   private press(p: Player, carrier: Player): void {
     const m = this.m;
-    this.containTarget(p, this.tmp);
+    const onBall = this.pressPoint(p, carrier, this.tmp);
     const d = m.ballDist(p);
-    this.moveTo(p, this.tmp.x, this.tmp.z, d > 4, true);
-    // Closing in: square to him, ready to jockey.
-    p.squareUp = d < 6;
-    if (d < 5) {
+    this.moveTo(p, this.tmp.x, this.tmp.z, d > 4 || onBall, true);
+    // Closing in: square to him, ready to jockey; a loose touch is pounced on.
+    p.squareUp = d < 6 && !onBall;
+    p.burst = onBall;
+    if (d < 5 && !onBall) {
       p.wantSpeed = Math.min(p.wantSpeed, carrier.speed + 1.5 + d);
     }
     // Tackle when close and the ball is exposed.
@@ -1220,11 +1247,13 @@ export class AI {
       const held = m.time - this.possStart;
       // Keepers with the ball at their feet: move it on quickly.
       if (p.role === 'GK') {
-        const fwd = team.players[pressure < 6 ? 9 : 2 + Math.floor(m.rng.next() * 2)];
+        const fwd = m.byJob(p.team, pressure < 6 ? 9 : 2 + Math.floor(m.rng.next() * 2));
         const dx = fwd.pos.x - b.x;
         const dz = fwd.pos.z - b.z;
         const d = Math.hypot(dx, dz);
-        p.plan = { type: pressure < 6 ? 'lob' : 'pass', dirX: dx / d, dirZ: dz / d, power: 0, targetId: fwd.id, expires: m.time + 1 };
+        // (Alone in a training drill: just clear it upfield.)
+        if (fwd === p || d < 0.5) p.plan = { type: 'lob', dirX: dir, dirZ: 0, power: 0.7, targetId: -1, expires: m.time + 1 };
+        else p.plan = { type: pressure < 6 ? 'lob' : 'pass', dirX: dx / d, dirZ: dz / d, power: 0, targetId: fwd.id, expires: m.time + 1 };
         return this.dribble(p, true);
       }
       // Take a touch or two before deciding, unless someone is right on us.
@@ -1704,7 +1733,7 @@ export class AI {
       return;
     }
     if (sp.kind === 'kickoff') {
-      target = team.players[7];
+      target = m.byJob(p.team, 7);
     } else if (sp.kind === 'freekick') {
       // Into the box when it's close enough to deliver, otherwise keep the ball.
       if (Math.abs(sp.x - goalX) < 40) {
@@ -1772,6 +1801,19 @@ export class AI {
     }
     // Team-mates give a flip or a leap room before they pile in.
     const room = cel && (cel.kind === 'flip' || cel.kind === 'siu') && m.phaseT < cel.at + 2.2 ? 1.6 : 0;
+    if (p === s && m.steer.on) {
+      // Your stick has him: flat out wherever it points, pulling up short of the lines.
+      let { x, z } = m.steer;
+      if (Math.abs(p.pos.x) > PITCH.halfL - 1.5 && x * p.pos.x > 0) x = 0;
+      if (Math.abs(p.pos.z) > PITCH.halfW - 1.5 && z * p.pos.z > 0) z = 0;
+      const k = Math.hypot(x, z);
+      p.moveX = k ? x / k : 0;
+      p.moveZ = k ? z / k : 0;
+      p.wantSpeed = k ? p.topSpeed : 0;
+      p.sprinting = true;
+      p.lookAt = null;
+      return;
+    }
     if (p === s) {
       if (front) {
         p.moveX = p.moveZ = 0;
@@ -1860,9 +1902,6 @@ export class AI {
     // A keeper sets himself square to the ball and shuffles across.
     k.squareUp = true;
     const team = m.teams[k.team];
-    const own = -team.dir;
-    const gx = own * PITCH.halfL;
-    const b = m.ball.pos;
 
     if (m.heldBy === k) {
       k.wantSpeed = 0;
@@ -1891,8 +1930,8 @@ export class AI {
           const d = Math.hypot(dx, dz);
           k.plan = { type: 'pass', dirX: dx / d, dirZ: dz / d, power: 0, targetId: best.id, expires: m.time + 1.5 };
         } else {
-          const fwd = team.players[9];
-          k.plan = { type: 'lob', dirX: team.dir, dirZ: 0, power: 0, targetId: fwd.id, expires: m.time + 1.5 };
+          const fwd = m.byJob(k.team, 9);
+          k.plan = { type: 'lob', dirX: team.dir, dirZ: 0, power: 0, targetId: fwd === k ? -1 : fwd.id, expires: m.time + 1.5 };
         }
       }
       return;
@@ -1918,47 +1957,18 @@ export class AI {
       }
     }
     // Angle play: stand on the line between ball and goal centre.
-    const dx = b.x - gx;
-    const dz = b.z;
-    const d = Math.max(0.1, Math.hypot(dx, dz));
-    const out = clamp(d * 0.09, 0.6, 5.5);
-    let tx = gx + (dx / d) * out;
-    let tz = (dz / d) * out;
-    tz = clamp(tz, -PITCH.goalHalfWidth - 0.6, PITCH.goalHalfWidth + 0.6);
-    if ((tx - gx) * own > 0) tx = gx - own * 0.6;
-    this.moveTo(k, tx, tz, false, true);
-    k.wantSpeed = Math.min(k.wantSpeed, 5.5);
+    this.keeperStance(k);
   }
 
   /** Detects shots on goal and commits to a save. Returns true if handling a threat. */
   private shotThreat(k: Player): boolean {
     const m = this.m;
-    const team = m.teams[k.team];
-    const own = -team.dir;
-    const b = m.ball;
     if (k.action === 'dive') return true;
     // A back-pass to him is not a shot.
     if (m.passTarget === k) return false;
-    const toward = b.vel.x * own;
-    if (toward < 6 || m.owner || m.heldBy) return false;
-    // Where does the ball cross the keeper's depth?
-    const kx = k.pos.x;
-    let cy = 0;
-    let cz = 0;
-    let ct = -1;
-    for (let i = 1; i < this.sampleCount; i++) {
-      const a = (this.sx[i - 1] - kx) * own;
-      const c = (this.sx[i] - kx) * own;
-      if (a < 0 && c >= 0) {
-        const f = -a / (c - a);
-        cy = this.sy[i - 1] + (this.sy[i] - this.sy[i - 1]) * f;
-        cz = this.sz[i - 1] + (this.sz[i] - this.sz[i - 1]) * f;
-        ct = (i - 1 + f) * SAMPLE_DT - (m.time - (this.nextIntercept - 0.1));
-        break;
-      }
-    }
-    if (ct < 0) return false;
-    if (Math.abs(cz) > PITCH.goalHalfWidth + 1.2 || cy > PITCH.goalHeight + 0.6) return false;
+    const cross = this.shotCrossing(k);
+    if (!cross) return false;
+    const { cy, cz, ct } = cross;
     // Reaction time after the strike.
     const react = 0.16 + (1 - k.attrs.keeping) * 0.12;
     if (m.time - m.lastKickTime < react) {
@@ -1982,6 +1992,63 @@ export class AI {
     }
     if (!k.isBusy() && m.time > this.keeperDiveT[k.team] + 0.8) this.commitDive(k, dz, dh, Math.max(0.2, ct));
     return true;
+  }
+
+  /**
+   * Where a ball coming at goal crosses the keeper's depth: height, point along the line and
+   * seconds until it gets there. Null when nothing is coming (or it's going well wide or over).
+   */
+  shotCrossing(k: Player): { cy: number; cz: number; ct: number } | null {
+    const m = this.m;
+    const own = -m.teams[k.team].dir;
+    if (m.ball.vel.x * own < 6 || m.owner || m.heldBy) return null;
+    const kx = k.pos.x;
+    for (let i = 1; i < this.sampleCount; i++) {
+      const a = (this.sx[i - 1] - kx) * own;
+      const c = (this.sx[i] - kx) * own;
+      if (a < 0 && c >= 0) {
+        const f = -a / (c - a);
+        const cy = this.sy[i - 1] + (this.sy[i] - this.sy[i - 1]) * f;
+        const cz = this.sz[i - 1] + (this.sz[i] - this.sz[i - 1]) * f;
+        const ct = (i - 1 + f) * SAMPLE_DT - (m.time - (this.nextIntercept - 0.1));
+        if (ct < 0 || Math.abs(cz) > PITCH.goalHalfWidth + 1.2 || cy > PITCH.goalHeight + 0.6) return null;
+        return { cy, cz, ct };
+      }
+    }
+    return null;
+  }
+
+  /**
+   * The human in goal presses Dive. With a shot coming he throws himself at it (or, with the
+   * stick pushed the other way, at full stretch to that side); with nothing coming, a stick
+   * push still sends him that way. Timing is his: too early and he's down before it arrives.
+   * `side`: the stick along the goal line in world z (-1, 0, 1).
+   */
+  humanDive(k: Player, side: number): void {
+    if (k.isBusy() || this.m.heldBy) return;
+    const c = this.shotCrossing(k);
+    const at = c && (side === 0 || Math.sign(c.cz - k.pos.z) === side) ? c : null;
+    if (at) return this.commitDive(k, at.cz - k.pos.z, clamp(at.cy, 0.15, 2.4), Math.max(0.15, at.ct));
+    if (side === 0) return;
+    this.commitDive(k, side * 2.8, c ? clamp(c.cy, 0.15, 2.4) : 0.7, c ? Math.max(0.15, c.ct) : 0.35);
+  }
+
+  /** Angle play, no saves: on the line between ball and goal centre, further out the further
+   * away the ball is. (Also the human's keeper when the stick is idle.) */
+  keeperStance(k: Player): void {
+    k.squareUp = true;
+    const team = this.m.teams[k.team];
+    const own = -team.dir;
+    const gx = own * PITCH.halfL;
+    const b = this.m.ball.pos;
+    const dx = b.x - gx;
+    const d = Math.max(0.1, Math.hypot(dx, b.z));
+    const out = clamp(d * 0.09, 0.6, 5.5);
+    let tx = gx + (dx / d) * out;
+    const tz = clamp((b.z / d) * out, -PITCH.goalHalfWidth - 0.6, PITCH.goalHalfWidth + 0.6);
+    if ((tx - gx) * own > 0) tx = gx - own * 0.6;
+    this.moveTo(k, tx, tz, false, true);
+    k.wantSpeed = Math.min(k.wantSpeed, 5.5);
   }
 
   /** Throw the body at a point `dz` along the line, `dh` high, arriving in `tt` seconds. */

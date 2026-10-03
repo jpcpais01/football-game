@@ -4,7 +4,7 @@ import './style.css';
 import * as THREE from 'three';
 import { DT, GOAL_SEQ, MATCH, PITCH } from './sim/constants';
 import { smoothstep } from './sim/vec';
-import { CELEBRATIONS, Match } from './sim/match';
+import { CELEBRATIONS, Match, type MatchEvents } from './sim/match';
 import { rollTimeAt } from './sim/kick';
 import { createPitch } from './render/pitch';
 import { StandShadow } from './render/standShadow';
@@ -12,6 +12,8 @@ import { TurfMarks } from './render/turfMarks';
 import { createStadium } from './render/stadium';
 import { createOldGround } from './render/oldGround';
 import { createBarePitch } from './render/barePitch';
+import { createTrainingGround } from './render/trainingGround';
+import { DRILLS, Drill, type DrillKind } from './sim/training';
 import { TIFOS, type TifoKind, loadTifo } from './ui/tifos';
 import { createGoals } from './render/goals';
 import { PlayersView } from './render/players';
@@ -33,9 +35,9 @@ import { Cutscene } from './ui/cutscene';
 import { CornerAim } from './render/cornerAim';
 import { Btn } from './sim/input';
 import { GameAudio } from './ui/audio';
-import { Club } from './meta/club';
+import { Club, type Ground } from './meta/club';
 import { crestCanvas } from './meta/crest';
-import { HomeUI } from './home/home';
+import { HomeUI, drillBests, saveDrillBest } from './home/home';
 
 const app = document.getElementById('app')!;
 // The boot screen in index.html: report milestones, dismiss it after the first frame.
@@ -114,26 +116,32 @@ const terraces = new Terraces();
 scene.add(rain.group);
 scene.add(freeze(createPitch(renderer, turfMarks.texture)));
 // The stands wear the club's colours and crest; rebuilt when the kit, crest or ground changes.
-/** The ground standing now. The bare pitch has no crowd: no terraces, chants or bench run. */
-let ground = club.state.ground ?? 'stadium';
-let crowded = ground !== 'bare';
+/** The ground standing now. The bare pitch and the training ground have no crowd: no
+ * terraces, chants or bench run. Training is always at the training ground (`groundOverride`). */
+let groundOverride: Ground | null = null;
+let ground: Ground = club.state.ground ?? 'stadium';
+const hasCrowd = (g: Ground) => g !== 'bare' && g !== 'training';
+let crowded = hasCrowd(ground);
 /** The player's own tifo pictures (Club settings, Tifos); null = the club's own design. */
 const tifoArt: Record<TifoKind, HTMLCanvasElement | null> = { giant: null, end: null, fan: null };
 const makeStadium = () => {
-  ground = club.state.ground ?? 'stadium';
-  crowded = ground !== 'bare';
+  ground = groundOverride ?? club.state.ground ?? 'stadium';
+  crowded = hasCrowd(ground);
   const home = club.info().kit.shirt;
   const away = club.opponentInfo().kit.shirt;
+  const clubArt = {
+    crest: crestCanvas(club.state.crest, 256),
+    name: club.info().name,
+    motto: club.bannerColors(),
+    founded: club.state.crest.year,
+    tifos: tifoArt,
+  };
   const st =
     ground === 'bare'
       ? createBarePitch(home, away)
-      : (ground === 'old' ? createOldGround : createStadium)(home, away, {
-          crest: crestCanvas(club.state.crest, 256),
-          name: club.info().name,
-          motto: club.bannerColors(),
-          founded: club.state.crest.year,
-          tifos: tifoArt,
-        });
+      : ground === 'training'
+        ? createTrainingGround(home, away, clubArt)
+        : (ground === 'old' ? createOldGround : createStadium)(home, away, clubArt);
   // The crowd (the costliest shader) draws after the rest of the opaque scene, so whatever
   // stands in front of it has already filled the depth buffer and hides those pixels.
   st.group.traverse((o) => {
@@ -280,6 +288,7 @@ const home = new HomeUI(ui, club, audio, {
     audio.setCrowd(crowded);
     playersView.hideBench = !crowded;
   },
+  onTraining: (kind) => startTraining(kind),
   onIdentity: () => {
     rebuildStadium();
     scene.remove(particles.points);
@@ -393,22 +402,14 @@ function updateCharge(alpha: number): void {
   const hold = inp.holdTime[btn];
   // Shoot: full power at 0.85 s, over-hit beyond (red).
   const shot = btn === 2;
-  // Pass / Through: the bar is the pass weight (full at 0.6 s); blue once slid up (lofted).
+  // Pass / Through: the bar is the pass weight (full at 0.6 s).
   const p = shot ? Math.min(1.15, hold / 0.85) / 1.15 : Math.min(1, hold / 0.6);
   // Dead-ball shot (aiming at the reticle): a gauge whose green peak is the best power —
   // full pace without sending it over (power ~0.92 of 1.15 on the bar's scale).
   const dead = shot && aimScreen !== null;
   charge.classList.toggle('dead', dead);
-  if (dead) {
-    chargeFill.style.transform = '';
-    chargeFill.style.clipPath = `inset(0 ${((1 - p) * 100).toFixed(1)}% 0 0)`;
-  } else {
-    chargeFill.style.clipPath = '';
-    chargeFill.style.transform = `scaleX(${p.toFixed(3)})`;
-  }
+  chargeFill.style.clipPath = `inset(0 ${((1 - p) * 100).toFixed(1)}% 0 0)`;
   charge.classList.toggle('shot', shot);
-  charge.classList.toggle('over', shot && hold > 0.85);
-  charge.classList.toggle('lofted', !shot && inp.swipe[btn]);
   chargeTick.style.display = shot ? '' : 'none';
   chargeTick.style.left = `${((dead ? 0.92 : 1) / 1.15) * 100}%`;
   let x: number;
@@ -453,8 +454,7 @@ function updateStamina(alpha: number): void {
   const st = Math.round(c.stamina * 100);
   if (st !== staminaLast) {
     staminaLast = st;
-    staminaFill.style.transform = `scaleX(${(st / 100).toFixed(2)})`;
-    staminaBar.classList.toggle('tired', st < 25);
+    staminaFill.style.clipPath = `inset(0 ${100 - st}% 0 0)`;
   }
   if (!staminaShown) staminaBar.classList.add('show'), (staminaShown = true);
 }
@@ -500,7 +500,8 @@ function setPlayUi(show: boolean): void {
   controls.setVisible(show);
   hud.setVisible(show);
   minimap.setVisible(show);
-  pauseBtn.style.display = foulBtn.style.display = show ? '' : 'none';
+  pauseBtn.style.display = show ? '' : 'none';
+  foulBtn.style.display = show && !drill ? '' : 'none';
 }
 
 async function enterFullscreen(): Promise<void> {
@@ -559,16 +560,72 @@ function startGame(seed: number): void {
   });
 }
 
+// ---------------------------------------------------------------- training
+/** The training drill running, if any (see sim/training). */
+let drill: Drill | null = null;
+let verdictsSeen = 0;
+
+function beginDrill(kind: DrillKind, seed?: number): void {
+  newMatch(seed);
+  drill = new Drill(match, kind, drillBests()[kind] ?? 0);
+  verdictsSeen = 0;
+  hud.setDrill(DRILLS.find((d) => d.id === kind)!.name);
+}
+
+/** Training: always at the training ground (the ground picked for matches comes back after). */
+function startTraining(kind: DrillKind): void {
+  audio.unlock();
+  void enterFullscreen();
+  void keepAwake();
+  groundOverride = 'training';
+  if (ground !== 'training') rebuildStadium();
+  audio.setCrowd(false);
+  playersView.hideBench = true;
+  playersView.hideOfficials = true;
+  beginDrill(kind);
+  playing = true;
+  paused = false;
+  playHz = 120;
+  slowFor = 0;
+  home.hide();
+  onResize();
+  setPlayUi(true);
+}
+
+function endTraining(): void {
+  if (!drill) return;
+  saveDrillBest(drill.kind, drill.best);
+  drill = null;
+  hud.setDrill(null);
+  playersView.hideOfficials = false;
+  groundOverride = null;
+  if ((club.state.ground ?? 'stadium') !== ground) rebuildStadium();
+  audio.setCrowd(crowded);
+  playersView.hideBench = !crowded;
+  newMatch();
+  backToMenu();
+  home.pickDrill();
+}
+
 pauseBtn.addEventListener('click', () => setPaused(true));
 pauseMenu.querySelector('.resume')!.addEventListener('click', () => setPaused(false));
-pauseMenu.querySelector('.restart')!.addEventListener('click', () => {
-  newMatch(matchSeed);
+const restartBtn = pauseMenu.querySelector('.restart') as HTMLButtonElement;
+restartBtn.addEventListener('click', () => {
+  if (drill) {
+    saveDrillBest(drill.kind, drill.best);
+    beginDrill(drill.kind, matchSeed);
+  } else newMatch(matchSeed);
   setPlayUi(true);
   setPaused(false);
 });
 // Forfeit: back to the menu mid-match, booked as a 0-3 defeat. Two taps, so it's never by accident.
 const quitBtn = pauseMenu.querySelector('.quit') as HTMLButtonElement;
 quitBtn.addEventListener('click', () => {
+  if (drill) {
+    setPaused(false);
+    endTraining();
+    return;
+  }
   if (!quitBtn.classList.contains('armed')) {
     quitBtn.classList.add('armed');
     quitBtn.textContent = 'Tap again: lose 0–3';
@@ -725,7 +782,8 @@ function setPaused(p: boolean): void {
   if (!playing) return;
   paused = p;
   quitBtn.classList.remove('armed');
-  quitBtn.textContent = 'Forfeit match';
+  quitBtn.textContent = drill ? 'End training' : 'Forfeit match';
+  restartBtn.textContent = drill ? 'Restart drill' : 'Restart match';
   pauseMenu.classList.toggle('hidden', !p);
   minimap.setVisible(!p && !cutscene.active);
   controls.enabled = !p;
@@ -811,6 +869,37 @@ function goalMouth(): number {
   return ((Math.exp(4 * k) - 1) / (Math.exp(4) - 1)) * front;
 }
 
+/** A match's big moments and the referee's calls: captions, the score card, the crowd. */
+function matchCalls(e: MatchEvents, now: number): void {
+  if (e.goal >= 0) {
+    if (crowded) particles.confetti(rig.focusX, e.goal as 0 | 1);
+    audio.goal(GOAL_SEQ.back); // full until the players walk back, then fading
+    rig.bump(0.4);
+    const scorer = match.scorer;
+    const team = match.teams[e.goal];
+    const who = scorer ? (scorer.name ? scorer.name.split(' ').slice(-1)[0] : '#' + (scorer.index + 1)) + ' · ' : '';
+    hud.showCaption('GOAL', `${who}${team.info.name}`, 3.2, now);
+    // The new score is revealed as the camera comes back from the crowd.
+    hud.goal(match, e.goal, GOAL_SEQ.back + 0.6);
+  }
+  if (e.save > 0.5) audio.crowdGasp();
+  // Referee's calls.
+  const f = match.lastFoul;
+  if (e.foul === 2) hud.showCaption('ADVANTAGE', 'Play on', 1.8, now, 'small');
+  else if (e.foul === 1 && f) {
+    if (f.penalty) {
+      hud.showCaption('PENALTY', match.teams[f.victim.team].info.name, 3, now);
+      audio.crowdGasp();
+    } else if (f.yellow) hud.showCaption('YELLOW CARD', `${f.offender.name ? f.offender.name.split(' ').slice(-1)[0] : '#' + (f.offender.index + 1)} · ${match.teams[f.offender.team].info.name}`, 2.6, now, 'yellow');
+    else hud.showCaption('FOUL', `Free kick · ${match.teams[f.victim.team].info.name}`, 2, now, 'small');
+  }
+  if (e.offside && match.lastOffside) hud.showCaption('OFFSIDE', `Free kick · ${match.teams[match.lastOffside.team].info.name}`, 2, now, 'small');
+  // Booked while advantage was played: show the card now.
+  if (e.card && e.foul === 2 && f) hud.showCaption('YELLOW CARD', `${f.offender.name ? f.offender.name.split(' ').slice(-1)[0] : '#' + (f.offender.index + 1)} · ${match.teams[f.offender.team].info.name} · advantage`, 2.6, now, 'yellow');
+  const pen = penaltyNoise();
+  audio.setExcitement(pen ? 1 : match.excitement, pen ? 1 : goalMouth());
+}
+
 function handleEvents(now: number): void {
   const e = match.takeEvents();
   if (crowded) terraces.onEvents(e, match);
@@ -823,33 +912,19 @@ function handleEvents(now: number): void {
       rig.bump(0.6);
     }
     if (e.net > 0) audio.net(e.net);
-    if (e.goal >= 0) {
-      if (crowded) particles.confetti(rig.focusX, e.goal as 0 | 1);
-      audio.goal(GOAL_SEQ.back); // full until the players walk back, then fading
-      rig.bump(0.4);
-      const scorer = match.scorer;
-      const team = match.teams[e.goal];
-      const who = scorer ? (scorer.name ? scorer.name.split(' ').slice(-1)[0] : '#' + (scorer.index + 1)) + ' · ' : '';
-      hud.showCaption('GOAL', `${who}${team.info.name}`, 3.2, now);
-      // The new score is revealed as the camera comes back from the crowd.
-      hud.goal(match, e.goal, GOAL_SEQ.back + 0.6);
+    if (drill && drill.verdicts !== verdictsSeen) {
+      // Training: how the attempt ended, instead of the referee's calls and the score card.
+      verdictsSeen = drill.verdicts;
+      const v = drill.verdict!;
+      hud.showCaption(v.title, v.sub, 1.5, now, v.good ? '' : 'small');
+      saveDrillBest(drill.kind, drill.best);
     }
-    if (e.save > 0.5) audio.crowdGasp();
-    // Referee's calls.
-    const f = match.lastFoul;
-    if (e.foul === 2) hud.showCaption('ADVANTAGE', 'Play on', 1.8, now, 'small');
-    else if (e.foul === 1 && f) {
-      if (f.penalty) {
-        hud.showCaption('PENALTY', match.teams[f.victim.team].info.name, 3, now);
-        audio.crowdGasp();
-      } else if (f.yellow) hud.showCaption('YELLOW CARD', `${f.offender.name ? f.offender.name.split(' ').slice(-1)[0] : '#' + (f.offender.index + 1)} · ${match.teams[f.offender.team].info.name}`, 2.6, now, 'yellow');
-      else hud.showCaption('FOUL', `Free kick · ${match.teams[f.victim.team].info.name}`, 2, now, 'small');
-    }
-    if (e.offside && match.lastOffside) hud.showCaption('OFFSIDE', `Free kick · ${match.teams[match.lastOffside.team].info.name}`, 2, now, 'small');
-    // Booked while advantage was played: show the card now.
-    if (e.card && e.foul === 2 && f) hud.showCaption('YELLOW CARD', `${f.offender.name ? f.offender.name.split(' ').slice(-1)[0] : '#' + (f.offender.index + 1)} · ${match.teams[f.offender.team].info.name} · advantage`, 2.6, now, 'yellow');
-    const pen = penaltyNoise();
-    audio.setExcitement(pen ? 1 : match.excitement, pen ? 1 : goalMouth());
+    if (drill) {
+      hud.drill(drill.line, drill.task, drill.streak, drill.best);
+      if (e.goal >= 0) audio.goal(1.5);
+      if (e.save > 0.5) audio.crowdGasp();
+      audio.setExcitement(match.excitement, goalMouth());
+    } else matchCalls(e, now);
   }
   if (e.net > 0) goals.impact(e.netX, e.netY, e.netZ, e.net, simTime);
   // Strikes rip up a little grass.
@@ -981,8 +1056,9 @@ function frame(now: number): void {
     // After your goal the buttons pick the celebration (and show which, while it plays).
     const cel = match.celebration;
     const mine = match.phase === 'goal' && match.scorer?.team === match.humanTeam && !match.autoPlay;
-    if (match.celebrationOpen) controls.setMode('celebrate');
-    else if (mine && cel && match.phaseT < cel.at + 1.6) controls.setMode('celebrate', CELEBRATIONS.indexOf(cel.kind));
+    if (match.celebrationOpen && !drill) controls.setMode('celebrate');
+    else if (mine && cel && match.phaseT < cel.at + 1.6 && !drill) controls.setMode('celebrate', CELEBRATIONS.indexOf(cel.kind));
+    else if (match.keeperHuman && match.controlled.role === 'GK' && match.heldBy !== match.controlled) controls.setMode('keeper');
     else if (match.aimingCorner) controls.setMode('corner');
     else if (match.aimingGoalKick) controls.setMode('goalkick');
     else controls.setMode(match.humanAttacking() ? 'attack' : 'defend');
@@ -994,6 +1070,7 @@ function frame(now: number): void {
     }
     while (!SHOWCASE && acc >= DT && steps < 12) {
       match.step(controls.input);
+      drill?.step();
       acc -= DT;
       steps++;
     }
@@ -1039,8 +1116,11 @@ function frame(now: number): void {
   if (playing) hud.update(match, now / 1000);
   if (playing && !paused) minimap.update(match, now / 1000);
   updateAim();
-  // Corner ring and flight preview (holding Shoot shows the floated ball).
-  cornerAim.update(match, playing && controls.input.held[Btn.C], now / 1000);
+  // Corner / goal kick ring and flight preview (holding Shoot shows the floated ball); the
+  // same for a cross while Pass is held and slid up.
+  const inp = controls.input;
+  const crossing = playing && !paused && inp.held[Btn.A] && inp.swipe[Btn.A];
+  cornerAim.update(match, playing && inp.held[Btn.C], now / 1000, crossing ? inp : null);
   updateCharge(alpha);
   updateStamina(alpha);
 

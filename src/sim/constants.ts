@@ -69,6 +69,7 @@ export const MATCH = {
  * After a goal (seconds into the 'goal' phase): the camera follows the scorer's run, swings
  * round in front of him for his celebration (`front` → `crowd`), then turns to the crowd —
  * while it's away the players are brought most of the way back (`cut`) — and returns to the
- * field (`back`) as they jog into their kick-off spots.
+ * field (`back`) as they jog into their kick-off spots. For the first `steer` seconds of your
+ * own goals the stick steers the scorer's run.
  */
-export const GOAL_SEQ = { front: 2.6, crowd: 6.6, cut: 7.5, back: 8.6, end: 11.6 } as const;
+export const GOAL_SEQ = { steer: 2, front: 2.6, crowd: 6.6, cut: 7.5, back: 8.6, end: 11.6 } as const;
