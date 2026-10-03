@@ -178,6 +178,10 @@ export class Match {
   setPiece: SetPiece | null = null;
   /** Restart waiting while the ball runs on after going out of play. */
   private pendingRestart: { kind: SetPieceKind; team: number; x: number; z: number } | null = null;
+  /** A penalty has been given and not yet taken (whistle, walk-up, run-up). */
+  get penaltyPending(): boolean {
+    return this.pendingRestart?.kind === 'penalty' || this.setPiece?.kind === 'penalty';
+  }
   kickoffTeam = 0;
   scorer: Player | null = null;
   /** The scorer's celebration, once picked (by the buttons, or by the AI for its goals). */

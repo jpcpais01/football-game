@@ -788,6 +788,17 @@ let lastPhase = match.phase;
 
 /** 0..1: the ball in the last 12 m before a goal line, in front of the goal, rising
  * exponentially to the line (the crowd surges with it). */
+/** The crowd at full cry from the penalty whistle until the kick has played out
+ * (2.5 s of flight, or sooner if the ball goes dead or in). */
+let penaltyUntil = -1;
+function penaltyNoise(): boolean {
+  if (match.penaltyPending) {
+    penaltyUntil = match.time + 2.5;
+    return true;
+  }
+  return match.phase === 'play' && match.time < penaltyUntil;
+}
+
 function goalMouth(): number {
   if (match.phase !== 'play') return 0;
   const b = match.ball.pos;
@@ -834,7 +845,8 @@ function handleEvents(now: number): void {
     if (e.offside && match.lastOffside) hud.showCaption('OFFSIDE', `Free kick · ${match.teams[match.lastOffside.team].info.name}`, 2, now, 'small');
     // Booked while advantage was played: show the card now.
     if (e.card && e.foul === 2 && f) hud.showCaption('YELLOW CARD', `${f.offender.name ? f.offender.name.split(' ').slice(-1)[0] : '#' + (f.offender.index + 1)} · ${match.teams[f.offender.team].info.name} · advantage`, 2.6, now, 'yellow');
-    audio.setExcitement(match.excitement, goalMouth());
+    const pen = penaltyNoise();
+    audio.setExcitement(pen ? 1 : match.excitement, pen ? 1 : goalMouth());
   }
   if (e.net > 0) goals.impact(e.netX, e.netY, e.netZ, e.net, simTime);
   // Strikes rip up a little grass.
