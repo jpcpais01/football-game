@@ -207,10 +207,17 @@ export class Profiler {
     // GPU time per pass (from the last probe; the peak over the window for bakes).
     if (this.gpuLast.size) {
       const parts: string[] = [];
-      for (const [k, v] of this.gpuLast) if (k !== 'bake') parts.push(`${k} ${v.toFixed(1)}`);
+      const split: string[] = [];
+      for (const [k, v] of this.gpuLast) {
+        if (k === 'bake') continue;
+        (k.startsWith('·') ? split : parts).push(`${k.replace('·', '')} ${v.toFixed(1)}`);
+      }
       lines.push(`gpu*  ${parts.join(' · ')}`);
+      // The world pass, each part drawn on its own (they overlap a little: the sum runs over).
+      if (split.length) lines.push(`gpu*  world = ${split.join(' · ')}`);
       const bake = this.gpuLast.get('bake');
-      if (bake !== undefined) lines.push(`gpu*  bake ${bake.toFixed(1)} last, ${(this.gpuPeak.get('bake') ?? 0).toFixed(1)} peak (sun shadow/light/clouds)`);
+      const peak = this.gpuPeak.get('bake');
+      if (bake !== undefined) lines.push(`gpu*  bake ${bake.toFixed(1)} last${peak ? `, ${peak.toFixed(1)} peak` : ''} (sun shadow/light/clouds)`);
     }
     // The slowest frame, by section (biggest first).
     this.worst = this.worstNow.slice().sort((a, b) => b[1] - a[1]);

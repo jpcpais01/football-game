@@ -23,7 +23,15 @@ const MAX_PAL = 32;
  * Every screen pixel inside an art pixel would compute the same colour anyway, so doing
  * the work per art pixel gives the identical picture for a fraction of the fill cost.
  * The HUD and controls are DOM, so they stay sharp.
+ *
+ * The grass is the exception to the 2x (setGrass): most of the screen, smooth, and the
+ * most expensive surface to light, it's shaded once per art pixel in a pass of its own,
+ * and the world pass only copies that value into the pitch's four samples (writing its
+ * depth as usual, so everything in front, the outlines and the glow work as before).
  */
+/** The layer the grass pass draws: the pitch and the lights on it. */
+export const GRASS_LAYER = 30;
+
 export class PixelPass {
   readonly target: THREE.WebGLRenderTarget;
   /** The finished low-res picture (graded, outlined, quantised). */
@@ -37,6 +45,9 @@ export class PixelPass {
   height = 288;
   /** Supersampling of the world render (2 = 2x2 samples per art pixel, 1 = off). */
   ss = 2;
+  /** The grass, shaded once per art pixel (setGrass). */
+  private grass: { mesh: THREE.Mesh; material: THREE.Material; rt: THREE.WebGLRenderTarget; copy: THREE.ShaderMaterial } | null = null;
+  private compact: boolean;
   private artW = 4;
   private artH = 4;
   private devW = 4;
@@ -49,6 +60,7 @@ export class PixelPass {
    * the GPU can render to it (EXT_color_buffer_float).
    */
   constructor(compact = false) {
+    this.compact = compact;
     this.target = new THREE.WebGLRenderTarget(4, 4, {
       type: compact ? THREE.UnsignedInt101111Type : THREE.HalfFloatType,
       format: compact ? THREE.RGBFormat : THREE.RGBAFormat,
@@ -334,6 +346,32 @@ export class PixelPass {
     this.scene.add(this.quad);
   }
 
+  /**
+   * Shade `mesh` (the pitch) once per art pixel. `lights` are put on the grass layer with
+   * it. The grass pass reuses the last shadow map (redrawn every other frame anyway).
+   */
+  setGrass(mesh: THREE.Mesh, lights: THREE.Object3D[]): void {
+    mesh.layers.enable(GRASS_LAYER);
+    for (const l of lights) l.layers.enable(GRASS_LAYER);
+    const rt = new THREE.WebGLRenderTarget(this.artW, this.artH, {
+      type: this.compact ? THREE.UnsignedInt101111Type : THREE.HalfFloatType,
+      format: this.compact ? THREE.RGBFormat : THREE.RGBAFormat,
+      minFilter: THREE.NearestFilter,
+      magFilter: THREE.NearestFilter,
+      depthBuffer: false,
+    });
+    rt.texture.generateMipmaps = false;
+    const copy = new THREE.ShaderMaterial({
+      uniforms: { tGrass: { value: rt.texture }, uSS: { value: this.ss } },
+      vertexShader: 'void main() { gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+      fragmentShader: /* glsl */ `
+        uniform sampler2D tGrass;
+        uniform int uSS;
+        void main() { gl_FragColor = vec4(texelFetch(tGrass, ivec2(gl_FragCoord.xy) / uSS, 0).rgb, 1.0); }`,
+    });
+    this.grass = { mesh, material: mesh.material as THREE.Material, rt, copy };
+  }
+
   /** Palette look (null = the smooth-banded pixel look). */
   setPalette(p: Palette | null): void {
     const u = this.mat.uniforms;
@@ -363,6 +401,10 @@ export class PixelPass {
     this.artH = lh;
     this.target.setSize(lw * this.ss, lh * this.ss);
     this.post.setSize(lw, lh);
+    if (this.grass) {
+      this.grass.rt.setSize(lw, lh);
+      this.grass.copy.uniforms.uSS.value = this.ss;
+    }
     (this.mat.uniforms.uRes.value as THREE.Vector2).set(lw, lh);
     this.mat.uniforms.uSS.value = this.ss;
     this.blit.uniforms.uScale.value = scale;
@@ -392,8 +434,25 @@ export class PixelPass {
     this.mat.uniforms.uNear.value = camera.near;
     this.mat.uniforms.uFar.value = camera.far;
     this.mat.uniforms.uNight.value = night;
+    const g = this.grass;
+    const grassOn = !!g && g.mesh.visible && g.mesh.parent !== null;
+    if (grassOn) {
+      // The grass alone, one fragment per art pixel (the camera sees only the grass layer;
+      // the shadow map isn't redrawn here: it would only hold what's on that layer).
+      const shadows = renderer.shadowMap.needsUpdate;
+      renderer.shadowMap.needsUpdate = false;
+      const mask = camera.layers.mask;
+      camera.layers.set(GRASS_LAYER);
+      renderer.setRenderTarget(g.rt);
+      renderer.render(scene, camera);
+      camera.layers.mask = mask;
+      renderer.shadowMap.needsUpdate = shadows;
+      onPass?.('grass');
+      g.mesh.material = g.copy;
+    }
     renderer.setRenderTarget(this.target);
     renderer.render(scene, camera);
+    if (grassOn) g.mesh.material = g.material;
     onPass?.('world');
     this.quad.material = this.mat;
     renderer.setRenderTarget(this.post);
