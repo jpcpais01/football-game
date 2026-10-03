@@ -475,3 +475,13 @@ html, body {
   position: absolute; right: 4%; bottom: calc(9% + 14px); font-weight: 800; font-size: 13px; letter-spacing: 0.16em; text-transform: uppercase;
   color: rgba(255, 255, 255, 0.6); animation: cs-cap 0.6s 0.8s ease-out both;
 }
+/* Goal replay: the same letterbox, a blinking red dot and REPLAY in the top corner. */
+.rp-tag {
+  position: absolute; left: 4%; top: calc(9% + 12px); font-weight: 800; font-size: clamp(16px, 2.6vw, 24px); letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--ink); animation: cs-cap 0.4s ease-out both;
+}
+.rp-tag::before {
+  content: ''; display: inline-block; width: 0.5em; height: 0.5em; margin-right: 0.45em; vertical-align: 0.12em;
+  border-radius: 50%; background: #e8322e; animation: rp-blink 1s steps(2, jump-none) infinite;
+}
+@keyframes rp-blink { 50% { opacity: 0; } }

@@ -32,6 +32,7 @@ import { Controls } from './ui/controls';
 import { Hud } from './ui/hud';
 import { Minimap } from './ui/minimap';
 import { Cutscene } from './ui/cutscene';
+import { Replay } from './ui/replay';
 import { CornerAim } from './render/cornerAim';
 import { Btn } from './sim/input';
 import { GameAudio } from './ui/audio';
@@ -494,6 +495,16 @@ minimap.setVisible(false);
 pauseBtn.style.display = foulBtn.style.display = 'none';
 /** The walk-out before kick-off (tap to skip each shot). */
 const cutscene = new Cutscene(ui);
+/** Goal replays (tap to skip). */
+const replay = new Replay(ui, officials.all);
+replay.onEvents = (kick, net, x, y, z, post, time) => {
+  if (kick > 0) audio.kick(kick);
+  if (post > 0) audio.post(post);
+  if (net > 0) {
+    audio.net(net);
+    goals.impact(x, y, z, net, time);
+  }
+};
 
 /** The in-match controls and readouts (hidden for menus and the cutscene). */
 function setPlayUi(show: boolean): void {
@@ -529,6 +540,7 @@ async function keepAwake(): Promise<void> {
 let matchSeed = 1;
 function newMatch(seed = Date.now() & 0xffff): void {
   cutscene.cancel();
+  replay.reset();
   matchSeed = seed;
   match = new Match(seed, club.matchSetup(seed));
   officials.reset();
@@ -781,7 +793,7 @@ function setPaused(p: boolean): void {
   quitBtn.textContent = drill ? 'End training' : 'Forfeit match';
   restartBtn.textContent = drill ? 'Restart drill' : 'Restart match';
   pauseMenu.classList.toggle('hidden', !p);
-  minimap.setVisible(!p && !cutscene.active);
+  minimap.setVisible(!p && !cutscene.active && !replay.active);
   controls.enabled = !p;
   if (p) audio.suspend();
   else audio.resume();
@@ -892,6 +904,7 @@ function matchCalls(e: MatchEvents, now: number): void {
 
 function handleEvents(now: number): void {
   const e = match.takeEvents();
+  if (playing && !drill) replay.note(e);
   if (crowded) terraces.onEvents(e, match);
   if (playing) {
     for (const k of e.kicks) audio.kick(k);
@@ -933,8 +946,14 @@ function handleEvents(now: number): void {
   }
 }
 
+function endReplay(): void {
+  playersView.snap();
+  setPlayUi(true);
+}
+
 function backToMenu(): void {
   cutscene.cancel();
+  replay.cancel();
   playing = false;
   hud.setVisible(false);
   minimap.setVisible(false);
@@ -1031,6 +1050,9 @@ function frame(now: number): void {
   if (running && cutscene.active) {
     acc = 0;
     cutscene.update(dt, rig);
+  } else if (running && replay.active) {
+    acc = 0;
+    replay.update(dt, rig);
   } else if (running) {
     controls.update(dt);
     // After your goal the buttons pick the celebration (and show which, while it plays).
@@ -1053,25 +1075,40 @@ function frame(now: number): void {
       drill?.step();
       acc -= DT;
       steps++;
+      if (playing && !drill) {
+        replay.record(match);
+        // The cut after a goal: the replay, then back to the crowd and the walk home.
+        if (replay.start(match, GOAL_SEQ.cut, endReplay)) {
+          setPlayUi(false);
+          acc = 0;
+          break;
+        }
+      }
     }
     if (steps === 12) acc = 0;
     simTime = match.time;
     // Attract mode loops forever.
     if (!playing && match.phase === 'fulltime' && match.phaseT > 4) newMatch(), (match.autoPlay = true);
   }
-  const alpha = acc / DT;
+  const alpha = replay.active ? replay.alpha : acc / DT;
   handleEvents(now / 1000);
 
-  if (!cutscene.active) officials.update(match, running ? dt : 0);
+  if (!cutscene.active && !replay.active) officials.update(match, running ? dt : 0);
   if (crowded) benches.update(match, running ? dt : 0);
   rig.cinematic = !playing || match.phase === 'halftime' || match.phase === 'fulltime';
   // A 4-second shot of the scoring side's fans going wild after each goal.
   rig.crowdShot = !crowded ? 0 : CROWD_SHOT || (playing && match.phase === 'goal' && match.phaseT >= GOAL_SEQ.crowd && match.phaseT < GOAL_SEQ.back && match.scorer ? (match.scorer.team === 0 ? -1 : 1) : 0);
-  if (!cutscene.active) rig.cut = null;
+  if (!cutscene.active && !replay.active) rig.cut = null;
   rig.update(match, alpha, dt, now / 1000);
-  playersView.update(match, alpha, now / 1000);
-  ballView.update(match, alpha, running ? dt : 0);
-  goals.update(simTime);
+  if (replay.active) {
+    // The tape is open play: drawn as such, not as the celebration around it.
+    const phase = match.phase;
+    match.phase = 'play';
+    playersView.update(match, alpha, now / 1000);
+    match.phase = phase;
+  } else playersView.update(match, alpha, now / 1000);
+  ballView.update(match, alpha, running ? dt * (replay.active ? replay.speed : 1) : 0);
+  goals.update(replay.active ? replay.time : simTime);
   // Time of day follows the match clock (the attract mode loops through it too).
   const progress = TOD >= 0 ? TOD : Math.min(1, ((match.half - 1) * MATCH.halfSeconds + match.clock) / (2 * MATCH.halfSeconds));
   atmo.set(progress);
@@ -1092,7 +1129,7 @@ function frame(now: number): void {
   if (crowded) terraces.update(running ? dt : 0, match);
   stadium.update(now / 1000, match.excitement, atmo, tifo, terraces, cutscene.active ? cutscene.hang : tifo);
   standShadow.update(renderer, stadium.group, SHARED.uStandOn.value > 0);
-  turfMarks.update(match, renderer);
+  if (!replay.active) turfMarks.update(match, renderer);
   if (playing) hud.update(match, now / 1000);
   if (playing && !paused) minimap.update(match);
   updateAim();
