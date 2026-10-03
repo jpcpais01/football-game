@@ -1,4 +1,5 @@
 import type { Match } from '../sim/match';
+import type { Player } from '../sim/player';
 
 function hex(c: number): string {
   return '#' + c.toString(16).padStart(6, '0');
@@ -23,6 +24,12 @@ export class Hud {
   /** Pending score card; `at` is seconds into the goal phase. */
   private reveal: { at: number; team: number; line: string } | null = null;
   private cardUntil = 0;
+  /** Bottom corner: the active player's name and stamina, boxed in his line's colour. */
+  private pcard: HTMLElement;
+  private pcName: HTMLElement;
+  private pcFill: HTMLElement;
+  private pcFor: Player | null = null;
+  private pcStamina = -1;
 
   constructor(parent: HTMLElement, match: Match) {
     this.root = document.createElement('div');
@@ -36,6 +43,7 @@ export class Hud {
         <div class="clock">0'</div>
         <div class="added"></div>
       </div>
+      <div class="pcard"><div class="pc-name"></div><div class="pc-bar"><i></i></div></div>
       <div class="caption"><div class="c-title"></div><div class="c-sub"></div></div>
       <div class="scorecard">
         <div class="sc-row">
@@ -57,6 +65,30 @@ export class Hud {
     this.captionTitle = this.root.querySelector('.c-title')!;
     this.captionSub = this.root.querySelector('.c-sub')!;
     this.card = this.root.querySelector('.scorecard')!;
+    this.pcard = this.root.querySelector('.pcard')!;
+    this.pcName = this.root.querySelector('.pc-name')!;
+    this.pcFill = this.root.querySelector('.pc-bar i')!;
+  }
+
+  private updatePlayerCard(m: Match): void {
+    const show = !m.autoPlay && m.phase !== 'fulltime';
+    this.pcard.classList.toggle('show', show);
+    if (!show) return;
+    const c = m.controlled;
+    if (c !== this.pcFor) {
+      this.pcFor = c;
+      this.pcStamina = -1;
+      const line = c.role === 'FWD' ? 'att' : c.role === 'MID' ? 'mid' : 'def';
+      this.pcard.className = `pcard show ${line}`;
+      const num = c.number || c.index + 1;
+      this.pcName.textContent = `${num}  ${c.name ? c.name.split(' ').slice(-1)[0] : 'Player'}`;
+    }
+    const st = Math.round(c.stamina * 100);
+    if (st !== this.pcStamina) {
+      this.pcStamina = st;
+      this.pcFill.style.transform = `scaleX(${(st / 100).toFixed(2)})`;
+      this.pcard.classList.toggle('tired', st < 25);
+    }
   }
 
   /**
@@ -143,6 +175,7 @@ export class Hud {
       this.added.classList.toggle('show', board);
       this.last.clock = label;
     }
+    this.updatePlayerCard(m);
     if (this.captionUntil > 0 && now > this.captionUntil) {
       this.caption.classList.remove('show');
       this.captionUntil = 0;

@@ -151,11 +151,15 @@ export class Player {
   get topSpeed(): number {
     // Heavier bodies carry a little less top speed.
     const mass = clamp(1 - (this.attrs.weight - 78) * 0.0015, 0.96, 1.03);
-    return PLAYER.topSpeed * (0.86 + 0.14 * this.attrs.pace) * (0.88 + 0.12 * this.stamina) * mass;
+    return PLAYER.topSpeed * (0.86 + 0.14 * this.attrs.pace) * (0.75 + 0.25 * this.stamina) * mass;
   }
 
-  /** Acceleration (m/s²): the accel stat, scaled by body mass. */
+  /** Acceleration (m/s²): the accel stat, scaled by body mass; tired legs lose their burst. */
   get accelRate(): number {
+    return this.accelBase * (0.7 + 0.3 * this.stamina);
+  }
+
+  private get accelBase(): number {
     // (Math.pow is costly and this is asked thousands of times a second: remembered for
     // the stats it was worked out from.)
     const { accel, weight } = this.attrs;

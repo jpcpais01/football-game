@@ -307,6 +307,36 @@ html, body {
   background: rgba(0, 0, 0, 0.45); padding: 4px 6px; border-radius: 3px; pointer-events: none;
 }
 
+/* ---------------------------------------------------------------- Stamina */
+/* Bottom corner card: the active player's number, name and stamina, in his line's colour. */
+.pcard {
+  position: absolute; left: calc(14px + var(--safe-l)); bottom: calc(12px + var(--safe-b));
+  min-width: 118px; padding: 5px 9px 6px; border-radius: 4px; pointer-events: none;
+  background: #2f9e4f; color: #fff; display: none;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3), inset 0 -2px 0 rgba(0, 0, 0, 0.18);
+}
+.pcard.show { display: block; }
+.pcard.mid { background: #e8bd25; color: #1b1a12; }
+.pcard.att { background: #d6453a; }
+.pc-name {
+  font-weight: 800; font-size: 15px; letter-spacing: 0.06em; text-transform: uppercase;
+  white-space: pre; line-height: 1.1;
+}
+.pc-bar { margin-top: 4px; height: 5px; border-radius: 3px; background: rgba(15, 20, 17, 0.45); overflow: hidden; }
+.pc-bar i, .stamina i {
+  display: block; height: 100%; transform-origin: left center; background: #f4efe3; transition: background 0.2s;
+}
+.pcard.tired .pc-bar i, .stamina.tired i { background: #ff5a4a; }
+.pcard.mid .pc-bar i { background: #1b1a12; }
+.pcard.mid.tired .pc-bar i { background: #b8231a; }
+/* Over the active player's head: very small and thin, just under the charge bar. */
+.stamina {
+  position: absolute; left: -14px; top: -4px; width: 28px; height: 3px; pointer-events: none;
+  background: rgba(15, 20, 17, 0.6); box-shadow: 0 0 0 1px rgba(15, 20, 17, 0.35);
+  overflow: hidden; display: none; will-change: transform;
+}
+.stamina.show { display: block; }
+
 /* ---------------------------------------------------------------- Charge bar */
 .charge {
   position: absolute; left: -24px; top: -14px; width: 48px; height: 7px; pointer-events: none;

@@ -409,6 +409,36 @@ function updateCharge(alpha: number): void {
   if (!chargeShown) charge.classList.add('show'), (chargeShown = true);
 }
 
+// The active player's stamina: a thin bar just above his head (under the charge bar).
+const staminaBar = document.createElement('div');
+staminaBar.className = 'stamina';
+staminaBar.innerHTML = '<i></i>';
+ui.appendChild(staminaBar);
+const staminaFill = staminaBar.firstChild as HTMLElement;
+let staminaShown = false;
+let staminaLast = -1;
+
+function updateStamina(alpha: number): void {
+  const c = match.controlled;
+  const show = playing && match.phase !== 'fulltime' && !match.autoPlay && !match.deadBallView;
+  if (!show) {
+    if (staminaShown) staminaBar.classList.remove('show'), (staminaShown = false);
+    return;
+  }
+  headPos.set(c.prevPos.x + (c.pos.x - c.prevPos.x) * alpha, 2.45 * c.look.height, c.prevPos.z + (c.pos.z - c.prevPos.z) * alpha);
+  headPos.project(rig.camera);
+  const x = (headPos.x * 0.5 + 0.5) * window.innerWidth;
+  const y = (-headPos.y * 0.5 + 0.5) * window.innerHeight;
+  staminaBar.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
+  const st = Math.round(c.stamina * 100);
+  if (st !== staminaLast) {
+    staminaLast = st;
+    staminaFill.style.transform = `scaleX(${(st / 100).toFixed(2)})`;
+    staminaBar.classList.toggle('tired', st < 25);
+  }
+  if (!staminaShown) staminaBar.classList.add('show'), (staminaShown = true);
+}
+
 const fpsEl = document.createElement('div');
 fpsEl.className = 'fps';
 ui.appendChild(fpsEl);
@@ -964,6 +994,7 @@ function frame(now: number): void {
   // Corner ring and flight preview (holding Shoot shows the floated ball).
   cornerAim.update(match, playing && controls.input.held[Btn.C], now / 1000);
   updateCharge(alpha);
+  updateStamina(alpha);
 
   particles.setScale(pixelLook() ? pixelPass.pixelHeight : renderer.domElement.height, rig.camera.fov);
   particles.update(running ? dt : 0, now / 1000, match, rig.focusX, rig.focusZ, crowded ? terraces : undefined);
