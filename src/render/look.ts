@@ -297,6 +297,46 @@ export function litMaterial(o: LitOptions = {}): THREE.MeshStandardMaterial {
   // litMaterial would share the first one compiled (three keys on the callback's source).
   const key = JSON.stringify([o.groundAO, o.diffuseHook, o.fragDecl, o.vertDecl, o.vertBody]);
   mat.customProgramCacheKey = () => key;
+  // A plain one (only colour, roughness, metalness, emissive) can be batched with others.
+  if (!(o.groundAO || o.diffuseHook || o.fragDecl || o.vertDecl || o.vertBody || o.uniforms || o.vertexColors)) mat.userData.plain = mat.onBeforeCompile;
+  return mat;
+}
+
+/** Whether a mesh's material is a plain litMaterial nothing has customised since. */
+export function isPlainLit(m: THREE.Material): m is THREE.MeshStandardMaterial {
+  const s = m as THREE.MeshStandardMaterial;
+  return !!s.userData.plain && s.userData.plain === s.onBeforeCompile && !s.map && !s.transparent && s.opacity === 1 && !s.clippingPlanes && s.alphaTest === 0;
+}
+
+/** Everything about a plain litMaterial that isn't per-vertex in a batch: its batch key. */
+export function plainBatchKey(m: THREE.MeshStandardMaterial): string {
+  return [m.side, m.flatShading, m.depthWrite, m.depthTest, m.polygonOffset, m.polygonOffsetFactor, m.polygonOffsetUnits, m.envMapIntensity, m.fog, m.toneMapped, m.shadowSide].join();
+}
+
+/**
+ * One material for many plain litMaterials merged into one mesh: colour, roughness,
+ * metalness and emissive come per vertex (attributes color, aRM, aEm), so the batch
+ * shades exactly as its parts did, in one draw.
+ */
+export function batchedLitMaterial(like: THREE.MeshStandardMaterial): THREE.MeshStandardMaterial {
+  const mat = litMaterial({
+    vertexColors: true,
+    vertDecl: 'attribute vec2 aRM;\nattribute vec3 aEm;\nvarying vec2 vRM;\nvarying vec3 vEm;',
+    vertBody: 'vRM = aRM; vEm = aEm;',
+    fragDecl: 'varying vec2 vRM;\nvarying vec3 vEm;',
+  });
+  for (const k of ['side', 'flatShading', 'depthWrite', 'depthTest', 'polygonOffset', 'polygonOffsetFactor', 'polygonOffsetUnits', 'envMapIntensity', 'fog', 'toneMapped', 'shadowSide'] as const)
+    (mat as unknown as Record<string, unknown>)[k] = like[k];
+  const base = mat.onBeforeCompile;
+  mat.onBeforeCompile = (shader, r) => {
+    base.call(mat, shader, r);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = vRM.x;')
+      .replace('#include <metalnessmap_fragment>', 'float metalnessFactor = vRM.y;')
+      .replace('#include <emissivemap_fragment>', 'totalEmissiveRadiance = vEm;');
+  };
+  const key = mat.customProgramCacheKey() + 'batch';
+  mat.customProgramCacheKey = () => key;
   return mat;
 }
 

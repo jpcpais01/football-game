@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { PITCH } from '../sim/constants';
 import type { Atmosphere } from './atmosphere';
-import { type FloodLamps, SHARED, STAND_MAP_GLSL, floodLamps, litMaterial, useFloodLamps } from './look';
+import { type FloodLamps, SHARED, STAND_MAP_GLSL, batchedLitMaterial, floodLamps, isPlainLit, litMaterial, plainBatchKey, useFloodLamps } from './look';
 import { DUGOUT } from './bench';
 import type { Terraces } from '../ui/terraces';
 
@@ -250,27 +250,60 @@ export function caps(pts: PathPt[], outlinePts: [number, number][]): THREE.Buffe
 }
 
 /**
- * Bake a group of static meshes into one mesh per material (world transforms applied), so
- * dozens of small props cost a handful of draws. Meshes flagged `userData.live` (cloth,
+ * Bake a group of static meshes into a handful of draws (world transforms applied): plain
+ * litMaterials of every colour share one batch (colour, roughness, metalness and emissive
+ * per vertex), everything else merges per material. Meshes flagged `userData.live` (cloth,
  * anything animated in its own space) are kept as they are.
  */
 export function bakeStatic(src: THREE.Group): THREE.Group {
   src.updateMatrixWorld(true);
-  const byMat = new Map<THREE.Material, THREE.BufferGeometry[]>();
+  const groups = new Map<string, { mat: THREE.Material; order: number; geos: THREE.BufferGeometry[]; batch: boolean }>();
   const out = new THREE.Group();
   const live: THREE.Object3D[] = [];
+  const c = new THREE.Color();
   src.traverse((o) => {
     if (!(o instanceof THREE.Mesh)) return;
     if (o.userData.live || o instanceof THREE.InstancedMesh) return void live.push(o);
+    const mat = o.material as THREE.Material;
     const g = (o.geometry as THREE.BufferGeometry).clone().applyMatrix4(o.matrixWorld);
     const flat = g.index ? g.toNonIndexed() : g;
     for (const k of Object.keys(flat.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'uv') flat.deleteAttribute(k);
-    const list = byMat.get(o.material as THREE.Material) ?? [];
-    list.push(flat);
-    byMat.set(o.material as THREE.Material, list);
+    if (!flat.attributes.uv) flat.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(flat.attributes.position.count * 2), 2));
+    const batch = isPlainLit(mat);
+    if (batch) {
+      // Its material's look, written onto every vertex.
+      const n = flat.attributes.position.count;
+      const col = new Float32Array(n * 3);
+      const rm = new Float32Array(n * 2);
+      const em = new Float32Array(n * 3);
+      c.copy(mat.emissive).multiplyScalar(mat.emissiveIntensity);
+      for (let i = 0; i < n; i++) {
+        col[i * 3] = mat.color.r;
+        col[i * 3 + 1] = mat.color.g;
+        col[i * 3 + 2] = mat.color.b;
+        rm[i * 2] = mat.roughness;
+        rm[i * 2 + 1] = mat.metalness;
+        em[i * 3] = c.r;
+        em[i * 3 + 1] = c.g;
+        em[i * 3 + 2] = c.b;
+      }
+      flat.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+      flat.setAttribute('aRM', new THREE.Float32BufferAttribute(rm, 2));
+      flat.setAttribute('aEm', new THREE.Float32BufferAttribute(em, 3));
+    }
+    const key = `${batch ? plainBatchKey(mat) : mat.uuid}|${o.renderOrder}`;
+    const e = groups.get(key) ?? { mat, order: o.renderOrder, geos: [], batch };
+    e.geos.push(flat);
+    groups.set(key, e);
   });
-  for (const [mat, geos] of byMat) {
-    const m = new THREE.Mesh(mergeGeometries(geos)!, mat);
+  for (const e of groups.values()) {
+    const geo = mergeGeometries(e.geos)!;
+    if (e.batch && e.geos.length === 1) {
+      for (const k of ['color', 'aRM', 'aEm']) geo.deleteAttribute(k);
+      e.batch = false;
+    }
+    const m = new THREE.Mesh(geo, e.batch ? batchedLitMaterial(e.mat as THREE.MeshStandardMaterial) : e.mat);
+    m.renderOrder = e.order;
     m.receiveShadow = true;
     out.add(m);
   }

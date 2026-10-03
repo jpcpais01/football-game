@@ -1,7 +1,8 @@
 import type { Match } from '../sim/match';
 import { PITCH } from '../sim/constants';
 
-const hex = (c: number) => '#' + c.toString(16).padStart(6, '0');
+const hexes = new Map<number, string>();
+const hex = (c: number) => hexes.get(c) ?? (hexes.set(c, '#' + c.toString(16).padStart(6, '0')), hexes.get(c)!);
 /** Perceived brightness 0..255 (to give light kits a dark rim on the light pitch lines). */
 const lum = (c: number) => 0.299 * ((c >> 16) & 255) + 0.587 * ((c >> 8) & 255) + 0.114 * (c & 255);
 
@@ -90,9 +91,11 @@ export class Minimap {
     // Players: the opponents first, so your team draws on top. One path per shirt colour.
     const r = Math.max(2.2, W / 64);
     g.lineWidth = 1;
-    for (const t of [1 - m.humanTeam, m.humanTeam]) {
+    for (let ti = 0; ti < 2; ti++) {
+      const t = ti === 0 ? 1 - m.humanTeam : m.humanTeam;
       const kit = m.teams[t].info.kit;
-      for (const gk of [false, true]) {
+      for (let gi = 0; gi < 2; gi++) {
+        const gk = gi === 1;
         const c = gk ? kit.gkShirt : kit.shirt;
         g.fillStyle = hex(c);
         g.strokeStyle = lum(c) > 150 ? 'rgba(10, 12, 20, 0.85)' : 'rgba(244, 239, 227, 0.8)';

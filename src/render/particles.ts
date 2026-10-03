@@ -40,7 +40,8 @@ export class Particles {
   /** Particles alive beyond the motes (0 most of a match: then only the motes are drawn
    * and uploaded), and whether any were last frame. */
   private live = 0;
-  private wasLive = false;
+  /** One past the highest slot that is alive (or just died and still needs its alpha zeroed). */
+  private hi = MOTES;
   /** New particles were spawned: their colours need uploading. */
   private colDirty = false;
   private gPos = new Float32Array(GROUND * 3);
@@ -57,6 +58,7 @@ export class Particles {
   private geo: THREE.BufferGeometry;
   private c = new THREE.Color();
   private breathT = new Float32Array(22);
+  private attrs: THREE.BufferAttribute[];
   private home: number;
   private away: number;
 
@@ -69,6 +71,7 @@ export class Particles {
     g.setAttribute('aSize', new THREE.BufferAttribute(this.size, 1).setUsage(THREE.DynamicDrawUsage));
     g.setAttribute('aAlpha', new THREE.BufferAttribute(this.alpha, 1).setUsage(THREE.DynamicDrawUsage));
     this.geo = g;
+    this.attrs = [g.attributes.position, g.attributes.aSize, g.attributes.aAlpha, g.attributes.color] as THREE.BufferAttribute[];
     this.mat = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
@@ -138,7 +141,10 @@ export class Particles {
   }
 
   private alloc(): number {
+    // All gone: the ring starts again at the bottom, so the live window stays short.
+    if (this.live === 0 && this.hi === MOTES) this.next = MOTES;
     const i = this.next;
+    if (i >= this.hi) this.hi = i + 1;
     this.next = this.next + 1 >= MAX ? MOTES : this.next + 1;
     return i;
   }
@@ -148,13 +154,20 @@ export class Particles {
     if (this.life[i] <= 0) this.live++;
     this.colDirty = true;
     this.kind[i] = kind;
-    this.pos.set([x, y, z], i * 3);
-    this.vel.set([vx, vy, vz], i * 3);
+    const i3 = i * 3;
+    this.pos[i3] = x;
+    this.pos[i3 + 1] = y;
+    this.pos[i3 + 2] = z;
+    this.vel[i3] = vx;
+    this.vel[i3 + 1] = vy;
+    this.vel[i3 + 2] = vz;
     this.life[i] = life;
     this.maxLife[i] = life;
     this.baseSize[i] = size;
     this.c.setHex(color);
-    this.col.set([this.c.r, this.c.g, this.c.b], i * 3);
+    this.col[i3] = this.c.r;
+    this.col[i3 + 1] = this.c.g;
+    this.col[i3 + 2] = this.c.b;
   }
 
   private spawnMote(i: number, cx: number, cz: number, anywhere: boolean): void {
@@ -162,8 +175,13 @@ export class Particles {
     const x = cx + (Math.random() - 0.5) * 70;
     const z = cz + (Math.random() - 0.5) * 44;
     const y = anywhere ? 0.4 + Math.random() * 8 : 0.4 + Math.random() * 8;
-    this.pos.set([x, y, z], i * 3);
-    this.vel.set([0, (Math.random() - 0.5) * 0.08, 0], i * 3);
+    const i3 = i * 3;
+    this.pos[i3] = x;
+    this.pos[i3 + 1] = y;
+    this.pos[i3 + 2] = z;
+    this.vel[i3] = 0;
+    this.vel[i3 + 1] = (Math.random() - 0.5) * 0.08;
+    this.vel[i3 + 2] = 0;
     this.life[i] = 1;
     this.maxLife[i] = 1;
     this.baseSize[i] = 0.035 + Math.random() * 0.03;
@@ -265,7 +283,10 @@ export class Particles {
       }
     }
     // Confetti the terraces throw.
-    if (terraces) for (const c of terraces.confetti.splice(0)) this.throwConfetti(c.end, c.amount);
+    if (terraces && terraces.confetti.length) {
+      for (const c of terraces.confetti) this.throwConfetti(c.end, c.amount);
+      terraces.confetti.length = 0;
+    }
     // Confetti on the grass: lies there, then fades away.
     this.ground.visible = this.gLive > 0;
     if (this.gLive > 0 && dt > 0) {
@@ -310,8 +331,9 @@ export class Particles {
       }
     }
 
-    // Everything beyond the motes is dead most of the time: then the loop stops at them.
-    const end = this.live > 0 || this.wasLive ? MAX : MOTES;
+    // Only the window of slots in use is walked (and uploaded): beyond hi everything is dead.
+    const end = this.hi;
+    let hi = MOTES;
     for (let i = 0; i < end; i++) {
       const k = this.kind[i];
       const i3 = i * 3;
@@ -339,6 +361,7 @@ export class Particles {
         this.alpha[i] = 0;
         continue;
       }
+      hi = i + 1;
       this.life[i] -= dt;
       const died = this.life[i] <= 0;
       if (died) this.live--;
@@ -402,13 +425,11 @@ export class Particles {
       this.pos[i3 + 2] += vz * dt;
     }
     // Upload (and draw) only what's in use: the motes, plus the rest while any is alive.
-    const n = this.live > 0 ? MAX : MOTES;
-    this.wasLive = this.live > 0;
-    this.geo.setDrawRange(0, n);
-    const a = this.geo.attributes;
-    for (const attr of [a.position, a.aSize, a.aAlpha, a.color] as THREE.BufferAttribute[]) {
+    this.hi = hi;
+    this.geo.setDrawRange(0, end);
+    for (const attr of this.attrs) {
       // Colours change only for the motes' tint, and when something new is spawned.
-      const count = attr === a.color && !this.colDirty ? MOTES : end;
+      const count = attr === this.attrs[3] && !this.colDirty ? MOTES : end;
       attr.clearUpdateRanges();
       attr.addUpdateRange(0, count * attr.itemSize);
       attr.needsUpdate = true;

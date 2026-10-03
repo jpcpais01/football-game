@@ -75,12 +75,16 @@ renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap; // (PCFSoft is gone in r18x; this is what it fell back to)
 // Per-material clipping planes (the giant tifo unrolling); free for everything without them.
 renderer.localClippingEnabled = true;
+// The ?debug readout counts every pass of a frame (it resets the totals itself).
+renderer.info.autoReset = false;
 app.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 /** Static scenery: its world matrices are worked out once, not walked every frame. */
 const freeze = <T extends THREE.Object3D>(o: T): T => {
   o.updateMatrixWorld(true);
+  // Both flags: three still walks (and re-composes) every child that auto-updates its matrix.
+  o.traverse((c) => (c.matrixAutoUpdate = false));
   o.matrixWorldAutoUpdate = false;
   return o;
 };
@@ -366,6 +370,10 @@ let aimScreen: { x: number; y: number } | null = null;
 let aimShown = false;
 let chargeShown = false;
 let chargeTf = '';
+let aimTf = '';
+/** The window's size, read on resize (reading it per frame can force a layout). */
+let viewW = window.innerWidth;
+let viewH = window.innerHeight;
 
 function updateAim(): void {
   aimScreen = null;
@@ -380,10 +388,11 @@ function updateAim(): void {
     aimShown = false;
     return;
   }
-  const x = (aimPos.x * 0.5 + 0.5) * window.innerWidth;
-  const y = (-aimPos.y * 0.5 + 0.5) * window.innerHeight;
+  const x = (aimPos.x * 0.5 + 0.5) * viewW;
+  const y = (-aimPos.y * 0.5 + 0.5) * viewH;
   aimScreen = { x, y };
-  aimMark.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
+  const tf = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
+  if (tf !== aimTf) aimMark.style.transform = aimTf = tf;
   // Off target (wide or over the bar): the reticle turns red.
   const off = Math.abs(a.z) > PITCH.goalHalfWidth - 0.1 || a.y > PITCH.goalHeight - 0.1;
   aimMark.classList.toggle('off', off);
@@ -429,8 +438,8 @@ function updateCharge(alpha: number): void {
     const c = match.controlled;
     headPos.set(c.prevPos.x + (c.pos.x - c.prevPos.x) * alpha, 2.45 * c.look.height, c.prevPos.z + (c.pos.z - c.prevPos.z) * alpha);
     headPos.project(rig.camera);
-    x = (headPos.x * 0.5 + 0.5) * window.innerWidth;
-    y = (-headPos.y * 0.5 + 0.5) * window.innerHeight;
+    x = (headPos.x * 0.5 + 0.5) * viewW;
+    y = (-headPos.y * 0.5 + 0.5) * viewH;
   }
   const tf = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
   if (tf !== chargeTf) charge.style.transform = chargeTf = tf;
@@ -456,8 +465,8 @@ function updateStamina(alpha: number): void {
   }
   headPos.set(c.prevPos.x + (c.pos.x - c.prevPos.x) * alpha, 2.45 * c.look.height, c.prevPos.z + (c.pos.z - c.prevPos.z) * alpha);
   headPos.project(rig.camera);
-  const x = (headPos.x * 0.5 + 0.5) * window.innerWidth;
-  const y = (-headPos.y * 0.5 + 0.5) * window.innerHeight;
+  const x = (headPos.x * 0.5 + 0.5) * viewW;
+  const y = (-headPos.y * 0.5 + 0.5) * viewH;
   const tf = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
   if (tf !== staminaTf) staminaBar.style.transform = staminaTf = tf;
   const st = Math.round(c.stamina * 100);
@@ -821,8 +830,8 @@ document.addEventListener('gesturestart', (e) => e.preventDefault());
 document.addEventListener('contextmenu', (e) => e.preventDefault());
 
 function onResize(): void {
-  const w = window.innerWidth;
-  const h = window.innerHeight;
+  const w = (viewW = window.innerWidth);
+  const h = (viewH = window.innerHeight);
   if (!FIXED_DPR) renderer.setPixelRatio(pixelLook() ? deviceDpr : dpr);
   renderer.setSize(w, h);
   rig.setAspect(w / h);
@@ -1174,12 +1183,14 @@ function frame(now: number): void {
     if (now - fpsT > 500) {
       const fps = Math.round((fpsFrames * 1000) / (now - fpsT));
       const ms = ((now - fpsT) / fpsFrames).toFixed(1);
+      // Totals since the last readout (all passes: shadow, world, post, blit), per frame.
       const info = renderer.info.render;
       fpsEl.textContent = DEBUG
-        ? `${fps} fps · ${ms} ms · ${info.calls} calls · ${(info.triangles / 1000).toFixed(0)}k tris · dpr ${dpr.toFixed(2)} · cpu ${cpuAvg.toFixed(2)}ms`
+        ? `${fps} fps · ${ms} ms · ${Math.round(info.calls / fpsFrames)} calls · ${(info.triangles / fpsFrames / 1000).toFixed(0)}k tris · dpr ${dpr.toFixed(2)} · cpu ${cpuAvg.toFixed(2)}ms`
         : `${fps} fps · ${ms} ms`;
       fpsFrames = 0;
       fpsT = now;
+      renderer.info.reset();
     }
   } else {
     fpsFrames = 0;

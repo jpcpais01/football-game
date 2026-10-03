@@ -1059,7 +1059,10 @@ export class PlayersView {
     if (this.list[0] !== match.players[0] || this.roster !== match.roster) this.applyColors(match);
     this.cull();
     const floodOn = this.flood.visible;
+    const benchFrom = this.hideBench && this.bench ? this.bench.all[0].id : Infinity;
     for (const p of this.list) {
+      // A ground with no bench (or no officials) never shows them: don't pose them either.
+      if (p.id >= benchFrom || (this.hideOfficials && p.team === 2)) continue;
       const x = lerp(p.prevPos.x, p.pos.x, alpha);
       const z = lerp(p.prevPos.z, p.pos.z, alpha);
       let df = p.facing - p.prevFacing;

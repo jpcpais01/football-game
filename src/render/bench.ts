@@ -567,9 +567,27 @@ export class Benches {
     g.arms = w;
     const c = s.cur;
     const a = 1 - Math.exp(-dt * 4.5);
-    for (const key in g) {
-      const kk = key as keyof Shape;
-      c[kk] += (g[kk] - c[kk]) * a;
-    }
+    // Field by field (a keyed for…in walk over the pose was the bench's main cost).
+    c.thL += (g.thL - c.thL) * a;
+    c.thR += (g.thR - c.thR) * a;
+    c.ftL += (g.ftL - c.ftL) * a;
+    c.ftR += (g.ftR - c.ftR) * a;
+    c.loL += (g.loL - c.loL) * a;
+    c.loR += (g.loR - c.loR) * a;
+    c.ywL += (g.ywL - c.ywL) * a;
+    c.ywR += (g.ywR - c.ywR) * a;
+    c.flex += (g.flex - c.flex) * a;
+    c.side += (g.side - c.side) * a;
+    c.tw += (g.tw - c.tw) * a;
+    c.head += (g.head - c.head) * a;
+    c.aL += (g.aL - c.aL) * a;
+    c.aR += (g.aR - c.aR) * a;
+    c.eL += (g.eL - c.eL) * a;
+    c.eR += (g.eR - c.eR) * a;
+    c.oL += (g.oL - c.oL) * a;
+    c.oR += (g.oR - c.oR) * a;
+    c.rL += (g.rL - c.rL) * a;
+    c.rR += (g.rR - c.rR) * a;
+    c.arms += (g.arms - c.arms) * a;
   }
 }
