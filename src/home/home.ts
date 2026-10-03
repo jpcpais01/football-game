@@ -14,6 +14,26 @@ import { ClubScreen } from './clubScreen';
 import { crestSVG as clubCrestSVG } from '../meta/crest';
 import { StoreScreen } from './store';
 import type { TifoKind } from '../ui/tifos';
+import { DRILLS, type DrillKind } from '../sim/training';
+
+/** Best streak per training drill, on this device. */
+export function drillBests(): Partial<Record<DrillKind, number>> {
+  try {
+    return JSON.parse(localStorage.getItem('drillBest') ?? '{}') as Partial<Record<DrillKind, number>>;
+  } catch {
+    return {};
+  }
+}
+export function saveDrillBest(kind: DrillKind, best: number): void {
+  const all = drillBests();
+  if ((all[kind] ?? 0) >= best) return;
+  all[kind] = best;
+  try {
+    localStorage.setItem('drillBest', JSON.stringify(all));
+  } catch {
+    /* storage unavailable */
+  }
+}
 
 export interface HomeHooks {
   /** Start the demo match with this seed (the opponent shown on the home screen). */
@@ -25,6 +45,8 @@ export interface HomeHooks {
   onIdentity(): void;
   /** A ground was picked before kick-off: build it behind the menu (a live preview). */
   onGround(g: Ground): void;
+  /** Start a training drill (on the training ground). */
+  onTraining(kind: DrillKind): void;
 }
 
 type ScreenName = 'home' | 'squad' | 'store' | 'club';
@@ -220,7 +242,10 @@ export class HomeUI {
               <div><b>${esc(opp.name)}</b><span>${oppOvr} OVR</span></div>
             </div>
           </div>
-          <button class="play-btn"><span>Play match</span><i>▶</i></button>
+          <div class="hero-actions">
+            <button class="play-btn"><span>Play match</span><i>▶</i></button>
+            <button class="train-btn"><span>Training</span></button>
+          </div>
           <div class="hero-reward">Win <b>+1,500</b> · Draw <b>+800</b> · <b>+150</b> per goal</div>
         </section>
         <button class="tile squad-tile">
@@ -253,6 +278,7 @@ export class HomeUI {
       </footer>`;
     const q = (s: string) => this.homeEl.querySelector(s) as HTMLElement;
     q('.play-btn').addEventListener('click', () => this.pickGround());
+    q('.train-btn').addEventListener('click', () => this.pickDrill());
     q('.squad-tile').addEventListener('click', () => this.go('squad'));
     q('.store-tile').addEventListener('click', () => this.go('store'));
     q('.club-btn').addEventListener('click', () => this.go('club'));
@@ -293,6 +319,27 @@ export class HomeUI {
       this.closeModal();
       this.hooks.onPlay(this.nextSeed);
     });
+  }
+
+  /** Training: pick a drill. Each shows its best streak on this device. */
+  pickDrill(): void {
+    const best = drillBests();
+    const box = this.openModal(
+      `<button class="m-close" aria-label="Close">✕</button>
+      <div class="kicker">At the training ground</div>
+      <h3>Training</h3>
+      <div class="drill-list">${DRILLS.map(
+        (d) => `<button class="chip drill-opt" data-d="${d.id}"><b>${d.name}</b><span>${d.about}</span><em>${best[d.id] ? `Best streak ${best[d.id]}` : 'No streak yet'}</em></button>`,
+      ).join('')}</div>
+      <div class="drill-hint">Pause to restart or leave a drill.</div>`,
+      'small drill-modal',
+    );
+    box.querySelectorAll<HTMLElement>('[data-d]').forEach((b) =>
+      b.addEventListener('click', () => {
+        this.closeModal();
+        this.hooks.onTraining(b.dataset.d as DrillKind);
+      }),
+    );
   }
 
   /** What's new: the patch notes, newest first. */

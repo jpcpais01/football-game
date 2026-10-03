@@ -150,6 +150,14 @@ button.tile:hover .chev { transform: translateX(4px); }
 .play-btn:active { transform: translateY(4px); box-shadow: 0 2px 0 #b37400, 0 8px 20px rgba(0, 0, 0, 0.35), inset 0 2px 0 rgba(255, 255, 255, 0.6); }
 @keyframes sweep { 0%, 55% { left: -60%; } 100% { left: 130%; } }
 @keyframes play-pulse { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.08); } }
+.hero-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.train-btn {
+  padding: clamp(8px, 2.4vh, 12px) 18px; border-radius: 12px; border: 2px solid rgba(255, 235, 215, 0.55);
+  background: rgba(0, 0, 0, 0.18); color: #fff3e6; font-size: clamp(15px, 4.4vh, 20px); font-weight: 800;
+  letter-spacing: 0.1em; text-transform: uppercase; transition: background 0.15s, transform 0.12s;
+}
+.train-btn:hover { background: rgba(0, 0, 0, 0.3); }
+.train-btn:active { transform: translateY(2px); }
 .hero-reward { font-size: 13px; font-weight: 600; letter-spacing: 0.08em; color: rgba(255, 230, 210, 0.75); }
 .hero-reward b { color: #ffe9a3; }
 
@@ -475,7 +483,16 @@ button.tile:hover .chev { transform: translateX(4px); }
 .modal.ground-modal { background: rgba(4, 6, 12, 0.3); }
 .modal.ground-modal .m-box { width: min(620px, 100%); }
 .ground-modal .kicker { color: var(--gold); font-size: 12px; letter-spacing: 0.25em; }
-.ground-list { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 6px; }
+.ground-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 6px; }
+/* Training: the drill picker. */
+.modal.drill-modal .m-box { width: min(640px, 100%); }
+.drill-modal .kicker { color: var(--gold); font-size: 12px; letter-spacing: 0.25em; }
+.drill-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; margin-top: 6px; }
+.chip.drill-opt { display: flex; flex-direction: column; gap: 5px; align-items: flex-start; text-align: left; white-space: normal; padding: 10px 12px; border-radius: 14px; }
+.drill-opt b { font-size: 17px; }
+.drill-opt span { font-size: 11px; font-weight: 600; letter-spacing: 0.02em; opacity: 0.8; line-height: 1.25; font-family: var(--font); }
+.drill-opt em { font-style: normal; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--gold); }
+.drill-hint { margin-top: 10px; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; color: var(--ink-dim); }
 .chip.ground-opt { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; text-align: left; white-space: normal; padding: 10px 12px; }
 .ground-opt span { font-size: 11px; font-weight: 600; letter-spacing: 0.02em; opacity: 0.8; line-height: 1.25; font-family: var(--font); }
 .ground-modal .kick-off { margin-left: auto; }
