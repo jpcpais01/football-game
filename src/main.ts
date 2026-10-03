@@ -810,7 +810,7 @@ const fineTicks = pauseMenu.querySelector('.fine-ticks') as HTMLElement;
 let exactHeights: number[] = [];
 let ticksFor = 0;
 function updateFineTicks(): void {
-  const H = renderer.domElement.height;
+  const H = Math.round(viewH * deviceDpr); // (the screen's, not the canvas's: Fast graphics shrinks that)
   if (H === ticksFor) return;
   ticksFor = H;
   exactHeights = [];
@@ -857,6 +857,7 @@ applySmoothing();
 smoothBtn.addEventListener('click', () => {
   smoothing = !smoothing;
   applySmoothing();
+  onResize();
   try {
     localStorage.setItem('smoothing', smoothing ? 'on' : 'off');
   } catch {
@@ -898,13 +899,17 @@ document.addEventListener('contextmenu', (e) => e.preventDefault());
 function onResize(): void {
   const w = (viewW = window.innerWidth);
   const h = (viewH = window.innerHeight);
-  if (!FIXED_DPR) renderer.setPixelRatio(pixelLook() ? deviceDpr : dpr);
+  // Fast graphics: the screen canvas only twice the art's height (the browser stretches it
+  // to the screen as it composites the page, softening each art pixel's edge the way the
+  // sharp upscale would): a third of the pixels to write and composite every frame.
+  const ratio = pixelLook() ? (smoothing ? deviceDpr : Math.min(deviceDpr, (pixelsH * 2) / h)) : dpr;
+  if (!FIXED_DPR) renderer.setPixelRatio(ratio);
   renderer.setSize(w, h);
   rig.setAspect(w / h);
   pixelPass.height = pixelsH;
   pixelPass.resize(renderer.domElement.width, renderer.domElement.height);
   updateFineTicks();
-  renderer.domElement.style.imageRendering = pixelLook() ? 'pixelated' : '';
+  renderer.domElement.style.imageRendering = pixelLook() && smoothing ? 'pixelated' : '';
   // The pixel look draws the vignette in its upscale pass (no full-screen layer to blend).
   vignette.style.display = pixelLook() ? 'none' : '';
   fineRow.style.display = pixelLook() ? '' : 'none';
