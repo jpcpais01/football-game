@@ -109,3 +109,62 @@ describe('aimed corners', () => {
     });
   }
 });
+
+describe('aimed goal kicks', () => {
+  /** A human goal kick, lined up with the ring out. */
+  function goalKick(): Match {
+    const m = new Match(5);
+    m.autoPlay = true;
+    run(m, () => m.phase === 'play' && m.time > 4);
+    const dir = m.teams[m.humanTeam].dir;
+    (m as unknown as { startSetPiece: (k: string, t: number, x: number, z: number) => void }).startSetPiece('goalkick', m.humanTeam, -dir * (PITCH.halfL - 5.5), 5);
+    m.autoPlay = false;
+    run(m, () => m.aimingGoalKick, makeInput(), 120 * 5);
+    expect(m.aimingGoalKick).toBe(true);
+    m.switchT = 99;
+    return m;
+  }
+
+  for (const [float, out] of [[false, 30], [true, 30], [false, 58], [true, 58]] as const) {
+    it(`the ${float ? 'floated' : 'driven'} kick comes down on the ring ${out} m out`, () => {
+      const m = goalKick();
+      const sp = m.setPiece!;
+      const dir = m.teams[m.humanTeam].dir;
+      const t = { x: sp.x + dir * out, z: -10 };
+      sp.target = { ...t };
+      const input = makeInput();
+      input.events.push({ btn: float ? Btn.C : Btn.A, kind: 'up', hold: 0.3, swipeUp: false });
+      m.step(input);
+      run(m, () => m.ball.vel.y > 2, makeInput(), 120 * 6);
+      const b = new Ball();
+      b.pos.copy(m.ball.pos);
+      b.prevPos.copy(b.pos);
+      b.vel.copy(m.ball.vel);
+      b.spin.copy(m.ball.spin);
+      b.onGround = false;
+      let land: { x: number; z: number } | null = null;
+      for (let i = 0; i < 120 * 8 && !land; i++) {
+        const falling = b.vel.y <= 0;
+        b.step(1 / 120);
+        if (falling && b.pos.y < 0.115) land = { x: b.pos.x, z: b.pos.z };
+      }
+      expect(land).not.toBeNull();
+      expect(Math.hypot(land!.x - t.x, land!.z - t.z)).toBeLessThan(out / 8);
+    });
+  }
+
+  it('Through plays it short along the ground', () => {
+    const m = goalKick();
+    const input = makeInput();
+    input.events.push({ btn: Btn.B, kind: 'up', hold: 0.2, swipeUp: false });
+    m.step(input);
+    const plan = m.setPiece!.taker.plan!;
+    expect(plan.type).toBe('pass');
+    expect(plan.targetId).toBeGreaterThanOrEqual(0);
+    let maxY = 0;
+    // Over the next three seconds the ball is struck and stays on the grass.
+    run(m, () => ((maxY = Math.max(maxY, m.ball.pos.y)), false), makeInput(), 120 * 3);
+    expect(m.phase).toBe('play');
+    expect(maxY).toBeLessThan(0.6);
+  });
+});
