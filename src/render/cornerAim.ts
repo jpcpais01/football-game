@@ -6,7 +6,7 @@ import type { Match } from '../sim/match';
 const DOTS = 34;
 
 /**
- * Corner aiming, FIFA-style: a gold ring on the grass where the delivery will come down,
+ * Corner and goal-kick aiming, FIFA-style: a gold ring on the grass where the delivery will come down,
  * and a dotted arc of its flight. The arc is the real flight (the match's own corner solver
  * and ball physics), whipped or floated depending on the button being held.
  */
@@ -73,7 +73,7 @@ export class CornerAim {
 
   update(match: Match, float: boolean, time: number): void {
     const sp = match.setPiece;
-    const show = match.aimingCorner && !!sp?.target;
+    const show = match.aimingDelivery && !!sp?.target;
     this.group.visible = show;
     if (!show || !sp?.target) return;
     const t = sp.target;
@@ -90,7 +90,7 @@ export class CornerAim {
     if (key === this.lastKey || time - this.solvedAt < 0.05) return;
     this.lastKey = key;
     this.solvedAt = time;
-    const r = match.solveCorner(t.x, t.z, float);
+    const r = match.solveDelivery(t.x, t.z, float);
     const b = this.ball;
     b.pos.copy(match.ball.pos);
     b.prevPos.copy(b.pos);

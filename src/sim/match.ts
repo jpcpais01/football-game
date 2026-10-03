@@ -37,7 +37,7 @@ export interface SetPiece {
   /** Human dead-ball shot: the aim point on the goal mouth (world z, height). */
   aimZ?: number;
   aimY?: number;
-  /** Human corner: where the delivery is aimed to land (the gold ring on the grass). */
+  /** Human corner or goal kick: where the delivery is aimed to land (the gold ring on the grass). */
   target?: { x: number; z: number };
 }
 
@@ -447,6 +447,9 @@ export class Match {
     if (kind === 'corner' && team === this.humanTeam) {
       // Start the ring around the penalty spot, a little toward the far post.
       this.setPiece.target = { x: goalX - dir * 9, z: -(Math.sign(z) || 1) * 1.5 };
+    } else if (kind === 'goalkick' && team === this.humanTeam) {
+      // Start the ring just short of halfway, out toward the touchline on the kick's side.
+      this.setPiece.target = { x: x + dir * 38, z: (Math.sign(z) || 1) * 12 };
     }
     if (kind === 'penalty' || direct) {
       // Where the human starts aiming: free kicks over the wall to the far post, penalties
@@ -475,7 +478,7 @@ export class Match {
     if (sp.kind === 'throw') {
       fx = 0;
       fz = -Math.sign(sp.z);
-    } else if (sp.kind === 'corner' && sp.target) {
+    } else if (sp.target) {
       // Lined up over the ball toward the aim ring.
       fx = sp.target.x - sp.x;
       fz = sp.target.z - sp.z;
@@ -516,6 +519,41 @@ export class Match {
       !!sp && !this.autoPlay && this.phase === 'setpiece' && sp.kind === 'corner' && sp.team === this.humanTeam &&
       sp.taker === this.controlled && !sp.taker.plan && sp.taker.action === 'none' && !!sp.target
     );
+  }
+
+  /** The human is lining up a goal kick: the same ring and flight preview, out upfield. */
+  get aimingGoalKick(): boolean {
+    const sp = this.setPiece;
+    return (
+      !!sp && !this.autoPlay && this.phase === 'setpiece' && sp.kind === 'goalkick' && sp.team === this.humanTeam &&
+      sp.taker === this.controlled && !sp.taker.plan && sp.taker.action === 'none' && !!sp.target
+    );
+  }
+
+  /** Either aimed delivery is being lined up (the ring is on the grass). */
+  get aimingDelivery(): boolean {
+    return this.aimingCorner || this.aimingGoalKick;
+  }
+
+  /** The aimed delivery for the current set piece: a corner, or a goal kick (no bend on those). */
+  solveDelivery(lx: number, lz: number, float: boolean, from: V3 = this.ball.pos): { vel: V3; spin: V3; time: number } {
+    if (this.setPiece?.kind !== 'goalkick') return this.solveCorner(lx, lz, float, from);
+    // Driven: low and skimming, quick to the target. Floated: a high hanging punt.
+    const d = dist2D(from.x, from.z, lx, lz);
+    const angle = float ? clamp(34 + d * 0.12, 38, 46) : clamp(13 + d * 0.22, 18, 28);
+    return solveLofted(from, lx, lz, angle, float ? 26 : 16, 0);
+  }
+
+  /** The short goal kick: the nearest outfield team-mate, preferring the ring's side. */
+  shortOption(p: Player, t: { x: number; z: number }): Player {
+    let best = this.teams[p.team].players[2];
+    let bestS = 1e9;
+    for (const q of this.teams[p.team].players) {
+      if (q === p || q.role === 'GK') continue;
+      const s = dist2D(q.pos.x, q.pos.z, p.pos.x, p.pos.z) + 0.25 * dist2D(q.pos.x, q.pos.z, t.x, t.z);
+      if (s < bestS) (bestS = s), (best = q);
+    }
+    return best;
   }
 
   /**
@@ -561,7 +599,11 @@ export class Match {
     const human = sp.team === this.humanTeam;
     if (human && t !== this.controlled) return null;
     const dir = this.teams[sp.team].dir;
-    if (sp.kind === 'goalkick') return { taker: t, x: sp.x + dir * 40, z: sp.z * 0.3, kind: sp.kind };
+    if (sp.kind === 'goalkick') {
+      // Yours: eyes on the ring; theirs: upfield.
+      const aim = human && this.aimingGoalKick ? sp.target! : { x: sp.x + dir * 40, z: sp.z * 0.3 };
+      return { taker: t, x: aim.x, z: aim.z, kind: sp.kind };
+    }
     if (sp.kind !== 'penalty' && !sp.direct) return null;
     if (human) {
       const aim = this.aimingShot ? this.aimPoint() : null;
@@ -873,10 +915,13 @@ export class Match {
           const spk = this.setPiece?.kind;
           if (spk && spk !== 'freekick' && spk !== 'penalty' && plan.type === 'shot') plan.type = spk === 'corner' ? 'cross' : 'lob';
           if (this.heldBy === c && plan.type === 'shot') plan.type = 'clear';
-          if (this.aimingCorner) {
-            // Corner: Pass whips it in, Shoot floats it, Through plays it short.
+          if (this.aimingDelivery) {
+            // Corner / goal kick: Pass drives (whips) it onto the ring, Shoot floats it,
+            // Through plays it short (a goal kick: along the ground, to the nearest team-mate
+            // on the ring's side).
             const t = this.setPiece!.target!;
-            if (ev.btn === Btn.B) plan = { type: 'pass', dirX: ax, dirZ: az, power: 0.5, targetId: -1, expires: exp, aimed: false };
+            if (ev.btn === Btn.B && this.aimingGoalKick) plan = { type: 'pass', dirX: ax, dirZ: az, power: 0.5, targetId: this.shortOption(c, t).id, expires: exp, aimed: false, lofted: false };
+            else if (ev.btn === Btn.B) plan = { type: 'pass', dirX: ax, dirZ: az, power: 0.5, targetId: -1, expires: exp, aimed: false };
             else plan = { type: 'cross', dirX: ax, dirZ: az, power: plan.power, targetId: -1, expires: this.time + 6, aimed: true, landX: t.x, landZ: t.z, float: ev.btn === Btn.C };
           }
           if (plan.type === 'shot' && this.aimingShot) {
@@ -929,6 +974,19 @@ export class Match {
         const depth = clamp((gx - t.x) * dir, 1.5, 32);
         t.x = gx - dir * depth;
         t.z = clamp(t.z, -PITCH.halfW + 2.5, PITCH.halfW - 2.5);
+      } else if (this.aimingGoalKick && m > 0.12) {
+        // Anywhere upfield a keeper can reach: 15 to 62 m out, inside the touchlines.
+        const t = sp.target!;
+        const dir = this.teams[sp.team].dir;
+        t.x = clamp(t.x + input.moveX * 16 * DT, -PITCH.halfL + 3, PITCH.halfL - 3);
+        t.z = clamp(t.z - input.moveY * 16 * DT, -PITCH.halfW + 3, PITCH.halfW - 3);
+        if ((t.x - sp.x) * dir < 8) t.x = sp.x + dir * 8;
+        const dx = t.x - sp.x;
+        const dz = t.z - sp.z;
+        const d = Math.hypot(dx, dz) || 1;
+        const k = clamp(d, 15, 62) / d;
+        t.x = sp.x + dx * k;
+        t.z = sp.z + dz * k;
       }
       if (this.aimingShot && m > 0.12) {
         const dir = this.teams[sp.team].dir;
@@ -1825,11 +1883,12 @@ export class Match {
       spin = r.spin;
       strength = 0.5 + pw * 0.5;
     } else if (plan.type === 'cross' && plan.landX !== undefined && plan.landZ !== undefined) {
-      // Aimed corner: onto the ring. The nearest team-mate attacks the landing spot, timed to
-      // arrive with the ball; others take the near post, the far post and the edge of the box.
+      // Aimed corner or goal kick: onto the ring. The nearest team-mate attacks the landing
+      // spot, timed to arrive with the ball; on a corner others take the near post, the far
+      // post and the edge of the box.
       const lx = plan.landX;
       const lz = plan.landZ;
-      const r = this.solveCorner(lx, lz, !!plan.float, b.pos);
+      const r = this.solveDelivery(lx, lz, !!plan.float, b.pos);
       vel = r.vel;
       spin = r.spin;
       base = plan.float ? 0.035 : 0.045;
@@ -1843,6 +1902,11 @@ export class Match {
       }
       receiver = best;
       if (best) this.ai.setRun(best, lx, lz, r.time + 0.6);
+      const gk = setPieceKind === 'goalkick';
+      if (gk) {
+        base = plan.float ? 0.03 : 0.035;
+        strength = plan.float ? 0.85 : 0.95;
+      }
       const gx = PITCH.halfL * team.dir;
       const near = Math.sign(b.pos.z || 1);
       const spots: [number, number][] = [
@@ -1850,7 +1914,7 @@ export class Match {
         [gx - team.dir * 7, -near * 3.5],
         [gx - team.dir * 14, 0],
       ];
-      let k = 0;
+      let k = gk ? spots.length : 0; // (box runs are for corners)
       for (const q of team.players) {
         if (q === p || q === best || q.role === 'GK' || q.role === 'DEF' || k >= spots.length) continue;
         if (dist2D(q.pos.x, q.pos.z, gx, 0) > 34) continue;
@@ -1916,7 +1980,7 @@ export class Match {
         // Lead the receiver: iterate target with predicted travel time.
         let tx = receiver.pos.x;
         let tz = receiver.pos.z;
-        const lofted = plan.type === 'lob' || plan.type === 'cross' || fromHands || setPieceKind === 'goalkick';
+        const lofted = plan.type === 'lob' || plan.type === 'cross' || fromHands || (setPieceKind === 'goalkick' && plan.lofted !== false);
         // Pass weight: AI plays a normal weight; a human tap is soft, a full hold is firm.
         const weightK = 0.8 + 0.4 * (plan.aimed === undefined ? 0.5 : plan.power);
         if (plan.type === 'cross' || setPieceKind === 'corner') {
