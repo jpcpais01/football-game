@@ -97,8 +97,8 @@ export class StandShadow {
 
   /**
    * Re-bakes if the ground or the sun has changed. `on`: false when there's no sun to cast.
-   * A new ground is baked at once; the sun moving on is baked into the back map a twelfth of
-   * the casters a frame (max blending: the order doesn't matter), then swapped in, with the
+   * A new ground is baked at once; the sun moving on is baked into the back map a 24th of
+   * the casters a frame (after a frame for the clear) (max blending: the order doesn't matter), then swapped in, with the
    * sun direction it was baked for (all at once in one frame cost a phone ~6 ms of GPU).
    */
   update(renderer: THREE.WebGLRenderer, group: THREE.Object3D, on: boolean): void {
@@ -110,14 +110,19 @@ export class StandShadow {
       this.casters.length = 0;
       this.collect(group, false);
       this.next = 0;
-      this.chunk = this.fresh ? this.casters.length : Math.ceil(this.casters.length / 12);
+      this.chunk = this.fresh ? this.casters.length : Math.ceil(this.casters.length / 24);
+      if (!this.fresh) {
+        // The clear (a 2048x1600 map) gets a frame to itself.
+        this.draw(renderer, this.rts[1 - this.front], true, 0, 0);
+        return;
+      }
     } else if (group !== this.group) {
       // The ground changed mid-bake: start again for the new one.
       this.next = -1;
       return this.update(renderer, group, on);
     }
     const back = this.rts[1 - this.front];
-    this.draw(renderer, back, this.next === 0, this.next, Math.min(this.casters.length, this.next + this.chunk));
+    this.draw(renderer, back, this.fresh && this.next === 0, this.next, Math.min(this.casters.length, this.next + this.chunk));
     this.next += this.chunk;
     if (this.next < this.casters.length) return;
     this.next = -1;

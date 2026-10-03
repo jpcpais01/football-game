@@ -1,5 +1,6 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.96.9', note: 'The stands’ sun-shadow update, the last occasional hiccup, is spread thinner: a frame of its own to clear the map, then a 24th of the stands a frame instead of a 12th.' },
   { v: '0.96.8', note: 'Smoother frames: the players’ poses and the particles are now sent to the graphics chip in two alternating buffers, so a new frame never overwrites data the chip may still be drawing from (some phones stalled on every frame for it).' },
   { v: '0.96.7', note: 'FPS counter: the 3.9 ms at the start of each frame is now split into sending the draw commands and uploading the frame’s data, to find the real cause of the dropped frames.' },
   { v: '0.96.6', note: 'FPS counter: graphics timings now subtract the cost of the measurement itself, and the frame’s data uploads are timed apart from the sun shadows, so each figure is what that part really costs.' },
