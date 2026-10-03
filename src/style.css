@@ -345,6 +345,8 @@ html, body {
   position: absolute; inset: 0; clip-path: inset(0 100% 0 0);
   background: linear-gradient(90deg, #e5483b 0%, #f7a23b 35%, #f2d43a 60%, #3ddc6a 100%);
 }
+/* Stamina just fills, in one plain colour. */
+.hp-bar i, .stamina i { background: #f4efe3; }
 .hp-bar { position: relative; margin-top: 5px; height: 3px; border-radius: 2px; }
 /* Over the active player's head: very small and thin, just under the charge bar. */
 .stamina {

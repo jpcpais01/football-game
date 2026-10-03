@@ -1,5 +1,6 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.84.1', note: 'The stamina bars (over your player and in the corner card) are back to one plain colour that simply fills and empties, still thin with a black outline. The pass and shot power bar keeps its red-to-green.' },
   { v: '0.84', note: 'Steer your celebration: for the first two seconds after you score, the stick takes your scorer wherever you want to run, flat out, before he pulls up for the camera. Let go and he heads for the corner flag as before.' },
   { v: '0.83', note: 'Training mode: tap Training on the home screen for free kicks, penalties, one on one, 2 v 2 with keepers, or play in goal yourself. Each keeps a score and your best streak; pause to restart or leave. The new training ground can also be picked for matches.' },
   { v: '0.82.1', note: 'Slimmer gauges: the stamina bars and the pass and shot power bar are thinner, with a fine black outline, and fill from red to green. The shot bar turns red again past full power, where it would fly over.' },
