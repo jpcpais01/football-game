@@ -1,5 +1,6 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.77', note: 'Walk-out before kick-off: the teams come out of a new tunnel, wide shots of the ground end on a giant home tifo dropped from the main stand roof, then the captains meet the referees. Tap to skip each shot. Pick your captain on the Squad screen; both captains wear armbands.' },
   { v: '0.76.3', note: 'The goal roar starts straight away: the recording now skips its first tenth of a second.' },
   { v: '0.76.2', note: 'Fixed the stamina card in matches: it showed up huge, upright and mid-screen because it shared a name with the collectible player cards. It now sits small in the bottom-left corner, and the collectible cards look right again too.' },
   { v: '0.76.1', note: 'No more trumpets: the crowd no longer sings with synthesised voices, which sounded like brass, and the rising "ooo" in attacks is gone. The drum, claps, Viking HUH, boos, near-miss ooh and the groan after a goal stay, now as breathy shouts.' },
