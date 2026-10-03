@@ -80,6 +80,12 @@ const SEC_SOAK = 6;
 /** Per-instance attributes written every frame by the pose (the rest only change with kits). */
 const POSE_ATTRS = ['aBend', 'aToe'];
 
+/** A fixed pseudo-random number in [0, 1) for player id and slot k. */
+function hash01(id: number, k: number): number {
+  const v = Math.sin(id * 12.9898 + k * 78.233) * 43758.5453;
+  return v - Math.floor(v);
+}
+
 function lathe(points: [number, number][], segments = 14): THREE.BufferGeometry {
   return new THREE.LatheGeometry(
     points.map(([r, y]) => new THREE.Vector2(r, y)),
@@ -572,6 +578,7 @@ export class PlayersView {
   private ikOn: Float32Array;
   /** Smoothed turning rate (rad/s, + = turning right), from the facing the renderer sees. */
   private turnS: Float32Array;
+  private armTmp = new Float32Array(10);
   /** Steering touch on a dribble turn: 0 none, 1 waiting for the leg's next swing, 2 in it. */
   private steerSt: Uint8Array;
   private steerLeg: Uint8Array;
@@ -1044,6 +1051,45 @@ export class PlayersView {
     return true;
   }
 
+  /** Running arms for this frame into armTmp: swing L/R, elbow L/R, out L/R, rot L/R, wrist L/R. */
+  private runArms(p: Player, phi: number, s: number, moveAmt: number, time: number): void {
+    const id = p.id;
+    const o = this.armTmp;
+    // His carriage (fixed per player) ...
+    const amp = 0.85 + 0.3 * hash01(id, 1);
+    const asym = (hash01(id, 2) - 0.5) * 0.24;
+    const elbowK = 0.8 + 0.4 * hash01(id, 3);
+    const elAsym = (hash01(id, 4) - 0.5) * 0.3;
+    const width = (hash01(id, 5) - 0.5) * 0.08;
+    const cross = 0.6 + 0.8 * hash01(id, 6);
+    // ... a slow drift from stride to stride ...
+    const n1 = Math.sin(time * 1.3 + hash01(id, 7) * 6.28) * 0.6 + Math.sin(time * 0.47 + hash01(id, 8) * 6.28) * 0.4;
+    const n2 = Math.sin(time * 0.9 + hash01(id, 9) * 6.28);
+    // ... effort (driving on) and fatigue.
+    const effort = clamp(p.accelFwd * 0.04, -0.15, 0.25) * moveAmt;
+    const tired = (1 - smoothstep(0.15, 0.45, p.stamina)) * s;
+    const run = s * moveAmt;
+    const reachF = 1 + 0.45 * s;
+    const reachB = 1 - 0.3 * s;
+    const bias = 0.15 * run;
+    const bounce = Math.cos(2 * phi - 0.9);
+    for (let a = 0; a < 2; a++) {
+      const side = a === 0 ? 1 : -1;
+      const th = phi - 0.18 + (a === 0 ? Math.PI : 0);
+      // + = forward. Skewed: the drive forward is quicker than the float back.
+      const u = Math.sin(th + 0.25 * Math.cos(th));
+      const sw = (0.12 + 0.68 * s) * moveAmt * amp * (1 + side * asym) * (1 + 0.1 * n1 + effort) * (1 - 0.15 * tired);
+      o[a] = bias + sw * u * (u > 0 ? reachF : reachB);
+      const uE = Math.sin(th - 0.35);
+      const e0 = (0.22 + 1.1 * run) * elbowK + side * elAsym * run + 0.08 * n2 * run + 0.2 * effort - 0.25 * tired;
+      o[2 + a] = Math.max(0.05, e0 + 0.5 * run * (Math.max(0, uE) - 0.6 * Math.max(0, -uE)) + 0.07 * run * bounce);
+      o[4 + a] = Math.max(0.04, 0.1 + width + 0.05 * run * (1 - Math.max(0, u)) - 0.04 * run * cross * Math.max(0, u) + 0.06 * tired);
+      o[6 + a] = -0.3 * run * cross * Math.max(0, u);
+      // The hand lags the forearm's swing.
+      o[8 + a] = 0.1 + (0.12 + 0.18 * s) * moveAmt * Math.cos(th);
+    }
+  }
+
   update(match: Match, alpha: number, time: number): void {
     const dt = clamp(time - this.lastTime, 0, 0.05);
     this.lastTime = time;
@@ -1090,31 +1136,25 @@ export class PlayersView {
       // the final ankle angle itself is + = toes down).
       let ankleL = 0;
       let ankleR = 0;
-      // Arms: they swing a beat behind the legs, further forward than back. Through the
-      // forward swing the elbow closes and the hand comes in toward the middle of the
-      // chest; going back the elbow opens and the arm tucks by the side. Walking, the arms
-      // hang nearly straight; running, the elbows hold near a right angle.
-      const aArm = (0.12 + 0.68 * s) * moveAmt;
-      const swA = Math.sin(phi - 0.18);
-      const fwdL = Math.max(0, -swA);
-      const fwdR = Math.max(0, swA);
-      // (Relative to the trunk, which leans forward at speed: the swing is set forward a
-      // little to make up for it.)
-      const reachF = 1 + 0.45 * s;
-      const reachB = 1 - 0.3 * s;
-      const bias = 0.15 * s * moveAmt;
-      let armL = bias - aArm * swA * (fwdL > 0 ? reachF : reachB);
-      let armR = bias + aArm * swA * (fwdR > 0 ? reachF : reachB);
-      const elbow0 = 0.22 + 1.1 * s * moveAmt;
-      const elbowSw = 0.5 * s * moveAmt;
-      let elbowL = elbow0 + elbowSw * (fwdL - 0.6 * Math.max(0, swA));
-      let elbowR = elbow0 + elbowSw * (fwdR - 0.6 * Math.max(0, -swA));
-      let armOutL = 0.1 + 0.05 * s * moveAmt * (1 - fwdL);
-      let armOutR = 0.1 + 0.05 * s * moveAmt * (1 - fwdR);
-      // Upper-arm rotation about its own length (+ = forearm swings outward): inward on
-      // the forward swing, so the hand crosses toward the chest.
-      let armRotL = -0.3 * s * moveAmt * fwdL;
-      let armRotR = -0.3 * s * moveAmt * fwdR;
+      // Arms: driven from the shoulders a beat behind the legs, further forward than back,
+      // with a quick drive forward and a softer float back. Through the forward swing the
+      // elbow folds (a moment after the upper arm, so the forearm whips) and the hand comes
+      // in toward the chest; going back the elbow opens and the arm tucks by the side. The
+      // hand trails the forearm, loose at the wrist. Every player has his own carriage
+      // (swing size, elbow angle, width, a slightly lazier side), it drifts a little stride
+      // to stride, effort pumps the arms harder and tiredness lets them drop and open.
+      this.runArms(p, phi, s, moveAmt, time);
+      const ra = this.armTmp;
+      let armL = ra[0];
+      let armR = ra[1];
+      let elbowL = ra[2];
+      let elbowR = ra[3];
+      let armOutL = ra[4];
+      let armOutR = ra[5];
+      let armRotL = ra[6];
+      let armRotR = ra[7];
+      const wristL = ra[8];
+      const wristR = ra[9];
       const hip0 = this.hipBase[id];
       // (Less drop with planted feet: the knees then bend to take it instead.)
       let hipY = hip0 - (0.016 + 0.07 * s) * Math.abs(cosP) * moveAmt * (1 - 0.3 * this.ikOn[id]);
@@ -2197,6 +2237,7 @@ export class PlayersView {
       // Feet plant during the stance of a stride (not while an action poses the legs).
       const legsFree = p.action === 'none' && lift < 0.01 && !cel && !(match.phase === 'goal' && match.scorer === p) && !(bp && bp.legs > 0.01);
       this.ikOn[id] += ((legsFree ? 1 : 0) - this.ikOn[id]) * (1 - Math.exp(-dt * 10));
+      const wristFree = legsFree;
 
       // ---------------- body physics: a springy spine driven by the movement
       // The upper body carries inertia: it pitches with acceleration and braking, swings
@@ -2289,7 +2330,7 @@ export class PlayersView {
         this.chain(this.j2, this.j1, 0, -0.29 * bs.armLen, 0, -elbow, sideSign * (sd === 0 ? armRotL : armRotR), 0);
         this.put('forearm', j * 2 + sd, this.j2, 0.5 + 0.5 * bs.arm, bs.armLen, 0.5 + 0.5 * bs.arm);
         // Hand at the wrist, relaxed with the palm toward the body; keeper gloves are bigger.
-        this.chain(this.j3, this.j2, 0, -0.245 * bs.armLen, 0, 0.1, 0, sideSign * -0.08);
+        this.chain(this.j3, this.j2, 0, -0.245 * bs.armLen, 0, wristFree ? (sd === 0 ? wristL : wristR) : 0.1, 0, sideSign * -0.08);
         const g = p.role === 'GK' ? 1.25 : 1;
         this.put('hand', j * 2 + sd, this.j3, g, g, g);
         if (sd === 1 && this.flagSlot[id] >= 0) this.put('flag', this.flagSlot[id], this.chainT(this.sm, this.j3, 0, -0.08, 0.02));
