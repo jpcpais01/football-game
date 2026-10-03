@@ -3,6 +3,7 @@ import '@fontsource/barlow-condensed/latin-800.css';
 import './style.css';
 import * as THREE from 'three';
 import { DT, GOAL_SEQ, MATCH, PITCH } from './sim/constants';
+import { smoothstep } from './sim/vec';
 import { CELEBRATIONS, Match } from './sim/match';
 import { rollTimeAt } from './sim/kick';
 import { createPitch } from './render/pitch';
@@ -772,6 +773,17 @@ let fpsFrames = 0;
 let fpsT = performance.now();
 let lastPhase = match.phase;
 
+/** 0..1: the ball in the last 5 m before a goal line, in front of the goal, rising
+ * exponentially to the line (the crowd surges with it). */
+function goalMouth(): number {
+  if (match.phase !== 'play') return 0;
+  const b = match.ball.pos;
+  const k = 1 - Math.min(1, Math.max(0, PITCH.length / 2 - Math.abs(b.x)) / 5);
+  if (k <= 0) return 0;
+  const front = 1 - smoothstep(12, 24, Math.abs(b.z));
+  return ((Math.exp(3 * k) - 1) / (Math.exp(3) - 1)) * front;
+}
+
 function handleEvents(now: number): void {
   const e = match.takeEvents();
   if (crowded) terraces.onEvents(e, match);
@@ -809,7 +821,7 @@ function handleEvents(now: number): void {
     if (e.offside && match.lastOffside) hud.showCaption('OFFSIDE', `Free kick · ${match.teams[match.lastOffside.team].info.name}`, 2, now, 'small');
     // Booked while advantage was played: show the card now.
     if (e.card && e.foul === 2 && f) hud.showCaption('YELLOW CARD', `${f.offender.name ? f.offender.name.split(' ').slice(-1)[0] : '#' + (f.offender.index + 1)} · ${match.teams[f.offender.team].info.name} · advantage`, 2.6, now, 'yellow');
-    audio.setExcitement(match.excitement);
+    audio.setExcitement(match.excitement, goalMouth());
   }
   if (e.net > 0) goals.impact(e.netX, e.netY, e.netZ, e.net, simTime);
   // Strikes rip up a little grass.

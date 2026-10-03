@@ -1,6 +1,7 @@
 /**
- * All sound is synthesised with WebAudio: no audio files to download, instant start.
- * Crowd bed that breathes with the danger on the pitch, strikes, whistle, woodwork, net.
+ * Sound is synthesised with WebAudio, except the crowd itself: a recorded bed (five
+ * offset, drifting copies of one loop, so the seam is never heard) that breathes with the
+ * danger on the pitch, and a recorded goal roar. Strikes, whistle, woodwork, net, menus.
  */
 import { ChantAudio } from './chantAudio';
 import type { Terraces } from './terraces';
@@ -8,18 +9,21 @@ import type { Terraces } from './terraces';
 export class GameAudio {
   private ctx: AudioContext | null = null;
   private master!: GainNode;
+  /** The crowd bed's overall level (excitement, the goal mouth, menus). */
   private crowdGain!: GainNode;
+  /** The recordings, once fetched and decoded. */
+  private goalRoar: AudioBuffer | null = null;
   /** Everything the crowd makes (bed, chatter, chants, gasps, roars): off at the bare pitch. */
   private crowdBus!: GainNode;
   private crowdOn = true;
   private crowdOff: ReturnType<typeof setTimeout> | undefined;
-  private chatterGain!: GainNode;
   private noise!: AudioBuffer;
   private chants: ChantAudio | null = null;
   private rainGain: GainNode | null = null;
   private raining = false;
   private rainOff: ReturnType<typeof setTimeout> | undefined;
   private excite = 0.2;
+  private mouth = 0;
   muted = false;
 
   /** Must be called from a user gesture. */
@@ -56,36 +60,33 @@ export class GameAudio {
       d[i] = (b0 + b1 + b2 + w * 0.1848) * 0.18;
     }
 
-    // Crowd bed: low murmur + mid chatter with slow swells.
-    const bed = ctx.createBufferSource();
-    bed.buffer = this.noise;
-    bed.loop = true;
-    const lp = ctx.createBiquadFilter();
-    lp.type = 'lowpass';
-    lp.frequency.value = 900;
+    // Crowd bed: the recording, five copies started a fifth of a loop apart, each at its
+    // own slightly different speed and wandering in level, so no loop point stands out.
     this.crowdGain = ctx.createGain();
-    this.crowdGain.gain.value = 0.15;
-    bed.connect(lp).connect(this.crowdGain).connect(this.crowdBus);
-    bed.start();
-
-    const chat = ctx.createBufferSource();
-    chat.buffer = this.noise;
-    chat.loop = true;
-    chat.playbackRate.value = 1.37;
-    const bp = ctx.createBiquadFilter();
-    bp.type = 'bandpass';
-    bp.frequency.value = 1100;
-    bp.Q.value = 0.7;
-    this.chatterGain = ctx.createGain();
-    this.chatterGain.gain.value = 0.05;
-    const lfo = ctx.createOscillator();
-    lfo.frequency.value = 0.23;
-    const lfoGain = ctx.createGain();
-    lfoGain.gain.value = 0.025;
-    lfo.connect(lfoGain).connect(this.chatterGain.gain);
-    lfo.start();
-    chat.connect(bp).connect(this.chatterGain).connect(this.crowdBus);
-    chat.start();
+    this.crowdGain.gain.value = 0.3;
+    this.crowdGain.connect(this.crowdBus);
+    void this.load('audio/crowd-bed.mp3').then((buf) => {
+      if (!buf) return;
+      for (let i = 0; i < 5; i++) {
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+        src.loop = true;
+        // Skip the mp3's encoder padding at either end.
+        src.loopStart = 0.06;
+        src.loopEnd = buf.duration - 0.06;
+        src.playbackRate.value = 0.96 + 0.02 * i + Math.random() * 0.01;
+        const g = ctx.createGain();
+        g.gain.value = 0.5;
+        src.connect(g).connect(this.crowdGain);
+        src.start(ctx.currentTime, 0.06 + (i / 5) * (buf.duration - 0.12));
+        const drift = () => {
+          g.gain.setTargetAtTime(0.25 + Math.random() * 0.55, ctx.currentTime, 0.8 + Math.random());
+          setTimeout(drift, 1500 + Math.random() * 3000);
+        };
+        drift();
+      }
+    });
+    void this.load('audio/crowd-goal.mp3').then((buf) => (this.goalRoar = buf));
 
     // The terraces: chants, drums, claps (see ChantAudio).
     this.chants = new ChantAudio(ctx, this.crowdBus, this.noise);
@@ -152,14 +153,27 @@ export class GameAudio {
     void this.ctx?.resume();
   }
 
-  setExcitement(e: number): void {
+  private async load(url: string): Promise<AudioBuffer | null> {
+    try {
+      const res = await fetch(import.meta.env.BASE_URL + url);
+      return await this.ctx!.decodeAudioData(await res.arrayBuffer());
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The crowd's level. `e` is the match excitement (0..1); `mouth` (0..1) is how close the
+   * ball is to the goal line in front of a goal: the last few metres make the bed surge.
+   */
+  setExcitement(e: number, mouth = 0): void {
     if (!this.ctx) return;
-    if (Math.abs(e - this.excite) < 0.01) return;
-    this.excite = e;
+    if (Math.abs(e - this.excite) < 0.01 && Math.abs(mouth - this.mouth) < 0.01) return;
     const t = this.ctx.currentTime;
-    this.chants?.out.gain.setTargetAtTime(1, t, 0.5);
-    this.crowdGain.gain.setTargetAtTime(0.1 + e * 0.32, t, 0.4);
-    this.chatterGain.gain.setTargetAtTime(0.04 + e * 0.1, t, 0.4);
+    if (this.excite < 0) this.chants?.out.gain.setTargetAtTime(1, t, 0.5);
+    this.excite = e;
+    this.mouth = mouth;
+    this.crowdGain.gain.setTargetAtTime((0.2 + e * 0.6) * (1 + 2.2 * mouth), t, mouth > 0 ? 0.15 : 0.4);
   }
 
   private noiseBurst(t: number, dur: number, type: BiquadFilterType, freq: number, q: number, gain: number, rate = 1, out: AudioNode = this.master): void {
@@ -287,6 +301,15 @@ export class GameAudio {
     if (!this.ctx) return;
     const ctx = this.ctx;
     const t = ctx.currentTime;
+    if (this.goalRoar) {
+      const src = ctx.createBufferSource();
+      src.buffer = this.goalRoar;
+      const g = ctx.createGain();
+      g.gain.value = 1.1;
+      src.connect(g).connect(out);
+      src.start(t);
+      return;
+    }
     const src = ctx.createBufferSource();
     src.buffer = this.noise;
     src.loop = true;
@@ -311,8 +334,7 @@ export class GameAudio {
     const t = this.ctx.currentTime;
     this.excite = -1;
     this.chants?.out.gain.setTargetAtTime(0.35 * level, t, 0.5);
-    this.crowdGain.gain.setTargetAtTime(0.1 * level, t, 0.5);
-    this.chatterGain.gain.setTargetAtTime(0.04 * level, t, 0.5);
+    this.crowdGain.gain.setTargetAtTime(0.2 * level, t, 0.5);
   }
 
   private tone(t: number, freq: number, dur: number, type: OscillatorType, gain: number, freqEnd = freq, attack = 0.005): void {

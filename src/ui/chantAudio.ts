@@ -1,7 +1,7 @@
 import type { Terraces, Vowel } from './terraces';
 
 /**
- * The terraces, synthesised (no audio files): thousands of voices singing in a concrete
+ * The terraces, synthesised: thousands of voices singing in a concrete
  * bowl. Each sung note is a section of the crowd — detuned saw "voices" an octave apart
  * plus breath, shaped by the vowel's two formants, scattered by a few tens of ms (they
  * never sing exactly together) — into the end's bus, panned to its side of the ground,
@@ -34,8 +34,8 @@ export class ChantAudio {
   private ends: GainNode[] = [];
   private scheduledId = -1;
   private scheduledTo = 0;
-  /** Per end: the anticipation — a rising wall of noise and a swelling "oooOOO". */
-  private tension: { noiseF: BiquadFilterNode; noiseG: GainNode; voices: OscillatorNode[]; choirG: GainNode }[] = [];
+  /** Per end: the anticipation, a swelling "oooOOO". */
+  private tension: { voices: OscillatorNode[]; choirG: GainNode }[] = [];
   private paramsAt = -1;
   /** Per end: the danger last sent to the tension layer, whether its choir is in the graph,
    * and since when it has been silent (a silent choir is unplugged: no saws to compute). */
@@ -73,24 +73,12 @@ export class ChantAudio {
       this.ends.push(g);
       this.tension.push(this.tensionLayer(g, e));
     }
-    this.murmur();
   }
 
-  /** An end's anticipation layer: always running, its level and pitch set by the danger. */
+  /** An end's anticipation "oooOOO": always running, its level and pitch set by the danger
+   * (the roar under it is the recorded crowd bed, see GameAudio). */
   private tensionLayer(bus: AudioNode, e: number) {
     const ctx = this.ctx;
-    const src = ctx.createBufferSource();
-    src.buffer = this.noise;
-    src.loop = true;
-    src.playbackRate.value = e ? 1.07 : 0.93;
-    const noiseF = ctx.createBiquadFilter();
-    noiseF.type = 'bandpass';
-    noiseF.frequency.value = 550;
-    noiseF.Q.value = 0.7;
-    const noiseG = ctx.createGain();
-    noiseG.gain.value = 0;
-    src.connect(noiseF).connect(noiseG).connect(bus);
-    src.start(0, e * 1.3);
     const choirG = ctx.createGain();
     choirG.gain.value = 0;
     const f1 = ctx.createBiquadFilter();
@@ -114,39 +102,7 @@ export class ChantAudio {
       o.start();
       voices.push(o);
     }
-    return { noiseF, noiseG, voices, choirG };
-  }
-
-  /**
-   * The murmur of the whole ground: two streams of breath through formants that wander
-   * slowly (vowels coming and going), so the bed sounds like people, not static.
-   */
-  private murmur(): void {
-    const ctx = this.ctx;
-    const g = ctx.createGain();
-    g.gain.value = 0.05;
-    g.connect(this.out);
-    for (const [rate, f, lfoHz, depth] of [
-      [0.97, 620, 0.13, 220],
-      [1.11, 1250, 0.19, 380],
-    ]) {
-      const src = ctx.createBufferSource();
-      src.buffer = this.noise;
-      src.loop = true;
-      src.playbackRate.value = rate;
-      const bp = ctx.createBiquadFilter();
-      bp.type = 'bandpass';
-      bp.frequency.value = f;
-      bp.Q.value = 3;
-      const lfo = ctx.createOscillator();
-      lfo.frequency.value = lfoHz;
-      const lg = ctx.createGain();
-      lg.gain.value = depth;
-      lfo.connect(lg).connect(bp.frequency);
-      src.connect(bp).connect(g);
-      src.start(0, rate);
-      lfo.start();
-    }
+    return { voices, choirG };
   }
 
   private impulse(seconds: number): AudioBuffer {
@@ -200,8 +156,6 @@ export class ChantAudio {
         // A steady danger needs no new automation.
         if (Math.abs(d - this.lastDanger[e]) < 0.003) continue;
         this.lastDanger[e] = d;
-        L.noiseG.gain.setTargetAtTime(0.015 + 0.6 * d * d, now, 0.2);
-        L.noiseF.frequency.setTargetAtTime(480 + 750 * d, now, 0.25);
         L.choirG.gain.setTargetAtTime(0.16 * sw * Math.sqrt(sw), now, 0.25);
         if (this.choirOn[e]) for (let i = 0; i < 3; i++) L.voices[i].frequency.setTargetAtTime(ROOT[e] * 0.85 * VOICE_DETUNE[i] * (1 + 0.5 * d), now, 0.3);
       }
@@ -315,15 +269,9 @@ export class ChantAudio {
     nz.stop(end + 0.3);
   }
 
-  /** A goal: the scoring end explodes — a wall of noise, a held roar, the claps after. */
+  /** A goal: the roar is the recording (GameAudio.goal); the scoring end claps after it. */
   private erupt(end: 0 | 1, t: number): void {
     const bus = this.ends[end];
-    this.burst(bus, t, 6.5, 'bandpass', 950, 0.45, 0.75);
-    this.burst(bus, t + 0.05, 4.5, 'highpass', 2600, 0.5, 0.22);
-    const r = ROOT[end] * 1.2;
-    this.sing(bus, t + 0.1, r, 3.4, 'a', 1.4);
-    this.sing(bus, t + 0.15, r * 1.498, 3.2, 'a', 1.0);
-    this.sing(bus, t + 0.2, r * 2, 3.0, 'a', 0.7);
     for (let i = 0; i < 9; i++) this.clap(bus, t + 3.4 + i * 0.42, 1);
     // The other end: the air goes out of it.
     this.groan(end === 0 ? 1 : 0, t + 0.3);
