@@ -122,6 +122,11 @@ export class Player {
   sprinting = false;
   /** Seconds since this player last touched the ball. */
   sinceTouch = 99;
+  /** Close control's pull on the ball (m/s it is being steered by, x/z) and when it was
+   * last applied (match time): for the renderer, which shows it as a foot dragging the ball. */
+  pullX = 0;
+  pullZ = 0;
+  pullT = -1;
 
   // ---- animation (read by renderer)
   stridePhase = 0;
