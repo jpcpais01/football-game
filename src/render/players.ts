@@ -572,6 +572,8 @@ export class PlayersView {
   private ikOn: Float32Array;
   /** Smoothed turning rate (rad/s, + = turning right), from the facing the renderer sees. */
   private turnS: Float32Array;
+  /** Keepers: how far into the ready stance (eased, so he never pops into or out of it). */
+  private gkReady: Float32Array;
   private secPoseNow = new Float32Array(SEC.count);
   private secWant = new Float32Array(SEC.count);
   private pinv = new THREE.Matrix4();
@@ -620,6 +622,7 @@ export class PlayersView {
     this.inStance = new Uint8Array(this.n * 2);
     this.ikOn = new Float32Array(this.n);
     this.turnS = new Float32Array(this.n);
+    this.gkReady = new Float32Array(this.n);
     this.hipBase = new Float32Array(this.n).fill(HIP_Y);
     this.bodyScale = new Float32Array(this.n).fill(1);
     const geos = buildGeometries();
@@ -1183,27 +1186,41 @@ export class PlayersView {
         flexExtra += br * 0.6;
       }
 
-      // Keeper ready stance: athletic crouch, hands out in front. When danger is close (an
-      // opponent on the ball near goal, or a shot coming) he gets set: lower, weight on the
-      // toes with a small bounce, hands up and forward.
-      if (p.role === 'GK' && speed < 4.5 && p.action === 'none' && held !== p && match.phase === 'play') {
-        const own = -match.teams[p.team].dir * 52.5;
-        const carrier = match.owner;
-        const ballD = Math.hypot(ball.pos.x - own, ball.pos.z);
-        const threat = (carrier && carrier.team !== p.team && ballD < 30) || (ball.vel.x * Math.sign(own) > 8 && ballD < 35);
-        const set = threat ? 1 : smoothstep(45, 25, ballD) * 0.5;
-        const calm = 1 - smoothstep(0.3, 2.5, speed) * 0.5;
-        kneeL += (0.3 + 0.25 * set) * calm;
-        kneeR += (0.3 + 0.25 * set) * calm;
-        hipL += (0.18 + 0.12 * set) * calm;
-        hipR += (0.18 + 0.12 * set) * calm;
-        hipY -= (0.07 + 0.07 * set) * calm;
-        if (speed < 1) hipY += Math.max(0, Math.sin(time * 9 + p.id)) * 0.018 * set;
-        armOutL = armOutR = 0.38 + 0.12 * set;
-        armL = armR = 0.45 + 0.35 * set;
-        elbowL = elbowR = 0.7;
-        flexExtra += 0.2 + 0.1 * set;
-        legOutL = legOutR = Math.max(legOutL, 0.12);
+      // Keeper ready stance: athletic crouch, hands out in front at the waist, palms to
+      // the ball. When danger is close (an opponent on the ball near goal, or a shot
+      // coming) he gets set: lower, hands higher, weight on the toes with a small bounce.
+      // Never still: the weight shifts foot to foot and the hands keep moving.
+      if (p.role === 'GK') {
+        const want = speed < 4.5 && p.action === 'none' && held !== p && match.phase === 'play' ? 1 : 0;
+        const gr = (this.gkReady[id] += (want - this.gkReady[id]) * (1 - Math.exp(-dt * 6)));
+        if (gr > 0.001) {
+          const own = -match.teams[p.team].dir * 52.5;
+          const carrier = match.owner;
+          const ballD = Math.hypot(ball.pos.x - own, ball.pos.z);
+          const threat = (carrier && carrier.team !== p.team && ballD < 30) || (ball.vel.x * Math.sign(own) > 8 && ballD < 35);
+          const set = threat ? 1 : smoothstep(45, 25, ballD) * 0.5;
+          const calm = (1 - smoothstep(0.3, 2.5, speed) * 0.5) * gr;
+          const still = 1 - moveAmt;
+          kneeL += (0.3 + 0.25 * set) * calm;
+          kneeR += (0.3 + 0.25 * set) * calm;
+          hipL += (0.18 + 0.12 * set) * calm;
+          hipR += (0.18 + 0.12 * set) * calm;
+          hipY -= (0.07 + 0.07 * set) * calm;
+          if (speed < 1) hipY += Math.max(0, Math.sin(time * 9 + p.id)) * 0.018 * set * gr;
+          roll += 0.035 * Math.sin(time * 1.6 + p.id * 1.3) * still * (1 - 0.6 * set) * gr;
+          const hand = (k: number) => 0.06 * Math.sin(time * 2.3 + p.id + k) * (1 - 0.5 * set);
+          armOutL = lerp(armOutL, 0.36 + 0.12 * set, gr);
+          armOutR = lerp(armOutR, 0.36 + 0.12 * set, gr);
+          armL = lerp(armL, 0.45 + 0.35 * set + hand(0), gr);
+          armR = lerp(armR, 0.45 + 0.35 * set + hand(1.9), gr);
+          elbowL = lerp(elbowL, 0.7 + 0.2 * set, gr);
+          elbowR = lerp(elbowR, 0.7 + 0.2 * set, gr);
+          armRotL = lerp(armRotL, 0.25, gr);
+          armRotR = lerp(armRotR, 0.25, gr);
+          flexExtra += (0.2 + 0.1 * set) * gr;
+          legOutL = lerp(legOutL, Math.max(legOutL, 0.12), gr);
+          legOutR = lerp(legOutR, Math.max(legOutR, 0.12), gr);
+        }
       }
 
       // Dribble touch: quick flick of the leading leg, body over the ball.
@@ -1360,6 +1377,17 @@ export class PlayersView {
             armOutL = lerp(0.35, armOutL, keep);
             armL = lerp(sameSwing, armL, keep);
             elbowR = lerp(0.45, elbowR, keep);
+          }
+          // A punt: the keeper holds the ball out in front in both hands, lets it go and
+          // the arms open out as the leg comes through.
+          if (held === p) {
+            const hold = inK * (1 - smoothstep(0.75, 1, u));
+            armL = lerp(armL, 0.95, hold);
+            armR = lerp(armR, 0.95, hold);
+            elbowL = lerp(elbowL, 0.55, hold);
+            elbowR = lerp(elbowR, 0.55, hold);
+            armOutL = lerp(armOutL, 0.14, hold);
+            armOutR = lerp(armOutR, 0.14, hold);
           }
 
           // ---- trunk: a slight arch on the back-lift, then over the ball for a driven
@@ -1561,10 +1589,12 @@ export class PlayersView {
           const rise = smoothstep(0.72, 0.86, pr) * (1 - smoothstep(0.9, 1.0, pr));
           const reach = smoothstep(0.015, 0.19, pr) * (1 - smoothstep(0.74, 0.9, pr));
           hipY = hip0 - dip * 0.14 - rise * 0.38;
-          // Near (push) leg drives straight; the far leg trails, bent.
+          // Near (push) leg drives straight; the far, top leg tucks up. On the grass he curls,
+          // knees up; getting up, one knee under him and the bottom hand pushing off.
           const nearL = side > 0;
-          const push = { hip: 0.1 * fly, knee: lerp(0.9 * dip + 0.15, 0.08, fly) };
-          const trail = { hip: 0.55 * fly + 0.2 * lie, knee: 1.1 * fly + 0.5 * lie };
+          const curl = lie;
+          const push = { hip: 0.1 * fly + 0.5 * curl, knee: lerp(0.9 * dip + 0.15, 0.08, fly) + 0.8 * curl };
+          const trail = { hip: 0.75 * fly + 0.85 * curl, knee: 1.3 * fly + 1.3 * curl };
           const kneelHip = 0.9 * rise;
           const kneelKnee = 1.6 * rise;
           if (nearL) {
@@ -1578,17 +1608,33 @@ export class PlayersView {
             hipL = trail.hip + kneelHip * 0.4;
             kneeL = trail.knee + kneelKnee * 0.6;
           }
-          // Arms stretch along the body toward the ball; the top hand comes over.
-          const up = lerp(0.6, 3.05, reach);
-          armL = lerp(armL, up, Math.max(reach, 0.2));
-          armR = lerp(armR, up, Math.max(reach, 0.2));
-          armOutL = nearL ? 0.06 : 0.22 * reach + 0.08;
-          armOutR = nearL ? 0.22 * reach + 0.08 : 0.06;
-          elbowL = elbowR = lerp(0.6, 0.06, reach);
-          sideExtra += -side * 0.14 * fly; // arch toward the ball
-          flexExtra += 0.25 * lie + 0.3 * rise; // curl on landing, lean forward to rise
+          // Arms stretch along the body line to the ball, elbows soft, hands together (the
+          // top one a touch higher). Landing, a held ball comes into the chest; a parried
+          // one, the arms just come down. Rising, the bottom hand pushes off the grass.
+          const gather = smoothstep(0.45, 0.62, pr) * (1 - smoothstep(0.72, 0.84, pr));
+          const up = lerp(0.6, 3.0, reach);
+          const down = held === p ? 1.25 : 2.2;
+          const nearArm = lerp(lerp(lerp(nearL ? armL : armR, up - 0.15, Math.max(reach, 0.2)), down, gather), 0.3, rise);
+          const farArm = lerp(lerp(lerp(nearL ? armR : armL, up + 0.08, Math.max(reach, 0.2)), down, gather), 0.8, rise);
+          const nearOut = lerp(0.05, 0.6, rise);
+          const farOut = lerp(0.1, 0.25, rise);
+          const elb = lerp(lerp(lerp(0.6, 0.18, reach), held === p ? 1.5 : 0.5, gather), 0.25, rise);
+          if (nearL) {
+            armL = nearArm;
+            armR = farArm;
+            armOutL = nearOut;
+            armOutR = farOut;
+          } else {
+            armR = nearArm;
+            armL = farArm;
+            armOutR = nearOut;
+            armOutL = farOut;
+          }
+          elbowL = elbowR = elb;
+          sideExtra += -side * 0.18 * fly; // arch toward the ball
+          flexExtra += 0.35 * lie + 0.45 * rise; // curl on landing, over the knees to rise
           headLook = false;
-          headPitch = 0.15 * fly;
+          headPitch = -0.15 * fly + 0.2 * lie;
           break;
         }
         case 'catch': {
@@ -1597,8 +1643,14 @@ export class PlayersView {
           const meet = 1 - smoothstep(0.25, 0.6, pr);
           const reachSwing = yH > 1.6 ? 2.5 : yH > 0.9 ? 1.5 : 0.75;
           armL = armR = lerp(1.0, reachSwing, meet);
-          elbowL = elbowR = lerp(1.35, 0.25, meet);
-          armOutL = armOutR = lerp(0.0, 0.12, meet);
+          elbowL = elbowR = lerp(1.35, 0.4, meet);
+          armOutL = armOutR = lerp(0.0, 0.16, meet);
+          // High ball: up off one foot, the other knee raised to protect himself. Low ball:
+          // down on one knee behind it (the long barrier), the knee turned across.
+          const hk = smoothstep(1.6, 2.0, yH) * Math.sin(Math.min(1, pr * 1.6) * Math.PI);
+          hipL += 0.9 * hk;
+          kneeL += 1.4 * hk;
+          const kneel = smoothstep(0.5, 0.3, yH) * smoothstep(0, 0.2, pr) * (1 - smoothstep(0.75, 1, pr));
           const low = 1 - smoothstep(0.3, 0.8, yH);
           kneeL += 0.7 * low + 0.25;
           kneeR += 0.7 * low + 0.25;
@@ -1607,6 +1659,12 @@ export class PlayersView {
           hipY -= 0.25 * low + 0.04;
           flexExtra += 0.45 * low + 0.18 * (1 - meet); // smother low balls, cushion the rest
           if (yH > 1.8) lift = 0.18 * Math.sin(Math.min(1, pr * 1.6) * Math.PI);
+          hipR = lerp(hipR, 0.12, kneel);
+          kneeR = lerp(kneeR, 1.6, kneel);
+          legYawR = lerp(legYawR, -0.55, kneel);
+          hipL = lerp(hipL, 0.95, kneel);
+          kneeL = lerp(kneeL, 1.35, kneel);
+          hipY = lerp(hipY, 0.5, kneel);
           headLook = false;
           headPitch = 0.2;
           break;

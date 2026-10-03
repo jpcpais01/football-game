@@ -43,7 +43,7 @@ export class Hud {
         <div class="clock">0'</div>
         <div class="added"></div>
       </div>
-      <div class="pcard"><div class="pc-name"></div><div class="pc-bar"><i></i></div></div>
+      <div class="hud-player"><div class="hp-name"></div><div class="hp-bar"><i></i></div></div>
       <div class="caption"><div class="c-title"></div><div class="c-sub"></div></div>
       <div class="scorecard">
         <div class="sc-row">
@@ -65,9 +65,9 @@ export class Hud {
     this.captionTitle = this.root.querySelector('.c-title')!;
     this.captionSub = this.root.querySelector('.c-sub')!;
     this.card = this.root.querySelector('.scorecard')!;
-    this.pcard = this.root.querySelector('.pcard')!;
-    this.pcName = this.root.querySelector('.pc-name')!;
-    this.pcFill = this.root.querySelector('.pc-bar i')!;
+    this.pcard = this.root.querySelector('.hud-player')!;
+    this.pcName = this.root.querySelector('.hp-name')!;
+    this.pcFill = this.root.querySelector('.hp-bar i')!;
   }
 
   private updatePlayerCard(m: Match): void {
@@ -79,7 +79,7 @@ export class Hud {
       this.pcFor = c;
       this.pcStamina = -1;
       const line = c.role === 'FWD' ? 'att' : c.role === 'MID' ? 'mid' : 'def';
-      this.pcard.className = `pcard show ${line}`;
+      this.pcard.className = `hud-player show ${line}`;
       const num = c.number || c.index + 1;
       this.pcName.textContent = `${num}  ${c.name ? c.name.split(' ').slice(-1)[0] : 'Player'}`;
     }
