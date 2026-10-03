@@ -49,6 +49,7 @@ Ultra-realistic, emergent football mechanics: physics-driven ball, bodies, tackl
     - Actions: kick, tackle, slide, dive, stumble, fall, header, stretch and others.
   - `body.ts`: five body types (lean, athletic, muscular, stocky, tall & lanky), read from height, weight and strength. They give each player a body shape for the renderer; the simulation keeps the real height and weight.
   - `ball.ts`, `kick.ts`: ball physics, kick solvers and `predictBallAt`.
+  - `training.ts`: training drills (free kicks, penalties, one on one, 2 v 2, goalkeeper) run on a real Match: `Match.field` picks who takes part (the rest aren't simulated or drawn), `Match.training` stops the clock and offside, `Match.keeperHuman` puts the human in goal (stick moves, any button dives, `AI.humanDive`). `Match.byJob` replaces hardcoded shirt-slot lookups so short-handed sides work.
   - `constants.ts`: `PITCH`, `PLAYER`, `BALL`, and `GOAL_SEQ` (the goal-sequence timeline: run, front-on celebration, crowd shot).
 - **`src/render/`** holds the three.js visuals.
   - `players.ts`: instanced procedural players built from the body shapes, plus every animation pose: kicks, tackles, slide, stretch, keeper dives, falls, celebrations.
@@ -63,6 +64,7 @@ Ultra-realistic, emergent football mechanics: physics-driven ball, bodies, tackl
     - A 2.5D shader crowd that bounces on the chant beat, with scarves, arms and flare glow.
     - Tifos in both ends, flags, banners, the fan photo banner, floodlights and beams.
     - The near stand, shown during low shots.
+  - `trainingGround.ts`: the training ground (training centre, ball-stop nets, fence, masts, practice pitches, trees, no crowd); also pickable for matches.
   - Pitch and weather:
     - `pitch.ts`: procedural grass, wet look, puddles
     - `turfMarks.ts`: slide-tackle scars
