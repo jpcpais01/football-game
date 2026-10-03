@@ -1295,6 +1295,9 @@ export class Match {
     const pz = c.pos.z + dz * lead;
     const wantVx = c.vel.x + (px - b.pos.x) * 3.5;
     const wantVz = c.vel.z + (pz - b.pos.z) * 3.5;
+    c.pullX = wantVx - b.vel.x;
+    c.pullZ = wantVz - b.vel.z;
+    c.pullT = this.time;
     const k = 1 - Math.exp(-DT * 1.25);
     b.vel.x += (wantVx - b.vel.x) * k;
     b.vel.z += (wantVz - b.vel.z) * k;
