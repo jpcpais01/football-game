@@ -82,7 +82,7 @@ const LOCAL_BOARDS: Board[] = [
 ];
 
 /** Front walls: painted in the club colour with a white top band, panel joints every 2 m. */
-function wallMaterial(home: number): THREE.MeshStandardMaterial {
+export function wallMaterial(home: number): THREE.MeshStandardMaterial {
   return litMaterial({
     roughness: 0.8,
     uniforms: { uClub: { value: new THREE.Color(home) } },

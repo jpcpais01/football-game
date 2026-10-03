@@ -106,7 +106,7 @@ export interface PathPt {
  * The stands' front edge, from part-way round the near-left corner, behind the home goal,
  * along the far side and behind the away goal to part-way round the near-right corner.
  */
-function bowlPath(): PathPt[] {
+export function bowlPath(): PathPt[] {
   const pts: PathPt[] = [];
   const cx = BOWL_X - BOWL_R;
   const cz = BOWL_Z - BOWL_R;
@@ -138,7 +138,7 @@ function bowlPath(): PathPt[] {
  * The near side, normally behind the broadcast camera: from where the bowl stops in the
  * near-right corner, along the near touchline, round to where it stops in the near-left.
  */
-function nearPath(): PathPt[] {
+export function nearPath(): PathPt[] {
   const pts: PathPt[] = [];
   const cx = BOWL_X - BOWL_R;
   const cz = BOWL_Z - BOWL_R;
@@ -158,7 +158,7 @@ function nearPath(): PathPt[] {
 }
 
 /** Splits the path into the part before the main stand, the main stand straight, and after. */
-function splitPath(path: PathPt[]): { left: PathPt[]; main: PathPt[]; right: PathPt[] } {
+export function splitPath(path: PathPt[]): { left: PathPt[]; main: PathPt[]; right: PathPt[] } {
   const i0 = path.findIndex((p) => p.nz < -0.999);
   let i1 = i0;
   while (i1 + 1 < path.length && path[i1 + 1].nz < -0.999) i1++;
