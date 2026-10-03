@@ -1,5 +1,6 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.96.21', note: 'The installed app asks to open in landscape again (in a normal app window, not the fullscreen mode that stopped it opening on Xiaomi phones). Reinstall from Chrome to get it.' },
   { v: '0.96.20', note: 'The first tap on the home screen really does go fullscreen and landscape now (on phones only the end of a tap counts as a gesture, so it was being ignored until a match started).' },
   { v: '0.96.19', note: 'The installed app turns the home screen landscape as soon as it opens, and the first tap anywhere goes fullscreen, so menus look like the match instead of a portrait window.' },
   { v: '0.96.18', note: 'The installed app opens on new Xiaomi phones: it now installs as a normal app window without a fixed orientation (the setup that froze on launch), and the game itself still goes fullscreen and turns landscape once you tap in. Uninstall the old icon and install again from Chrome.' },
