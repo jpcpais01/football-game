@@ -1,5 +1,6 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.96.13', note: 'Fewer hitches when the camera swings after the ball: a player stepping in or out of view no longer rewrites kit data the graphics chip is still drawing from, and per-frame data now rotates through three buffers instead of two, since phones keep a couple of frames in flight.' },
   { v: '0.96.12', note: 'The FPS counter starts measuring 10 seconds after kickoff (it counts down until then), so loading and the walk-out no longer colour the numbers.' },
   { v: '0.96.11', note: 'Fewer hitches when the ball changes hands: the buttons only rewrite labels that really change, and each button, the player card and the FPS counter re-lay out on their own instead of the whole screen. The full breakdown also times the browser’s own page work.' },
   { v: '0.96.10', note: 'The FPS counter (pause menu) has three settings: off, fps only, and the full breakdown. Only the full breakdown times the graphics chip, which itself causes a small hitch every two seconds.' },

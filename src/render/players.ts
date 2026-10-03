@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { flipAttribute, flipInstances } from './pingPong';
+import { flipAttribute, flipColors, flipInstances } from './pingPong';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { GOAL_SEQ, PLAYER } from '../sim/constants';
 import type { Match } from '../sim/match';
@@ -544,7 +544,8 @@ export class PlayersView {
   /** Visible set the kit attributes are currently packed for (null = needs packing). */
   private packedFor: number[] | null = null;
   /** Per-player attributes that only change with the kits: master copies for culling. */
-  private statics: { attr: THREE.BufferAttribute; master: Float32Array; part: Part }[] = [];
+  /** Kit attributes per part (`name` null: the instance colours), in id order. */
+  private statics: { name: string | null; master: Float32Array; part: Part }[] = [];
 
   // scratch
   private e = new THREE.Euler();
@@ -879,10 +880,10 @@ export class PlayersView {
     this.packedFor = null;
     for (const part of this.partList) {
       const { mesh } = part;
-      const keep = (attr: THREE.BufferAttribute | null) => attr && this.statics.push({ attr, master: (attr.array as Float32Array).slice(), part });
-      keep(mesh.instanceColor);
+      const keep = (name: string | null, attr: THREE.BufferAttribute | null) => attr && this.statics.push({ name, master: (attr.array as Float32Array).slice(), part });
+      keep(null, mesh.instanceColor);
       for (const [k, a] of Object.entries(mesh.geometry.attributes)) {
-        if (!POSE_ATTRS.includes(k) && (a as THREE.InstancedBufferAttribute).isInstancedBufferAttribute) keep(a as THREE.BufferAttribute);
+        if (!POSE_ATTRS.includes(k) && (a as THREE.InstancedBufferAttribute).isInstancedBufferAttribute) keep(k, a as THREE.BufferAttribute);
       }
     }
   }
@@ -941,20 +942,23 @@ export class PlayersView {
       for (const k of POSE_ATTRS) flipAttribute(mesh.geometry, k, count);
     }
     // Kit attributes: copied from the master in the same order — only when the visible set
-    // changes (they don't change otherwise, so there's nothing to upload).
+    // changes (they don't change otherwise, so there's nothing to upload). That happens as a
+    // player crosses the edge of the view, often while the camera swings after the ball:
+    // the new packing goes into a buffer not in use too, or the phone stalls on it.
     const prev = this.packedFor;
     let same = prev !== null && prev.length === n;
     for (let j = 0; same && j < n; j++) same = prev![j] === vis[j];
     if (!same) {
       this.packedFor = vis.slice();
-      for (const { attr, master, part } of this.statics) {
+      for (const { name, master, part } of this.statics) {
+        const { mesh, order, perPlayer } = part;
+        const count = order.length * perPlayer;
+        if (name === null) flipColors(mesh, count);
+        else flipAttribute(mesh.geometry, name, count);
+        const attr = (name === null ? mesh.instanceColor : mesh.geometry.getAttribute(name)) as THREE.BufferAttribute;
         const a = attr.array as Float32Array;
-        const w = part.perPlayer * attr.itemSize;
-        const order = part.order;
+        const w = perPlayer * attr.itemSize;
         for (let j = 0; j < order.length; j++) a.set(master.subarray(order[j] * w, (order[j] + 1) * w), j * w);
-        attr.clearUpdateRanges();
-        attr.addUpdateRange(0, order.length * w);
-        attr.needsUpdate = true;
       }
     }
     // Ground shadows: one contact blob per visible player, and the floodlight fans only

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { flipAttribute } from './pingPong';
+import { flipAttribute, RING } from './pingPong';
 import { PITCH } from '../sim/constants';
 import type { Match } from '../sim/match';
 import { SHARED } from './look';
@@ -151,7 +151,7 @@ export class Particles {
   private spawn(kind: Kind, x: number, y: number, z: number, vx: number, vy: number, vz: number, life: number, size: number, color: number): void {
     const i = this.alloc();
     if (this.life[i] <= 0) this.live++;
-    this.colDirty = 2;
+    this.colDirty = RING;
     this.kind[i] = kind;
     const i3 = i * 3;
     this.pos[i3] = x;
@@ -426,7 +426,7 @@ export class Particles {
     // Upload (and draw) only what's in use: the motes, plus the rest while any is alive.
     this.hi = hi;
     this.geo.setDrawRange(0, end);
-    // Into the buffers not in use (see pingPong); new colours go to both, one a frame.
+    // Into the buffers not in use (see pingPong); new colours go to each, one a frame.
     const names = ['position', 'aSize', 'aAlpha', 'color'];
     for (let k = 0; k < 4; k++) flipAttribute(this.geo, names[k], k === 3 && this.colDirty === 0 ? MOTES : end);
     if (this.colDirty > 0) this.colDirty--;
