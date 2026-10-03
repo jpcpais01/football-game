@@ -304,34 +304,50 @@ export class GameAudio {
   }
 
   /**
-   * The roar, held at full for `hold` seconds (the recording chained into itself with
-   * crossfades if it's longer than one take), then fading. The pack reveal borrows it,
-   * crowd or no crowd.
+   * The roar, held at full for `hold` seconds, then fading. The recording plays once from
+   * the top; to hold it longer, three looping copies (staggered, each a touch faster or
+   * slower, wandering in level like the bed) swell in under it, so no seam is heard.
+   * The pack reveal borrows it, crowd or no crowd.
    */
   goal(hold = 0, out: AudioNode = this.crowdBus): void {
     if (!this.ctx) return;
     const ctx = this.ctx;
     const t = ctx.currentTime;
     if (this.goalRoar) {
+      const buf = this.goalRoar;
       const skip = 0.1; // the recording opens with a beat of dead air
-      const take = this.goalRoar.duration - skip;
-      const xf = 1;
+      const take = buf.duration - skip;
       const g = ctx.createGain();
       g.gain.value = 1.1;
       g.connect(out);
-      if (hold > take) g.gain.setTargetAtTime(0.0001, t + hold, 1.2);
-      const until = hold > take ? t + hold + 5 : t + take;
-      for (let at = t, first = true; at < until; at += take - xf, first = false) {
+      const first = ctx.createBufferSource();
+      first.buffer = buf;
+      const fe = ctx.createGain();
+      first.connect(fe).connect(g);
+      first.start(t, skip);
+      if (hold <= take) return;
+      // The opening take gives way to the layers over its last 2 s.
+      fe.gain.setValueAtTime(1, t + take - 2);
+      fe.gain.linearRampToValueAtTime(0.0001, t + take);
+      const end = t + hold + 5;
+      g.gain.setTargetAtTime(0.0001, t + hold, 1.2);
+      const lo = 0.6; // past the attack
+      for (let i = 0; i < 3; i++) {
         const src = ctx.createBufferSource();
-        src.buffer = this.goalRoar;
+        src.buffer = buf;
+        src.loop = true;
+        src.loopStart = lo;
+        src.loopEnd = buf.duration - 0.06;
+        src.playbackRate.value = 0.97 + 0.03 * i;
         const env = ctx.createGain();
-        env.gain.setValueAtTime(first ? 1 : 0.0001, at);
-        if (!first) env.gain.linearRampToValueAtTime(1, at + xf);
-        env.gain.setValueAtTime(1, at + take - xf);
-        env.gain.linearRampToValueAtTime(0.0001, at + take);
+        env.gain.setValueAtTime(0.0001, t);
+        env.gain.linearRampToValueAtTime(0.0001, t + 1.5);
+        env.gain.linearRampToValueAtTime(0.6, t + take - 0.5);
         src.connect(env).connect(g);
-        src.start(at, skip);
-        src.stop(Math.min(at + take, until));
+        src.start(t, lo + (i / 3) * (src.loopEnd - lo));
+        src.stop(end);
+        // Each layer wanders a little, so no one loop point ever stands out.
+        for (let at = t + take; at < t + hold; at += 1.2 + Math.random() * 1.5) env.gain.setTargetAtTime(0.4 + Math.random() * 0.35, at, 0.6);
       }
       return;
     }

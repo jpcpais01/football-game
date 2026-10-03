@@ -1,5 +1,6 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.81.1', note: 'The goal roar no longer audibly ends and restarts: after the first take, three overlapping, staggered copies of it swell in underneath, each drifting in level, carrying the roar seamlessly through the celebration.' },
   { v: '0.81', note: 'Sprint or press on a high ball and your player attacks it: real aerial duels, decided by jump, height, strength and run-up, with the winner heading it under pressure. Pressing the carrier now moves with him instead of trailing, sprint gets right up against him, and any loose touch gets pounced on.' },
   { v: '0.80.5', note: 'Rain is half as loud.' },
   { v: '0.80.4', note: 'Fixed the fans’ flags in the stands shaking faster and faster the longer you played until they flickered. Their ripple now speeds up mid-swing and settles at the turn, at the same gentle pace all match.' },
