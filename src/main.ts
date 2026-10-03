@@ -820,7 +820,7 @@ function handleEvents(now: number): void {
     if (e.net > 0) audio.net(e.net);
     if (e.goal >= 0) {
       if (crowded) particles.confetti(rig.focusX, e.goal as 0 | 1);
-      audio.goal();
+      audio.goal(GOAL_SEQ.back); // full until the players walk back, then fading
       rig.bump(0.4);
       const scorer = match.scorer;
       const team = match.teams[e.goal];

@@ -303,18 +303,36 @@ export class GameAudio {
     this.noiseBurst(this.ctx.currentTime, 1.4, 'bandpass', 700, 0.6, 0.35, 0.9, this.crowdBus);
   }
 
-  /** The roar (the pack reveal borrows it, crowd or no crowd). */
-  goal(out: AudioNode = this.crowdBus): void {
+  /**
+   * The roar, held at full for `hold` seconds (the recording chained into itself with
+   * crossfades if it's longer than one take), then fading. The pack reveal borrows it,
+   * crowd or no crowd.
+   */
+  goal(hold = 0, out: AudioNode = this.crowdBus): void {
     if (!this.ctx) return;
     const ctx = this.ctx;
     const t = ctx.currentTime;
     if (this.goalRoar) {
-      const src = ctx.createBufferSource();
-      src.buffer = this.goalRoar;
+      const skip = 0.1; // the recording opens with a beat of dead air
+      const take = this.goalRoar.duration - skip;
+      const xf = 1;
       const g = ctx.createGain();
       g.gain.value = 1.1;
-      src.connect(g).connect(out);
-      src.start(t, 0.1); // the recording opens with a beat of dead air
+      g.connect(out);
+      if (hold > take) g.gain.setTargetAtTime(0.0001, t + hold, 1.2);
+      const until = hold > take ? t + hold + 5 : t + take;
+      for (let at = t, first = true; at < until; at += take - xf, first = false) {
+        const src = ctx.createBufferSource();
+        src.buffer = this.goalRoar;
+        const env = ctx.createGain();
+        env.gain.setValueAtTime(first ? 1 : 0.0001, at);
+        if (!first) env.gain.linearRampToValueAtTime(1, at + xf);
+        env.gain.setValueAtTime(1, at + take - xf);
+        env.gain.linearRampToValueAtTime(0.0001, at + take);
+        src.connect(env).connect(g);
+        src.start(at, skip);
+        src.stop(Math.min(at + take, until));
+      }
       return;
     }
     const src = ctx.createBufferSource();
@@ -422,7 +440,7 @@ export class GameAudio {
     if (tier >= 2) this.noiseBurst(t, 0.9 + tier * 0.3, 'highpass', 6000, 0.5, 0.12 + tier * 0.04, 1.2);
     if (tier >= 3) {
       this.tone(t, 98, 2, 'sine', 0.4, 49);
-      this.goal(this.master);
+      this.goal(0, this.master);
     }
   }
 }
