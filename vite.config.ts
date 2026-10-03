@@ -23,9 +23,10 @@ export default defineConfig({
         theme_color: '#14123a',
         background_color: '#14123a',
         id: '/',
-        display: 'fullscreen',
-        display_override: ['fullscreen', 'standalone'],
-        orientation: 'landscape',
+        // Standalone and no fixed orientation, like PokeGen: a WebAPK installed as
+        // fullscreen + landscape would not launch at all on a Xiaomi 17 (HyperOS). The
+        // game goes fullscreen and locks landscape itself (enterFullscreen in main.ts).
+        display: 'standalone',
         start_url: '/',
         scope: '/',
         icons: [
