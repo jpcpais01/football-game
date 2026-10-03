@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { PITCH } from '../sim/constants';
-import { PYLONS, SHARED, litMaterial } from './look';
+import { PYLONS, floodLamps, litMaterial } from './look';
 import { type Stadium, type StadiumClub, bakeStatic, drawCrest, groundPlanes, lampGlows, lampMaterial, pitchside, sky, updateShared } from './stadium';
 
 /**
@@ -166,16 +166,15 @@ export function createTrainingGround(homeColor: number, awayColor: number, club:
 
   group.add(bakeStatic(site));
   const glows = lampGlows(spots, 0.8);
+  const banks = floodLamps(spots);
   group.add(glows.mesh);
   return {
     group,
     setFanBanner: () => {},
     setNearStand: () => {},
     update(time, excitement, atmo) {
-      const flood = updateShared(time, excitement, atmo);
+      const flood = updateShared(time, excitement, atmo, 0, undefined, banks);
       glows.update(flood);
-      // No stand: no shadow across the pitch.
-      SHARED.uShadowZ0.value = 1e4;
     },
   };
 }
