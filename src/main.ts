@@ -497,6 +497,7 @@ pauseBtn.style.display = foulBtn.style.display = 'none';
 const cutscene = new Cutscene(ui);
 /** Goal replays (tap to skip). */
 const replay = new Replay(ui, officials.all);
+replay.onRewind = () => playersView.snap();
 replay.onEvents = (kick, net, x, y, z, post, time) => {
   if (kick > 0) audio.kick(kick);
   if (post > 0) audio.post(post);
@@ -1107,7 +1108,7 @@ function frame(now: number): void {
     playersView.update(match, alpha, now / 1000);
     match.phase = phase;
   } else playersView.update(match, alpha, now / 1000);
-  ballView.update(match, alpha, running ? dt * (replay.active ? replay.speed : 1) : 0);
+  ballView.update(match, alpha, running ? dt : 0);
   goals.update(replay.active ? replay.time : simTime);
   // Time of day follows the match clock (the attract mode loops through it too).
   const progress = TOD >= 0 ? TOD : Math.min(1, ((match.half - 1) * MATCH.halfSeconds + match.clock) / (2 * MATCH.halfSeconds));
