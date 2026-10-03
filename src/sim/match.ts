@@ -678,12 +678,18 @@ export class Match {
     this.switchT += DT;
     const ball = this.ball;
 
-    if (this.phase === 'play' || this.phase === 'out' || this.phase === 'setpiece' || this.phase === 'kickoff') {
-      this.clock += DT;
-    }
+    const running = this.phase === 'play' || this.phase === 'out' || this.phase === 'setpiece' || this.phase === 'kickoff';
+    if (running) this.clock += DT;
 
-    // Half / full time.
-    if (this.phase === 'play' && this.clock >= (MATCH.halfSeconds * (45 + this.addedTime)) / 45) {
+    // Half / full time: once the added time is up, the referee lets an attack in the final third
+    // play out. He blows when it's over: the ball back out of the third, won by the defenders,
+    // in the keeper's hands or dead, and at the latest a few minutes on.
+    const over = this.clock - (MATCH.halfSeconds * (45 + this.addedTime)) / 45;
+    const attack =
+      Math.abs(ball.pos.x) > PITCH.halfL / 3 && this.teams[this.possTeam].dir === Math.sign(ball.pos.x) && !this.heldBy;
+    if (running && over >= 0 && ((this.phase === 'play' && !attack) || this.phase === 'out' || over >= (MATCH.halfSeconds * 3) / 45)) {
+      this.pendingRestart = null;
+      this.setPiece = null;
       if (this.half === 1) {
         this.phase = 'halftime';
         this.phaseT = 0;
