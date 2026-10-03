@@ -568,6 +568,8 @@ export class PlayersView {
   private footW: Float32Array;
   private inStance: Uint8Array;
   private ikOn: Float32Array;
+  /** Smoothed turning rate (rad/s, + = turning right), from the facing the renderer sees. */
+  private turnS: Float32Array;
   private secPoseNow = new Float32Array(SEC.count);
   private secWant = new Float32Array(SEC.count);
   private pinv = new THREE.Matrix4();
@@ -615,6 +617,7 @@ export class PlayersView {
     this.footW = new Float32Array(this.n * 2);
     this.inStance = new Uint8Array(this.n * 2);
     this.ikOn = new Float32Array(this.n);
+    this.turnS = new Float32Array(this.n);
     this.hipBase = new Float32Array(this.n).fill(HIP_Y);
     this.bodyScale = new Float32Array(this.n).fill(1);
     const geos = buildGeometries();
@@ -1116,6 +1119,31 @@ export class PlayersView {
           twist *= 1 - k;
           flexExtra += k * 0.12;
         }
+      }
+
+      // Changing direction: the body turns from the ground up. The head looks into the new
+      // direction first and the hips lead the shoulders round (the spring on the shoulder
+      // twist makes them lag); the feet point into the turn. In a cut at speed, he sinks
+      // through the knees, the inside knee folds deeper and the outside leg pushes out
+      // wide; pivoting on the spot, he drops a little onto bent knees.
+      const turn = clamp(this.turnS[id], -10, 10);
+      let headLead = 0;
+      if (p.action === 'none') {
+        const lean = clamp(Math.abs(leanS) / 0.3, 0, 1) * moveAmt;
+        const pivot = Math.min(1, Math.abs(turn) / 9) * (1 - 0.5 * moveAmt);
+        headLead = clamp(-0.045 * turn, -0.4, 0.4);
+        pelvisYaw += clamp(-0.03 * turn, -0.3, 0.3);
+        legYawL += clamp(-0.035 * turn, -0.3, 0.3);
+        legYawR += clamp(-0.035 * turn, -0.3, 0.3);
+        const inR = leanS > 0 ? 1 : 0; // turning right: the right leg is the inside one
+        kneeL += lean * 0.28 * (1 - inR) + 0.1 * lean;
+        kneeR += lean * 0.28 * inR + 0.1 * lean;
+        legOutL += lean * 0.12 * inR;
+        legOutR += lean * 0.12 * (1 - inR);
+        hipY -= 0.05 * lean + 0.04 * pivot;
+        kneeL += 0.2 * pivot;
+        kneeR += 0.2 * pivot;
+        flexExtra += 0.06 * lean + 0.08 * pivot;
       }
 
       // Idle breathing.
@@ -1924,9 +1952,10 @@ export class PlayersView {
         let dF = facing - this.lastFacing[id];
         if (dF > Math.PI) dF -= Math.PI * 2;
         if (dF < -Math.PI) dF += Math.PI * 2;
-        turnRate = dF / dt;
+        turnRate = clamp(dF / dt, -14, 14);
         this.lastFacing[id] = facing;
       }
+      this.turnS[id] = sc0 ? 0 : this.turnS[id] + (turnRate - this.turnS[id]) * (1 - Math.exp(-dt * 12));
       {
         // Free to swing, or held to a pose the physics depends on (hands on the ball).
         const free = p.action === 'dive' || p.action === 'catch' || p.action === 'throw' ? 0.25 : held === p ? 0.5 : 1;
@@ -1946,9 +1975,14 @@ export class PlayersView {
         // forearms drop on a landing; the head nods into braking and footfalls; the
         // shoulders lag a quick turn.
         const want = this.secWant;
-        want[SEC.armL] = want[SEC.armR] = -0.03 * aF;
-        want[SEC.outL] = Math.max(0, -lat) * 0.5 - 0.15 * lat;
-        want[SEC.outR] = Math.max(0, lat) * 0.5 + 0.15 * lat;
+        // (Turning, the hands lag the spin: the leading arm drifts back, the trailing one
+        // forward, and both flare out a little.)
+        const spin = this.turnS[id] * free;
+        const flare = Math.min(0.25, Math.abs(spin) * 0.02);
+        want[SEC.armL] = -0.03 * aF - 0.025 * spin;
+        want[SEC.armR] = -0.03 * aF + 0.025 * spin;
+        want[SEC.outL] = Math.max(0, -lat) * 0.5 - 0.15 * lat + flare;
+        want[SEC.outR] = Math.max(0, lat) * 0.5 + 0.15 * lat + flare;
         want[SEC.elbowL] = want[SEC.elbowR] = -0.02 * aF - 0.006 * aY;
         want[SEC.headPitch] = -0.012 * aF + 0.004 * aY;
         want[SEC.headRoll] = -0.2 * lat;
@@ -1992,7 +2026,8 @@ export class PlayersView {
       // past and settles (underdamped spring), and bends a little out of turns. The head
       // stays level and tracks the ball.
       const flexTarget = clamp(p.leanFwd * 0.8 - p.accelFwd * 0.012 + s * 0.06 + flexExtra, -0.6, 0.7);
-      const sideTarget = clamp(-leanS * 0.4 + sideExtra, -0.45, 0.45);
+      // (Only a little counter-bend: the trunk goes into a turn with the legs.)
+      const sideTarget = clamp(-leanS * 0.15 + sideExtra, -0.45, 0.45);
       const w = 13;
       const zeta = 0.42;
       this.spF[id] += (w * w * (flexTarget - this.sF[id]) - 2 * zeta * w * this.spF[id]) * dt;
@@ -2047,7 +2082,7 @@ export class PlayersView {
       const headLevel = -(leanF + flex) * 0.75;
       const headRoll = -(leanS + roll * 0.2 + side) * 0.6 + headLag;
       const hP = headPitch + headLevel;
-      const hY = this.headYaw[id];
+      const hY = this.headYaw[id] + headLead;
       const N = this.chain(this.neck, C, 0, 0.58 * bs.torsoL, 0, hP * 0.4, hY * 0.3, headRoll * 0.4);
       this.put('neck', j, N, bs.neck, bs.neckLen, bs.neck);
       const top = 0.075 * bs.neckLen;
