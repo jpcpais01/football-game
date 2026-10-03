@@ -2501,6 +2501,57 @@ export class Match {
    * curling away from the keeper. The stick (if pushed) steers which runner it's for.
    */
   planCross(p: Player, plan: KickPlan): { receiver: Player | null; x: number; z: number; angle: number; curl: number } {
+    const c = this.pickCross(p, plan);
+    const best = c.receiver;
+    if (best) {
+      // Others attack the near post, far post and the edge of the area.
+      const team = this.teams[p.team];
+      const dir = team.dir;
+      const gx = PITCH.halfL * dir;
+      const near = Math.sign(this.ball.pos.z || 1);
+      const spots: [number, number][] = [
+        [gx - dir * 5.5, near * 2.5],
+        [gx - dir * 7, -near * 3.5],
+        [gx - dir * 13, 0],
+      ];
+      let k = 0;
+      for (const q of team.players) {
+        if (q === p || q === best || q.role === 'GK' || q.role === 'DEF' || k >= spots.length) continue;
+        if (dist2D(q.pos.x, q.pos.z, gx, 0) > 34) continue;
+        this.ai.setRun(q, spots[k][0], spots[k][1]);
+        k++;
+      }
+    }
+    return c;
+  }
+
+  /**
+   * The human's cross as it would go now (Pass held and slid up, on the ball in the crossing
+   * zone): where it comes down and how it's struck, before the taker's error. Null otherwise.
+   */
+  crossAim(moveX: number, moveY: number): { x: number; z: number; vel: V3; spin: V3; time: number } | null {
+    const p = this.controlled;
+    if (this.autoPlay || this.phase !== 'play' || this.owner !== p || this.heldBy === p) return null;
+    if (!this.inCrossZone(p.team, this.ball.pos.x, this.ball.pos.z)) return null;
+    // The stick as the button handler reads it.
+    const m = Math.hypot(moveX, moveY);
+    const aimed = m > 0.12;
+    const plan: KickPlan = {
+      type: 'lob',
+      dirX: aimed ? moveX / m : Math.cos(p.facing),
+      dirZ: aimed ? -moveY / m : Math.sin(p.facing),
+      power: 0.5,
+      targetId: -1,
+      expires: 0,
+      aimed,
+    };
+    const c = this.pickCross(p, plan);
+    const r = solveLofted(this.ball.pos, c.x, c.z, c.angle, 14, c.curl);
+    return { x: c.x, z: c.z, vel: r.vel, spin: r.spin, time: r.time };
+  }
+
+  /** The cross itself (no side effects): who it's for, where it lands, its loft and curl. */
+  private pickCross(p: Player, plan: KickPlan): { receiver: Player | null; x: number; z: number; angle: number; curl: number } {
     const b = this.ball;
     const team = this.teams[p.team];
     const dir = team.dir;
@@ -2559,22 +2610,6 @@ export class Match {
     // Curl away from the goal (and the keeper): right of travel is (-fz, fx).
     const curlSign = Math.sign(-fz * -dir) || 1;
     const curl = curlSign * (10 + Math.min(10, d * 0.3));
-    if (best) {
-      // Others attack the near post, far post and the edge of the area.
-      const near = Math.sign(b.pos.z || 1);
-      const spots: [number, number][] = [
-        [gx - dir * 5.5, near * 2.5],
-        [gx - dir * 7, -near * 3.5],
-        [gx - dir * 13, 0],
-      ];
-      let k = 0;
-      for (const q of team.players) {
-        if (q === p || q === best || q.role === 'GK' || q.role === 'DEF' || k >= spots.length) continue;
-        if (dist2D(q.pos.x, q.pos.z, gx, 0) > 34) continue;
-        this.ai.setRun(q, spots[k][0], spots[k][1]);
-        k++;
-      }
-    }
     return { receiver: best, x: lx, z: lz, angle, curl };
   }
 

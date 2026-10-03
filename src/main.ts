@@ -1035,8 +1035,11 @@ function frame(now: number): void {
   if (playing) hud.update(match, now / 1000);
   if (playing && !paused) minimap.update(match, now / 1000);
   updateAim();
-  // Corner ring and flight preview (holding Shoot shows the floated ball).
-  cornerAim.update(match, playing && controls.input.held[Btn.C], now / 1000);
+  // Corner / goal kick ring and flight preview (holding Shoot shows the floated ball); the
+  // same for a cross while Pass is held and slid up.
+  const inp = controls.input;
+  const crossing = playing && !paused && inp.held[Btn.A] && inp.swipe[Btn.A];
+  cornerAim.update(match, playing && inp.held[Btn.C], now / 1000, crossing ? inp : null);
   updateCharge(alpha);
   updateStamina(alpha);
 
