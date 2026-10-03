@@ -1,5 +1,6 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.93', note: 'Your player only goes for a loose ball while you hold Press or Sprint: flat out, the stick bending his run (up to 60%, 30% when it’s tight). Let go and the stick alone moves him. Pass pressed early still meets the ball.' },
   { v: '0.92.1', note: 'Solar Gardens now stands alone in open green plains: the garden towers, tree avenues and wind turbines beyond the stands are gone.' },
   { v: '0.92', note: 'New ground: Solar Gardens, a solarpunk stadium built chunky for the pixel art. Rammed-earth stands, a sawtooth solar canopy on tree columns, hanging gardens, a wood growing on the home end’s roof, light-tree floodlights, garden towers and turning wind turbines. Pick it before kick-off.' },
   { v: '0.91', note: 'Big performance boost. Pitch light, stand shadows and clouds are now pre-drawn instead of recalculated every pixel; the crowd, sky and shadows are cheaper; the stadium’s props draw in a few batches; less hidden work on bench, particles and HUD. Same look, smoother frames.' },

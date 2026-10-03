@@ -1191,11 +1191,12 @@ export class Match {
       }
     } else this.pressTight = 0;
 
-    // Ball seeking: the active player always hunts the ball (meets loose balls and
-    // passes, closes down the carrier). The stick bends the run (up to 70%) while he has
-    // time in hand, and still about 35% when the meeting is tight. Stick idle: pure seek.
-    // Pressing on a ball in the air or running loose means attacking it flat out.
-    if (this.owner !== c && (!this.pressHeld || loose)) {
+    // Ball seeking, only while Press or Sprint is held: he goes to meet a loose ball or a
+    // pass in flight (ours or theirs). The stick bends the run (up to 60%) while he has time
+    // in hand, about 30% when the meeting is tight; stick idle, pure seek. Either button
+    // attacks it flat out (easing only so as not to run past it). Button up: the stick alone
+    // moves him.
+    if (this.owner !== c && loose && (this.pressHeld || input.sprint || c.plan)) {
       const mode = this.seekTarget(c, tmpV);
       if (mode) {
         const dx = tmpV.x - c.pos.x;
@@ -1205,16 +1206,12 @@ export class Match {
           const tx = dx / d;
           const tz = dz / d;
           let speed: number;
-          let stickW = 0.7;
+          let stickW = 0.6;
           if (mode === 'loose') {
-            // Pace from the meeting: flat out when it's tight, otherwise just enough to be there
-            // as the ball is (the same pace the computer's players run at). A slow or dying ball
-            // close by won't come to him: he goes and gets it.
+            // Flat out: the button asked for it.
             const ip = this.ai.intercept[c.id];
-            const bs = Math.hypot(this.ball.vel.x, this.ball.vel.z);
             const gap = this.ballDist(c);
-            const floor = gap > 3 ? PLAYER.jogSpeed : gap > 1 ? PLAYER.jogSpeed + (bs < 3 ? 1 : 0) : bs < 1.5 ? 2.5 : 1.2;
-            speed = Math.max(floor, this.ai.meetPace(c));
+            speed = c.topSpeed;
             stickW *= 0.5 + 0.5 * clamp((ip.slack - 0.15) / 0.5, 0, 1);
             c.burst = gap < 2.5;
             // Arrive, don't overrun: no faster than he can come into the meeting point moving
@@ -1250,7 +1247,7 @@ export class Match {
           }
           c.moveX = dirX;
           c.moveZ = dirZ;
-          c.wantSpeed = input.sprint || this.pressHeld ? c.topSpeed : Math.min(c.topSpeed, speed);
+          c.wantSpeed = Math.min(c.topSpeed, speed);
           if (mode === 'press' && d < 6) {
             c.lookTarget.copy(this.ball.pos);
             c.lookAt = c.lookTarget;
