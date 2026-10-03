@@ -213,6 +213,7 @@ export class Match {
   shotBy: Player | null = null;
   /** Wall players block (don't play) the ball until this time. */
   private wallUntil = -1;
+  private readonly zone = { x: 0, z: 0, r: 0, half: false };
 
   readonly humanTeam = 0;
   /** When true the AI also drives the "controlled" player (attract mode / tests). */
@@ -861,6 +862,7 @@ export class Match {
     for (const p of this.players) p.move(DT);
     this.collidePlayers();
     this.confineToPitch();
+    this.keepRestartDistance();
 
     // Action resolution (kicks, tackles).
     for (const p of this.players) this.resolveActions(p);
@@ -1234,6 +1236,21 @@ export class Match {
         }
       }
     }
+
+    // Caught inside the distance at the other side's dead ball: an idle stick walks him out.
+    const zn = this.restartZone(c);
+    if (zn && m <= 0.12) {
+      const dx = c.pos.x - zn.x;
+      const dz = c.pos.z - zn.z;
+      const d = Math.hypot(dx, dz);
+      if (d < zn.r - 0.1) {
+        c.moveX = d > 1e-3 ? dx / d : -this.teams[c.team].dir;
+        c.moveZ = d > 1e-3 ? dz / d : 0;
+        c.wantSpeed = PLAYER.jogSpeed;
+        c.lookTarget.copy(this.ball.pos);
+        c.lookAt = c.lookTarget;
+      }
+    }
   }
 
   /** Where the active player should go to win the ball, if anywhere. */
@@ -1478,6 +1495,66 @@ export class Match {
       b2.vel.z += (this.rng.next() - 0.5) * 3;
     }
     this.events.tackle = Math.max(this.events.tackle, 0.5);
+  }
+
+  /**
+   * The ground a player must give at the other side's dead ball, until it's played: 9.15 m
+   * round a free kick (a wall stands right on it), 9.15 m from the corner arc, and at a
+   * kick-off his own half, outside the centre circle. Null when he can go where he likes.
+   */
+  restartZone(p: Player): { x: number; z: number; r: number; half: boolean } | null {
+    const sp = this.setPiece;
+    if (!sp || p.team === sp.team) return null;
+    const zn = this.zone;
+    zn.half = false;
+    if (this.phase === 'kickoff') {
+      zn.x = zn.z = 0;
+      zn.r = PITCH.circleRadius;
+      zn.half = true;
+    } else if (this.phase === 'setpiece' && sp.kind === 'freekick') {
+      zn.x = sp.x;
+      zn.z = sp.z;
+      zn.r = PITCH.circleRadius;
+    } else if (this.phase === 'setpiece' && sp.kind === 'corner') {
+      zn.x = Math.sign(sp.x) * PITCH.halfL;
+      zn.z = Math.sign(sp.z) * PITCH.halfW;
+      zn.r = PITCH.circleRadius + 1;
+    } else return null;
+    return zn;
+  }
+
+  /**
+   * An invisible line round the restart: nobody gets any closer than he already was, and
+   * nobody crosses into the zone. Whoever's caught inside it can only walk out.
+   */
+  private keepRestartDistance(): void {
+    for (const p of this.players) {
+      const zn = this.restartZone(p);
+      if (!zn) continue;
+      const dx = p.pos.x - zn.x;
+      const dz = p.pos.z - zn.z;
+      const d = Math.hypot(dx, dz);
+      const lim = Math.min(zn.r, Math.hypot(p.prevPos.x - zn.x, p.prevPos.z - zn.z));
+      if (d < lim && d > 1e-3) {
+        const nx = dx / d;
+        const nz = dz / d;
+        p.pos.x = zn.x + nx * lim;
+        p.pos.z = zn.z + nz * lim;
+        const vn = p.vel.x * nx + p.vel.z * nz;
+        if (vn < 0) {
+          p.vel.x -= nx * vn;
+          p.vel.z -= nz * vn;
+        }
+      }
+      if (zn.half) {
+        const dir = this.teams[p.team].dir;
+        const max = Math.max(p.prevPos.x * dir, 0);
+        if (p.pos.x * dir > max) {
+          p.pos.x = max * dir;
+          if (p.vel.x * dir > 0) p.vel.x = 0;
+        }
+      }
+    }
   }
 
   private confineToPitch(): void {

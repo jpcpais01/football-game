@@ -1698,17 +1698,18 @@ export class AI {
       x = this.tmp.x;
       z = this.tmp.z;
     }
-    // Opponents keep their distance.
-    if (p.team !== sp.team) {
-      const minD = sp.kind === 'throw' ? 3 : 9.3;
-      const dx = x - sp.x;
-      const dz = z - sp.z;
-      const d = Math.hypot(dx, dz);
-      if (d < minD) {
-        const k = minD / Math.max(0.1, d);
-        x = sp.x + dx * k;
-        z = sp.z + dz * k;
-      }
+    // Opponents keep their distance (a step clear of the line the match holds them behind).
+    const zn = m.restartZone(p);
+    const cx = zn ? zn.x : sp.x;
+    const cz = zn ? zn.z : sp.z;
+    const minD = zn ? zn.r + 0.15 : p.team !== sp.team ? (sp.kind === 'throw' ? 3 : 9.3) : 0;
+    const dx = x - cx;
+    const dz = z - cz;
+    const d = Math.hypot(dx, dz);
+    if (d < minD) {
+      const k = minD / Math.max(0.1, d);
+      x = cx + dx * k;
+      z = cz + dz * k;
     }
     this.moveTo(p, x, z, false, true);
   }
