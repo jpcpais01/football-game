@@ -1353,10 +1353,14 @@ export function crowdFlags(path: PathPt[], home: number, away: number, club: Sta
         // The fan swings the flag back and forth around the foot of the pole.
         float sp = 1.7 + fract(aPhase) * 0.8;
         float A = 0.5 + uExcite * 0.35;
-        float sway = sin(uTime * sp + aPhase) * A;
-        float swayVel = cos(uTime * sp + aPhase) * A * sp;
-        // Waves run from the pole to the fly end, faster and bigger when the flag moves.
-        float t = uTime * (4.0 + wind * 1.5 + abs(swayVel) * 1.2);
+        float th = uTime * sp + aPhase;
+        float sway = sin(th) * A;
+        float swayVel = cos(th) * A * sp;
+        // Waves run from the pole to the fly end, faster mid-swing. The wave phase is the
+        // integral of that speed (|cos| integrates to 2n + sin of the remainder): scaling the
+        // clock by a changing speed instead would race faster the longer the page is open.
+        float n = floor(th / 3.14159265 + 0.5);
+        float t = uTime * (4.0 + wind * 1.5) + (2.0 * n + sin(th - n * 3.14159265)) * 0.75;
         float ph1 = p.x * 2.6 - t + aPhase;
         float ph2 = p.x * 5.6 - t * 1.7 + p.y * 2.2 + aPhase * 1.3;
         float ph3 = p.x * 11.0 - t * 3.1 + p.y * 5.0;
