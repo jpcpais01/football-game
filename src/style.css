@@ -184,6 +184,8 @@ html, body {
   background: rgba(20, 26, 22, 0.55); border: 2px solid rgba(244, 239, 227, 0.4);
   color: var(--ink); font-weight: 800; letter-spacing: 0.06em; font-size: 13px;
   transition: transform 0.06s, background 0.12s;
+  /* A button's label or state changing re-lays out and repaints that button alone. */
+  contain: layout style;
 }
 .btn span { pointer-events: none; }
 .btn.down { transform: scale(0.92); background: rgba(244, 239, 227, 0.32); }
@@ -318,6 +320,7 @@ html, body {
   position: absolute; top: calc(52px + var(--safe-t)); left: calc(14px + var(--safe-l)); font: 600 12px/1 monospace;
   font-variant-numeric: tabular-nums; color: var(--ink); white-space: pre; line-height: 1.25;
   background: rgba(0, 0, 0, 0.55); padding: 4px 6px; border-radius: 3px; pointer-events: none; z-index: 5;
+  contain: layout style;
 }
 
 /* ---------------------------------------------------------------- Stamina */
@@ -327,6 +330,7 @@ html, body {
   min-width: 118px; padding: 5px 9px 6px; border-radius: 4px; pointer-events: none;
   background: #2f9e4f; color: #fff; display: none;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3), inset 0 -2px 0 rgba(0, 0, 0, 0.18);
+  contain: layout style;
 }
 .hud-player.show { display: block; }
 .hud-player.mid { background: #e8bd25; color: #1b1a12; }

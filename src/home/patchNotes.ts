@@ -1,5 +1,6 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.96.11', note: 'Fewer hitches when the ball changes hands: the buttons only rewrite labels that really change, and each button, the player card and the FPS counter re-lay out on their own instead of the whole screen. The full breakdown also times the browser’s own page work.' },
   { v: '0.96.10', note: 'The FPS counter (pause menu) has three settings: off, fps only, and the full breakdown. Only the full breakdown times the graphics chip, which itself causes a small hitch every two seconds.' },
   { v: '0.96.9', note: 'The stands’ sun-shadow update, the last occasional hiccup, is spread thinner: a frame of its own to clear the map, then a 24th of the stands a frame instead of a 12th.' },
   { v: '0.96.8', note: 'Smoother frames: the players’ poses and the particles are now sent to the graphics chip in two alternating buffers, so a new frame never overwrites data the chip may still be drawing from (some phones stalled on every frame for it).' },

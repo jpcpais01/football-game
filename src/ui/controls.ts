@@ -114,7 +114,10 @@ export class Controls {
     const labels = LABELS[mode];
     const all = [...this.btnEls, this.sprintEl];
     all.forEach((el, i) => {
-      (el.querySelector('span') as HTMLElement).innerHTML = labels[i];
+      // Only a label that really changes is rewritten (each write is a re-layout and repaint
+      // of the button, and possession can flip back and forth several times a second).
+      const span = el.querySelector('span') as HTMLElement;
+      if (span.dataset.label !== labels[i]) span.innerHTML = span.dataset.label = labels[i];
       el.classList.toggle('defend', mode === 'defend');
       el.classList.toggle('celebrate', mode === 'celebrate');
       el.classList.toggle('picked', mode === 'celebrate' && picked === i);

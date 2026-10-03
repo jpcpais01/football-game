@@ -49,12 +49,34 @@ export class Profiler {
   private gpuPeak = new Map<string, number>();
   private probeAt = 0;
   private stalled = 0;
+  // The page's own work after our frame (style, layout, paint of the HUD and buttons): timed
+  // from the end of the frame to a message posted then, which runs once the browser is done.
+  private pageSum = 0;
+  private pageMax = 0;
+  private pageN = 0;
+  private pageAt = 0;
+  private channel = new MessageChannel();
   /** The text to show (refreshed every two seconds). */
   text = '';
 
   private renderer: THREE.WebGLRenderer | null = null;
   private tiny = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: false });
   private px = new Uint8Array(4);
+
+  constructor() {
+    this.channel.port1.onmessage = () => {
+      const ms = performance.now() - this.pageAt;
+      this.pageSum += ms;
+      this.pageN++;
+      if (ms > this.pageMax) this.pageMax = ms;
+    };
+  }
+
+  /** Called at the very end of a frame: times what the browser does after it. */
+  markPage(): void {
+    this.pageAt = performance.now();
+    this.channel.port2.postMessage(0);
+  }
 
   attachGpu(renderer: THREE.WebGLRenderer): void {
     this.renderer = renderer;
@@ -204,6 +226,7 @@ export class Profiler {
       lines.push(`${s.sub ? ' └' : ''}${s.name.padEnd(s.sub ? 5 : 7)}avg${f(s.sum / n)} max${f(s.max)}`);
     }
     if (this.gcs) lines.push(`gc    ${this.gcs}× in 2 s`);
+    if (this.pageN) lines.push(`page  avg${f(this.pageSum / this.pageN)} max${f(this.pageMax)}  (browser: layout, paint of HUD and buttons)`);
     // GPU time per pass (from the last probe; the peak over the window for bakes).
     if (this.gpuLast.size) {
       // Every figure less the round trip a wait costs on its own.
@@ -241,6 +264,7 @@ export class Profiler {
     this.frames = this.long = this.gcs = 0;
     this.frameSum = this.cpuSum = this.cpuMax = this.worstMs = 0;
     this.gpuSum = this.gpuMax = this.gpuN = 0;
+    this.pageSum = this.pageMax = this.pageN = 0;
     for (const s of this.secs) s.sum = s.max = 0;
     this.gpuPeak.clear();
   }

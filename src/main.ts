@@ -1300,6 +1300,7 @@ function frame(now: number): void {
   const cpuMs = performance.now() - t0;
   cpuAvg += (cpuMs - cpuAvg) * 0.05;
   prof.end(now, frameMs, cpuMs);
+  if (fullStats) prof.markPage();
   adaptQuality(frameMs, now);
 
   if (showStats) {
