@@ -65,10 +65,11 @@ export interface ClubLook {
 }
 
 /** Where a match is played: the big stadium, the old second-division ground, or the bare pitch. */
-export type Ground = 'stadium' | 'old' | 'bare';
+export type Ground = 'stadium' | 'old' | 'training' | 'bare';
 export const GROUNDS: { id: Ground; name: string; about: string }[] = [
   { id: 'stadium', name: 'Big stadium', about: 'Four stands, floodlit roofs, a full house' },
   { id: 'old', name: 'Old Ground', about: 'Terraces, the Shed, pylons and the town beyond' },
+  { id: 'training', name: 'Training ground', about: 'The club’s own: clean, modern, no crowd' },
   { id: 'bare', name: 'Bare pitch', about: 'Just the field: no stands, no crowd' },
 ];
 

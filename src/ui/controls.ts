@@ -12,6 +12,8 @@ const LABELS = {
   corner: ['WHIP', 'SHORT', 'FLOAT', 'SPRINT'],
   goalkick: ['DRIVE', 'SHORT', 'FLOAT', 'SPRINT'],
   defend: ['TACKLE', 'SWITCH', 'PRESS', 'SPRINT<br><small>▼ TACKLE · ◀ SLIDE</small>'],
+  // Training in goal: any of the three dives (toward the stick, or at the shot).
+  keeper: ['DIVE', 'DIVE', 'DIVE', 'QUICK<br><small>STEP</small>'],
   // After your goal (same order as CELEBRATIONS in the match).
   celebrate: ['KNEE<br>SLIDE', 'AERO<br>PLANE', 'SIUU', 'BACK<br>FLIP'],
 };

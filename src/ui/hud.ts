@@ -43,6 +43,7 @@ export class Hud {
         <div class="clock">0'</div>
         <div class="added"></div>
       </div>
+      <div class="drillboard"><b class="db-name"></b><span class="db-task"></span><span class="db-score"></span><span class="db-streak"></span></div>
       <div class="hud-player"><div class="hp-name"></div><div class="hp-bar"><i></i></div></div>
       <div class="caption"><div class="c-title"></div><div class="c-sub"></div></div>
       <div class="scorecard">
@@ -132,6 +133,26 @@ export class Hud {
 
   setVisible(v: boolean): void {
     this.root.style.display = v ? '' : 'none';
+  }
+
+  /** Training: the drill's board takes the scoreboard's place (null: back to the match's). */
+  setDrill(name: string | null): void {
+    this.root.classList.toggle('drill', name !== null);
+    this.root.querySelector('.db-name')!.textContent = name ?? '';
+    this.drillLast = '';
+  }
+  private drillLast = '';
+
+  /** The drill's score, this round's task (2 v 2) and the streak (best in brackets). */
+  drill(line: string, task: string, streak: number, best: number): void {
+    const key = `${line}|${task}|${streak}|${best}`;
+    if (key === this.drillLast) return;
+    this.drillLast = key;
+    const q = (s: string) => this.root.querySelector(s) as HTMLElement;
+    q('.db-score').textContent = line;
+    q('.db-task').textContent = task;
+    q('.db-task').style.display = task ? '' : 'none';
+    q('.db-streak').textContent = `Streak ${streak} · Best ${best}`;
   }
 
   /** `variant`: '' (big moment), 'small' (a call: foul, advantage), 'yellow' (a booking). */

@@ -594,6 +594,10 @@ export class PlayersView {
   bench: Benches | null = null;
   /** No dugouts at this ground: the substitutes aren't drawn. */
   hideBench = false;
+  /** No referee or linesmen (training). */
+  hideOfficials = false;
+  /** The match roster drawn (see Match.field). */
+  private roster = -1;
   private lastTime = 0;
 
   constructor(match: Match, extra: Player[] = []) {
@@ -742,6 +746,7 @@ export class PlayersView {
   applyColors(match: Match): void {
     // A new match has new Player objects: always draw the current ones, from rest.
     this.list = [...match.players, ...this.extra];
+    this.roster = match.roster;
     this.secReady.fill(0);
     this.footW.fill(0);
     this.inStance.fill(0);
@@ -862,7 +867,7 @@ export class PlayersView {
       this.sphere.center.set(p.pos.x, 1, p.pos.z);
       this.sphere.radius = 7; // a margin for long evening shadows thrown into view
       if (cam && !this.frustum.intersectsSphere(this.sphere)) continue;
-      if (p.id >= benchFrom) continue;
+      if (p.id >= benchFrom || (this.hideOfficials && p.team === 2)) continue;
       this.slot[p.id] = vis.length;
       vis.push(p.id);
       const hair = this.parts[HAIR_OF_STYLE[p.look.hairStyle] ?? 'hairBun'];
@@ -1034,7 +1039,7 @@ export class PlayersView {
     const kneeBend = this.parts.thigh.mesh.geometry.getAttribute('aBend') as THREE.InstancedBufferAttribute;
     const toe = this.parts.boot.mesh.geometry.getAttribute('aToe') as THREE.InstancedBufferAttribute;
     const off = this.officials;
-    if (this.list[0] !== match.players[0]) this.applyColors(match);
+    if (this.list[0] !== match.players[0] || this.roster !== match.roster) this.applyColors(match);
     this.cull();
     const floodOn = this.flood.visible;
     for (const p of this.list) {

@@ -154,7 +154,16 @@ const HUMAN_CONTACT_REACH = 1.6;
 
 export class Match {
   readonly ball = new Ball();
+  /** The players taking part (everyone, except in a small-sided training drill). */
   readonly players: Player[] = [];
+  /** Every player by id, taking part or not. */
+  readonly all: Player[] = [];
+  /** Bumped whenever the players taking part change (see `field`). */
+  roster = 0;
+  /** Training: no clock, no offside, and restarts are the drill's business. */
+  training = false;
+  /** Training: the human plays in goal (the stick positions him, a button dives). */
+  keeperHuman = false;
   readonly teams: TeamState[] = [];
   readonly rng: Rng;
   readonly ai: AI;
@@ -201,7 +210,7 @@ export class Match {
    */
   private offsideSnap: { team: number; flagged: Player[] } | null = null;
   /** Who struck the last shot (headers included); see `shotTeam`. */
-  private shotBy: Player | null = null;
+  shotBy: Player | null = null;
   /** Wall players block (don't play) the ball until this time. */
   private wallUntil = -1;
 
@@ -268,6 +277,7 @@ export class Match {
       });
       this.teams.push(team);
     }
+    this.all.push(...this.players);
     this.ai = new AI(this);
     this.controlled = this.teams[this.humanTeam].players[9];
     this.startKickoff(0);
@@ -331,6 +341,61 @@ export class Match {
     return dist2D(p.pos.x, p.pos.z, this.ball.pos.x, this.ball.pos.z);
   }
 
+  /** The player in shirt slot `index` (0 GK … 9 ST), or the best stand-in when a training
+   * drill has left him out: an outfielder if there is one. */
+  byJob(team: number, index: number): Player {
+    const ps = this.teams[team].players;
+    if (ps[index]?.index === index) return ps[index];
+    return ps.find((p) => p.index === index) ?? ps.find((p) => p.role !== 'GK') ?? ps[0];
+  }
+
+  /**
+   * Training: only these shirt slots take part, per team; the rest stand down (not simulated,
+   * not drawn). Null brings everyone back.
+   */
+  field(squads: [number[], number[]] | null): void {
+    this.players.length = 0;
+    for (let t = 0; t < 2; t++) {
+      const team = this.teams[t];
+      team.players = this.all.filter((p) => p.team === t && (!squads || squads[t].includes(p.index)));
+      this.players.push(...team.players);
+    }
+    this.roster++;
+  }
+
+  /** Training: a clean slate between attempts (no restart pending, nobody on the ball,
+   * everyone fresh). */
+  clearPlay(): void {
+    this.pendingRestart = null;
+    this.setPiece = null;
+    this.owner = null;
+    this.heldBy = null;
+    this.passTarget = null;
+    this.lastTouch = null;
+    this.lastKicker = null;
+    this.shotBy = null;
+    this.advantage = null;
+    this.offsideSnap = null;
+    this.scorer = null;
+    this.celebration = null;
+    this.lunge = null;
+    this.wallUntil = -1;
+    this.ball.reset(0, 0);
+    for (const p of this.all) {
+      p.stamina = 1;
+      p.vel.set(0, 0, 0);
+      p.action = 'none';
+      p.plan = null;
+      p.lookAt = null;
+      p.sprinting = false;
+    }
+  }
+
+  /** The restart waiting while the ball runs out (a foul's free kick or penalty included). */
+  get restartPending(): SetPieceKind | null {
+    return this.pendingRestart?.kind ?? null;
+  }
+
   // ------------------------------------------------------------------ restarts
 
   /** Where a player lines up for a kick-off taken by `kickTeam` (world). */
@@ -379,10 +444,10 @@ export class Match {
     this.lastTouch = null;
     this.offsideSnap = null;
     this.possTeam = team;
-    const taker = this.teams[team].players[9];
+    const taker = this.byJob(team, 9);
     this.setPiece = { kind: 'kickoff', team, x: 0, z: 0, taker, t: 0 };
     if (team === this.humanTeam) this.setControlled(taker);
-    else this.setControlled(this.teams[this.humanTeam].players[9]);
+    else this.setControlled(this.byJob(this.humanTeam, 9));
     this.events.whistle = 1;
   }
 
@@ -413,10 +478,10 @@ export class Match {
     const direct = kind === 'freekick' && toGoal < 32 && Math.abs(z) < 24 && (goalX - x) * dir > 9;
     let taker: Player;
     if (kind === 'goalkick') {
-      taker = this.teams[team].players[0];
+      taker = this.byJob(team, 0);
     } else if (kind === 'penalty' || direct) {
       // The specialist steps up: the best striker of a dead ball among those close enough.
-      taker = this.teams[team].players[9];
+      taker = this.byJob(team, 9);
       let best = -1e9;
       for (const p of this.teams[team].players) {
         if (p.role === 'GK') continue;
@@ -428,7 +493,7 @@ export class Match {
       }
     } else {
       // Nearest outfield player of the restarting team.
-      taker = this.teams[team].players[1];
+      taker = this.byJob(team, 1);
       let best = 1e9;
       for (const p of this.teams[team].players) {
         if (p.role === 'GK') continue;
@@ -556,7 +621,7 @@ export class Match {
 
   /** The short goal kick: the nearest outfield team-mate, preferring the ring's side. */
   shortOption(p: Player, t: { x: number; z: number }): Player {
-    let best = this.teams[p.team].players[2];
+    let best = this.byJob(p.team, 2);
     let bestS = 1e9;
     for (const q of this.teams[p.team].players) {
       if (q === p || q.role === 'GK') continue;
@@ -731,7 +796,7 @@ export class Match {
     const ball = this.ball;
 
     const running = this.phase === 'play' || this.phase === 'out' || this.phase === 'setpiece' || this.phase === 'kickoff';
-    if (running) this.clock += DT;
+    if (running && !this.training) this.clock += DT;
 
     // Half / full time: once the added time is up, the referee lets an attack in the final third
     // play out. He blows when it's over: the ball back out of the third, won by the defenders,
@@ -759,7 +824,7 @@ export class Match {
       for (const p of this.players) p.stamina = Math.min(1, p.stamina + 0.4);
       this.startKickoff(1);
     }
-    if (this.phase === 'out' && this.phaseT > 1.5 && this.pendingRestart) {
+    if (this.phase === 'out' && this.phaseT > 1.5 && this.pendingRestart && !this.training) {
       const r = this.pendingRestart;
       this.pendingRestart = null;
       this.startSetPiece(r.kind, r.team, r.x, r.z);
@@ -922,6 +987,25 @@ export class Match {
     const m = Math.hypot(input.moveX, input.moveY);
     if (m > 0.12) this.noInputT = 0;
     else this.noInputT += DT;
+
+    // Training in goal: the stick moves him (idle: he takes up his own position), any button dives.
+    if (this.keeperHuman && c.role === 'GK' && this.heldBy !== c && this.phase === 'play') {
+      const side = Math.abs(input.moveY) > 0.3 ? -Math.sign(input.moveY) : 0;
+      for (const ev of input.events) if (ev.kind === 'down') this.ai.humanDive(c, side);
+      input.events.length = 0;
+      c.sprinting = false;
+      if (c.isBusy()) return;
+      c.lookAt = null;
+      if (m > 0.12) {
+        c.moveX = input.moveX / m;
+        c.moveZ = -input.moveY / m;
+        c.wantSpeed = (input.sprint ? 5.5 : 3.6) * Math.min(1, m / 0.85);
+        c.lookTarget.copy(this.ball.pos);
+        c.lookAt = c.lookTarget;
+        c.squareUp = true;
+      } else this.ai.keeperStance(c);
+      return;
+    }
 
     // Buttons.
     for (const ev of input.events) {
@@ -1746,7 +1830,7 @@ export class Match {
   private judgeOffside(p: Player, deliberate = true, restart?: SetPieceKind): void {
     const s = this.offsideSnap;
     if (s && s.team !== p.team && !deliberate) return;
-    if (this.phase !== 'play' || restart === 'throw' || restart === 'corner' || restart === 'goalkick') {
+    if (this.phase !== 'play' || this.training || restart === 'throw' || restart === 'corner' || restart === 'goalkick') {
       this.offsideSnap = null;
       return;
     }
@@ -1773,7 +1857,7 @@ export class Match {
     if (this.phase !== 'play') return;
     const b = this.ball.pos;
     const near = (team: number) => {
-      let best = this.teams[team].players[1];
+      let best = this.byJob(team, 1);
       let bd = 1e9;
       for (const p of this.teams[team].players) {
         if (p.role === 'GK') continue;
@@ -1902,7 +1986,7 @@ export class Match {
     if (plan.type === 'through') {
       const ask = (only: Player | null) =>
         this.ai.planThrough(p, plan.dirX, plan.dirZ, plan.aimed === true, plan.aimed === undefined ? 0.5 : plan.power, !!plan.lofted, only);
-      through = ask(plan.targetId >= 0 ? this.players[plan.targetId] : null);
+      through = ask(plan.targetId >= 0 ? this.all[plan.targetId] : null);
       if (!through && plan.aimed === undefined) {
         through = ask(null);
         if (!through) plan = { ...plan, type: 'pass', targetId: -1, aimed: false };
@@ -1922,7 +2006,7 @@ export class Match {
       vel = r.vel;
       spin = r.spin;
       strength = 0.6 + pw * 0.4;
-      this.ai.penaltyGuess(this.teams[1 - p.team].players[0], tz, ty);
+      this.ai.penaltyGuess(this.byJob(1 - p.team, 0), tz, ty);
     } else if (plan.type === 'shot' && setPieceKind === 'freekick' && this.setPiece?.direct) {
       // Direct free kick: over (or round) the wall, dipping under the bar, curling away from the keeper.
       skill = p.attrs.shooting * 0.6 + p.attrs.passing * 0.4;
@@ -2063,7 +2147,7 @@ export class Match {
     } else {
       receiver =
         plan.targetId >= 0
-          ? this.players[plan.targetId]
+          ? this.all[plan.targetId]
           : plan.aimed === false
             ? this.ai.bestReceiver(p, false)
             : this.ai.pickReceiver(p, plan.dirX, plan.dirZ, false, plan.aimed ? AIM_CONE : undefined);
@@ -2180,7 +2264,7 @@ export class Match {
     // Keepers first: saves and catches.
     for (const t of this.teams) {
       const k = t.players[0];
-      if (this.ai.keeperContact(k)) return;
+      if (k?.role === 'GK' && this.ai.keeperContact(k)) return;
     }
 
     // Closest eligible player gets the touch; a high ball both sides can reach is a duel.
@@ -2663,7 +2747,7 @@ export class Match {
       const side = p.x > 0 ? 1 : -1;
       const scoringTeam = this.teams[0].dir === side ? 0 : 1;
       this.teams[scoringTeam].score++;
-      this.scorer = this.lastTouch && this.lastTouch.team === scoringTeam ? this.lastTouch : this.teams[scoringTeam].players[9];
+      this.scorer = this.lastTouch && this.lastTouch.team === scoringTeam ? this.lastTouch : this.byJob(scoringTeam, 9);
       this.phase = 'goal';
       this.phaseT = 0;
       this.owner = null;
