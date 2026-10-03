@@ -534,24 +534,29 @@ prof.attachGpu(renderer);
 prof.wrap(AI.prototype, 'update', 'ai');
 prof.wrap(AI.prototype, 'planThrough', 'thru');
 prof.wrap(Match.prototype, 'performKick', 'kick');
-// FPS / frame-time readout: a pause-menu setting (always on with ?debug).
-let showStats = DEBUG;
+// FPS readout, a pause-menu setting: off, the frame rate only, or the full breakdown (which
+// times the GPU by waiting for it every two seconds: a hitch of its own). Full with ?debug.
+let statsMode = DEBUG ? 2 : 0;
 try {
-  showStats = showStats || localStorage.getItem('stats') === '1';
+  if (!DEBUG) statsMode = Math.min(2, Math.max(0, Number(localStorage.getItem('stats')) || 0));
 } catch {
   /* keep default */
 }
+let showStats = statsMode > 0;
+let fullStats = statsMode === 2;
 const statsBtn = pauseMenu.querySelector('.stats') as HTMLButtonElement;
 const applyStats = () => {
+  showStats = statsMode > 0;
+  fullStats = statsMode === 2;
   fpsEl.style.display = showStats ? '' : 'none';
-  statsBtn.textContent = `FPS counter: ${showStats ? 'on' : 'off'}`;
+  statsBtn.textContent = `FPS counter: ${['off', 'fps only', 'full breakdown'][statsMode]}`;
 };
 applyStats();
 statsBtn.addEventListener('click', () => {
-  showStats = !showStats;
+  statsMode = (statsMode + 1) % 3;
   applyStats();
   try {
-    localStorage.setItem('stats', showStats ? '1' : '0');
+    localStorage.setItem('stats', String(statsMode));
   } catch {
     /* ignore */
   }
@@ -1244,7 +1249,7 @@ function frame(now: number): void {
   stadium.update(now / 1000, match.excitement, atmo, tifo, terraces, cutscene.active ? cutscene.hang : tifo);
   const standOn = SHARED.uStandOn.value > 0;
   // With the counter on, a bake's GPU time is measured on its own (drained before, waited after).
-  const timeBake = showStats && (standShadow.due(stadium.group, standOn) || groundLight.due(standShadow) || cloudField.due());
+  const timeBake = fullStats && (standShadow.due(stadium.group, standOn) || groundLight.due(standShadow) || cloudField.due());
   if (timeBake) prof.lap('world'), prof.gpuSync(null), prof.begin();
   standShadow.update(renderer, stadium.group, standOn);
   if (timeBake) prof.gpuSync('bake:sun shadow');
@@ -1279,17 +1284,17 @@ function frame(now: number): void {
   } else if (pixelLook()) {
     if ((shadowTick++ & 1) === 0) renderer.shadowMap.needsUpdate = true;
     // Once every two seconds the counter waits for the GPU after each pass to time it.
-    const probe = showStats && prof.probeDue(now);
+    const probe = fullStats && prof.probeDue(now);
     if (probe) prof.gpuSync(null), (renderer.shadowMap.needsUpdate = true); // (timed with its shadow pass)
-    else if (showStats) prof.gpuBegin();
+    else if (fullStats) prof.gpuBegin();
     if (probe) probeWorld();
     pixelPass.render(renderer, scene, rig.camera, SHARED.uFlood.value, atmo.weather === 'sunny' ? 0.35 : 1, rig.subPixelX, rig.subPixelY, probe ? (pass) => prof.gpuSync(pass) : undefined);
-    if (showStats && !probe) prof.gpuEnd();
+    if (fullStats && !probe) prof.gpuEnd();
   } else {
     renderer.shadowMap.needsUpdate = true;
-    if (showStats) prof.gpuBegin();
+    if (fullStats) prof.gpuBegin();
     renderer.render(scene, rig.camera);
-    if (showStats) prof.gpuEnd();
+    if (fullStats) prof.gpuEnd();
   }
   prof.lap('render');
   const cpuMs = performance.now() - t0;
@@ -1307,7 +1312,7 @@ function frame(now: number): void {
       fpsEl.textContent = DEBUG
         ? `${fps} fps · ${ms} ms · ${Math.round(info.calls / fpsFrames)} calls · ${(info.triangles / fpsFrames / 1000).toFixed(0)}k tris · dpr ${dpr.toFixed(2)} · cpu ${cpuAvg.toFixed(2)}ms`
         : `${fps} fps · ${ms} ms`;
-      if (prof.text) fpsEl.textContent += '\n' + prof.text;
+      if (fullStats && prof.text) fpsEl.textContent += '\n' + prof.text;
       fpsFrames = 0;
       fpsT = now;
       renderer.info.reset();
