@@ -597,12 +597,27 @@ async function enterFullscreen(): Promise<void> {
     if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
       await document.documentElement.requestFullscreen({ navigationUI: 'hide' });
     }
-    const o = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> };
-    await o.lock?.('landscape');
   } catch {
     /* not supported (iOS Safari): fine */
   }
+  await lockLandscape();
 }
+
+/** Landscape everywhere, menus included. The manifest no longer pins the orientation
+ * (that WebAPK would not launch on HyperOS), but an installed app may lock it itself,
+ * and so may any page once it is fullscreen. */
+async function lockLandscape(): Promise<void> {
+  try {
+    const o = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> };
+    await o.lock?.('landscape');
+  } catch {
+    /* a plain browser tab: only after the first tap goes fullscreen */
+  }
+}
+void lockLandscape();
+// The first tap anywhere goes fullscreen too, so the home screen is landscape and
+// edge to edge from the start rather than only once a match begins.
+document.addEventListener('pointerdown', () => void enterFullscreen(), { once: true, capture: true });
 
 let wakeLock: { release(): Promise<void> } | null = null;
 async function keepAwake(): Promise<void> {
@@ -887,8 +902,9 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     if (playing && !paused) setPaused(true);
     audio.suspend();
-  } else if (playing && wakeLock === null) {
-    void keepAwake();
+  } else {
+    void lockLandscape();
+    if (playing && wakeLock === null) void keepAwake();
   }
 });
 
