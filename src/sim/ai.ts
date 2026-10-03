@@ -1529,8 +1529,9 @@ export class AI {
   /**
    * Receiver for a human pass: the teammate best aligned with the stick. `cone` (cosine) is
    * how far off the stick he may be: an aimed pass never goes the other way from the aim.
+   * `power` (the charge, 0..1): past half, the harder it's charged the further on he looks.
    */
-  pickReceiver(p: Player, dirX: number, dirZ: number, through: boolean, cone = 0.35): Player | null {
+  pickReceiver(p: Player, dirX: number, dirZ: number, through: boolean, cone = 0.35, power?: number): Player | null {
     const m = this.m;
     let best: Player | null = null;
     let bestS = -1e9;
@@ -1545,6 +1546,8 @@ export class AI {
       let open = 99;
       for (const o of m.teams[1 - p.team].players) open = Math.min(open, dist2D(o.pos.x, o.pos.z, q.pos.x, q.pos.z));
       let s = align * 3 + clamp(open / 6, 0, 1) * 0.6 - d / 35;
+      // A full charge looks for the man further on (a tap or a normal pass: the nearer one).
+      if (power !== undefined) s += clamp((power - 0.5) * 2, 0, 1) * Math.min(d, 35) / 20;
       // Of the ones the stick points at, one he can actually get it to.
       if (!through && align > 0.7 && this.passMargin(p, q) < 0.1) s -= 1.2;
       if (through && q.role === 'FWD') s += 0.3;

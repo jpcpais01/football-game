@@ -2215,10 +2215,10 @@ export class Match {
         this.ai.setRun(receiver, tp.x, tp.z, tp.time + 1.2);
       } else {
         // No runner: weighted into space along the stick.
-        const len = 10 + 12 * plan.power;
+        const len = 12 + 18 * plan.power;
         const tx = clamp(b.pos.x + plan.dirX * len, -PITCH.halfL + 2, PITCH.halfL - 2);
         const tz = clamp(b.pos.z + plan.dirZ * len, -PITCH.halfW + 2, PITCH.halfW - 2);
-        r = lofted ? solveLofted(b.pos, tx, tz, 30, 40, 0) : solveGroundPass(b.pos, tx, tz, 2);
+        r = lofted ? solveLofted(b.pos, tx, tz, 30, 40, 0) : solveGroundPass(b.pos, tx, tz, 2.5 + 1.5 * plan.power);
       }
       vel = r.vel;
       spin = r.spin;
@@ -2230,12 +2230,25 @@ export class Match {
           ? this.all[plan.targetId]
           : plan.aimed === false
             ? this.ai.bestReceiver(p, false)
-            : this.ai.pickReceiver(p, plan.dirX, plan.dirZ, false, plan.aimed ? AIM_CONE : undefined);
-      if (!receiver) {
-        // Nobody there: play it into space.
-        const tx = clamp(b.pos.x + plan.dirX * 15, -PITCH.halfL, PITCH.halfL);
-        const tz = clamp(b.pos.z + plan.dirZ * 15, -PITCH.halfW, PITCH.halfW);
-        const r = solveGroundPass(b.pos, tx, tz, 4);
+            : this.ai.pickReceiver(p, plan.dirX, plan.dirZ, false, plan.aimed ? AIM_CONE : undefined, plan.aimed ? plan.power : undefined);
+      const lob = plan.type === 'lob';
+      // Nobody to feet where the stick points: into the path of a team-mate who gets there
+      // first along it (the through-ball planner, held to the stick).
+      const space = !receiver && plan.aimed && (plan.type === 'pass' || lob) ? this.ai.planThrough(p, plan.dirX, plan.dirZ, true, plan.power, lob, null) : null;
+      if (space) {
+        receiver = space.receiver;
+        const r = lob ? solveLofted(b.pos, space.landX, space.landZ, clamp(22 + dist2D(b.pos.x, b.pos.z, space.landX, space.landZ) * 0.3, 26, 40), 45, 0) : groundKick(space.dx, space.dz, space.v0);
+        this.ai.setRun(receiver, space.x, space.z, space.time + 1.2);
+        vel = r.vel;
+        spin = r.spin;
+        base = lob ? 0.04 : 0.028;
+        strength = lob ? 0.6 : 0.4;
+      } else if (!receiver) {
+        // Nobody at all: into space along the stick, as hard as it was charged.
+        const len = 12 + 23 * (plan.aimed === undefined ? 0.5 : plan.power);
+        const tx = clamp(b.pos.x + plan.dirX * len, -PITCH.halfL, PITCH.halfL);
+        const tz = clamp(b.pos.z + plan.dirZ * len, -PITCH.halfW, PITCH.halfW);
+        const r = lob ? solveLofted(b.pos, tx, tz, 30, 40, 0) : solveGroundPass(b.pos, tx, tz, 3 + 2 * plan.power);
         vel = r.vel;
         spin = r.spin;
       } else {
