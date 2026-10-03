@@ -270,7 +270,7 @@ export class HomeUI {
         </button>
       </main>
       <footer class="home-foot">
-        <span class="hint">Landscape · joystick to move · Pass / Through / Shoot</span>
+        <span class="hint">Landscape · joystick to move · Pass / Through / Kick</span>
         <span class="grow"></span>
         <span class="ver">v${__APP_VERSION__}</span>
         <button class="notes" aria-label="Patch notes">Patch notes</button>

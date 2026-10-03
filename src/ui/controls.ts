@@ -2,12 +2,12 @@ import { Btn, type InputState, makeInput } from '../sim/input';
 
 /**
  * FIFA-Mobile style controls: floating joystick on the left, contextual action buttons
- * on the right (Pass / Through / Shoot in attack, Switch / Press / Tackle in defence),
+ * on the right (Pass / Through / Kick in attack, Switch / Press / Tackle in defence),
  * plus Sprint. Keyboard works too for desktop testing.
  */
 
 const LABELS = {
-  attack: ['PASS', 'THROUGH', 'SHOOT', 'SPRINT'],
+  attack: ['PASS', 'THROUGH', 'KICK', 'SPRINT'],
   // Lining up your corner / goal kick: what each button does with the ball on the ring.
   corner: ['WHIP', 'SHORT', 'FLOAT', 'SPRINT'],
   goalkick: ['DRIVE', 'SHORT', 'FLOAT', 'SPRINT'],
@@ -39,7 +39,7 @@ export class Controls {
   /** Sprint swipe this press: 0 none, 1 tackle (slid down), 2 slide tackle (slid left). */
   private sprintSwipe = 0;
   mode: Mode = 'attack';
-  /** The celebration picked (0-3: Pass, Through, Shoot, Sprint), -1 = none yet. */
+  /** The celebration picked (0-3: Pass, Through, Kick, Sprint), -1 = none yet. */
   private picked = -1;
   private keys = new Set<string>();
   private keySprint = false;
@@ -54,7 +54,7 @@ export class Controls {
       <div class="btn btn-sprint"><span>SPRINT</span></div>
       <div class="btn btn-a"><span>PASS</span></div>
       <div class="btn btn-b"><span>THROUGH</span></div>
-      <div class="btn btn-c"><span>SHOOT</span><i class="power"></i></div>
+      <div class="btn btn-c"><span>KICK</span><i class="power"></i></div>
     `;
     parent.appendChild(this.root);
     const zone = this.root.querySelector('.joy-zone') as HTMLElement;
