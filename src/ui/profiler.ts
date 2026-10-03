@@ -175,6 +175,17 @@ export class Profiler {
     }
   }
 
+  /** A frame that isn't measured: forget it, and start the next window afresh. */
+  discard(now: number): void {
+    for (const s of this.secs) s.now = s.sum = s.max = 0;
+    this.windowAt = now;
+    this.probeAt = now;
+    this.frames = this.long = this.gcs = 0;
+    this.frameSum = this.cpuSum = this.cpuMax = this.worstMs = 0;
+    this.worstNow.length = 0;
+    this.text = '';
+  }
+
   /** End of a drawn frame: `frameMs` is the time since the last one. */
   end(now: number, frameMs: number, cpuMs: number): void {
     if (this.stalled > 0) {

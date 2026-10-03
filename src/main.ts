@@ -629,6 +629,7 @@ function newMatch(seed = Date.now() & 0xffff): void {
 }
 
 function startGame(seed: number): void {
+  kickedOffAt = 0;
   warmPending = true;
   audio.unlock();
   void enterFullscreen();
@@ -663,6 +664,7 @@ function beginDrill(kind: DrillKind, seed?: number): void {
 
 /** Training: always at the training ground (the ground picked for matches comes back after). */
 function startTraining(kind: DrillKind): void {
+  kickedOffAt = 0;
   audio.unlock();
   void enterFullscreen();
   void keepAwake();
@@ -928,6 +930,9 @@ let perfCheckAt = performance.now() + 3000;
 let fpsFrames = 0;
 let fpsT = performance.now();
 let lastPhase = match.phase;
+/** When the ball first went live in this match (0: not yet). The counter measures from 10 s after. */
+let kickedOffAt = 0;
+const STATS_DELAY = 10000;
 
 /** 0..1: the ball in the last 12 m before a goal line, in front of the goal, rising
  * exponentially to the line (the crowd surges with it). */
@@ -1148,6 +1153,11 @@ function frame(now: number): void {
   if (now < nextFrameAt - rafAvg * 0.5) return;
   nextFrameAt = now - nextFrameAt > TARGET_MS ? now + TARGET_MS : nextFrameAt + TARGET_MS;
   const t0 = performance.now();
+  if (playing && !kickedOffAt && match.phase === 'play' && !cutscene.active) kickedOffAt = now;
+  // The counter measures only from 10 s after kickoff (loading, the walk-out and the first
+  // uploads aren't the match).
+  const measuring = showStats && kickedOffAt > 0 && now - kickedOffAt >= STATS_DELAY;
+  const fullMeasure = measuring && fullStats;
   prof.begin();
   const frameMs = now - last;
   const dt = Math.min(0.1, frameMs / 1000);
@@ -1249,7 +1259,7 @@ function frame(now: number): void {
   stadium.update(now / 1000, match.excitement, atmo, tifo, terraces, cutscene.active ? cutscene.hang : tifo);
   const standOn = SHARED.uStandOn.value > 0;
   // With the counter on, a bake's GPU time is measured on its own (drained before, waited after).
-  const timeBake = fullStats && (standShadow.due(stadium.group, standOn) || groundLight.due(standShadow) || cloudField.due());
+  const timeBake = fullMeasure && (standShadow.due(stadium.group, standOn) || groundLight.due(standShadow) || cloudField.due());
   if (timeBake) prof.lap('world'), prof.gpuSync(null), prof.begin();
   standShadow.update(renderer, stadium.group, standOn);
   if (timeBake) prof.gpuSync('bake:sun shadow');
@@ -1284,26 +1294,32 @@ function frame(now: number): void {
   } else if (pixelLook()) {
     if ((shadowTick++ & 1) === 0) renderer.shadowMap.needsUpdate = true;
     // Once every two seconds the counter waits for the GPU after each pass to time it.
-    const probe = fullStats && prof.probeDue(now);
+    const probe = fullMeasure && prof.probeDue(now);
     if (probe) prof.gpuSync(null), (renderer.shadowMap.needsUpdate = true); // (timed with its shadow pass)
-    else if (fullStats) prof.gpuBegin();
+    else if (fullMeasure) prof.gpuBegin();
     if (probe) probeWorld();
     pixelPass.render(renderer, scene, rig.camera, SHARED.uFlood.value, atmo.weather === 'sunny' ? 0.35 : 1, rig.subPixelX, rig.subPixelY, probe ? (pass) => prof.gpuSync(pass) : undefined);
-    if (fullStats && !probe) prof.gpuEnd();
+    if (fullMeasure && !probe) prof.gpuEnd();
   } else {
     renderer.shadowMap.needsUpdate = true;
-    if (fullStats) prof.gpuBegin();
+    if (fullMeasure) prof.gpuBegin();
     renderer.render(scene, rig.camera);
-    if (fullStats) prof.gpuEnd();
+    if (fullMeasure) prof.gpuEnd();
   }
   prof.lap('render');
   const cpuMs = performance.now() - t0;
   cpuAvg += (cpuMs - cpuAvg) * 0.05;
-  prof.end(now, frameMs, cpuMs);
-  if (fullStats) prof.markPage();
+  if (measuring) prof.end(now, frameMs, cpuMs);
+  else prof.discard(now);
+  if (fullMeasure) prof.markPage();
   adaptQuality(frameMs, now);
 
-  if (showStats) {
+  if (showStats && !measuring) {
+    fpsEl.textContent = kickedOffAt ? `measuring in ${Math.ceil((STATS_DELAY - (now - kickedOffAt)) / 1000)} s` : 'measuring from 10 s after kickoff';
+    fpsFrames = 0;
+    fpsT = now;
+    renderer.info.reset();
+  } else if (showStats) {
     fpsFrames++;
     if (now - fpsT > 500) {
       const fps = Math.round((fpsFrames * 1000) / (now - fpsT));
