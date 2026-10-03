@@ -545,8 +545,6 @@ function startGame(seed: number): void {
   newMatch(seed);
   playing = true;
   paused = false;
-  playHz = 120;
-  slowFor = 0;
   home.hide();
   onResize();
   if (NO_CUT) return setPlayUi(true);
@@ -585,8 +583,6 @@ function startTraining(kind: DrillKind): void {
   beginDrill(kind);
   playing = true;
   paused = false;
-  playHz = 120;
-  slowFor = 0;
   home.hide();
   onResize();
   setPlayUi(true);
@@ -833,14 +829,8 @@ let frameAvg = 16.7;
 /** Frame pacing: the display's refresh interval, and the interval we actually draw at. */
 let rafAvg = 16.7;
 let lastRaf = performance.now();
-/** The display's real refresh interval: the shortest seen between two refreshes. */
-let rafMin = 16.7;
-let targetMs = 16.7;
-/** Match frame rate: 120, or a steady 60 on a device that can't hold 120 (a steady 60
- * looks smoother than an uneven 80-110, and runs far cooler). */
-let playHz = 120;
-/** How long the frames have been coming too slowly for the play rate (seconds). */
-let slowFor = 0;
+/** The frame-rate cap, everywhere in the app (matches, menus, pause, cutscenes, drills). */
+const TARGET_MS = 1000 / 120;
 
 let perfCheckAt = performance.now() + 3000;
 let fpsFrames = 0;
@@ -1016,17 +1006,13 @@ function frame(now: number): void {
     void Promise.race([compiled, timeout]).then(() => requestAnimationFrame(() => boot.__bootDone?.()));
   }
   requestAnimationFrame(frame);
-  // Frame pacing: a frame scheduler at the target rate — 120 fps in play (60 if the device
-  // can't hold it), 60 on the home screen, 30 under the pause menu (only the crowd moves)
-  // and behind full-screen menus. On a faster display, refreshes are skipped evenly to
-  // hold the rate; on a slower one every refresh is drawn.
+  // Frame pacing: 120 fps everywhere, the one cap. On a faster display, refreshes are
+  // skipped evenly to hold it; on a slower one every refresh is drawn.
   rafAvg += (Math.min(50, now - lastRaf) - rafAvg) * 0.1;
-  if (now - lastRaf > 5) rafMin = Math.min(rafMin, now - lastRaf);
   lastRaf = now;
   const hidden = home.opaque && !playing;
-  targetMs = 1000 / (paused || hidden ? 30 : playing ? playHz : 60);
   if (now < nextFrameAt - rafAvg * 0.5) return;
-  nextFrameAt = now - nextFrameAt > targetMs ? now + targetMs : nextFrameAt + targetMs;
+  nextFrameAt = now - nextFrameAt > TARGET_MS ? now + TARGET_MS : nextFrameAt + TARGET_MS;
   const t0 = performance.now();
   const frameMs = now - last;
   const dt = Math.min(0.1, frameMs / 1000);
@@ -1039,12 +1025,6 @@ function frame(now: number): void {
       audio.terraces(terraces);
     }
     return;
-  }
-  // 120 fps that keeps missing (frames well over 9 ms for a few seconds on a display that
-  // could show them) drops to a steady 60 for the rest of the match.
-  if (playing && !paused && playHz === 120 && rafMin < 10) {
-    slowFor = frameMs > 10.5 ? slowFor + dt : Math.max(0, slowFor - dt * 0.5);
-    if (slowFor > 3) playHz = 60;
   }
 
   const running = !paused;
@@ -1114,7 +1094,7 @@ function frame(now: number): void {
   standShadow.update(renderer, stadium.group, SHARED.uStandOn.value > 0);
   turfMarks.update(match, renderer);
   if (playing) hud.update(match, now / 1000);
-  if (playing && !paused) minimap.update(match, now / 1000);
+  if (playing && !paused) minimap.update(match);
   updateAim();
   // Corner / goal kick ring and flight preview (holding Shoot shows the floated ball); the
   // same for a cross while Pass is held and slid up.

@@ -9,7 +9,7 @@ const lum = (c: number) => 0.299 * ((c >> 16) & 255) + 0.587 * ((c >> 8) & 255) 
  * The radar at the bottom of the screen: the pitch from above, both teams as dots in their
  * shirt colours, the ball, and the player you control ringed. The same way round as the
  * match camera (home attacking right, the near touchline at the bottom). Drawn on a small
- * canvas at up to 30 fps.
+ * canvas every frame.
  */
 export class Minimap {
   private el = document.createElement('div');
@@ -20,7 +20,6 @@ export class Minimap {
   private W = 0;
   private H = 0;
   private dpr = Math.min(2, window.devicePixelRatio || 1);
-  private lastDraw = 0;
   /** Measure again before the next draw (reading the layout every draw forces a reflow). */
   private dirty = true;
 
@@ -75,9 +74,7 @@ export class Minimap {
     g.strokeRect(W - boxW - 0.5, (H - boxH) / 2, boxW, boxH);
   }
 
-  update(m: Match, now: number): void {
-    if (now - this.lastDraw < 1 / 30) return;
-    this.lastDraw = now;
+  update(m: Match): void {
     if (this.dirty) this.size();
     const { W, H, g } = this;
     if (!W) return;

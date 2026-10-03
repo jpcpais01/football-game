@@ -1,5 +1,6 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.86.2', note: 'No more frame-rate limits: the whole app runs at up to 120 fps everywhere, matches, menus, the pause screen, cutscenes and training alike. The minimap redraws every frame too.' },
   { v: '0.86.1', note: 'Proper distance at the other side’s restarts: at their free kicks and corners nobody on your team, you included, can get within 9.15 m until the ball is played, and at their kick-off you stay in your half, outside the centre circle. Caught too close, you walk back out.' },
   { v: '0.86', note: 'Real stadium shadows: the stands, roofs, pylons and masts cast their true shape across the pitch, onto players and fans. Crisp and deep on a sunny day, softer at golden hour as they creep past halfway. At night the floodlights throw overlapping pools of light on the grass.' },
   { v: '0.85', note: 'Dribbling turns look real: when you change direction with the ball, the nearest leg reaches out, gets outside the ball and steers it round, with the body lunging and dropping into it. The ball no longer seems to curve after you on its own.' },
