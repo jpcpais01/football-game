@@ -1042,8 +1042,8 @@ export class Match {
     }
 
     // Ball seeking: the active player always hunts the ball (meets loose balls and
-    // passes, closes down the carrier). The stick bends the run (up to 30%) only while he
-    // has time in hand; when the meeting is tight the seek is all that counts.
+    // passes, closes down the carrier). The stick bends the run (up to 45%) while he has
+    // time in hand; when the meeting is tight it still leans it a little (about 15%).
     if (this.owner !== c && !this.pressHeld) {
       const mode = this.seekTarget(c, tmpV);
       if (mode) {
@@ -1054,7 +1054,7 @@ export class Match {
           const tx = dx / d;
           const tz = dz / d;
           let speed: number;
-          let stickW = 0.3;
+          let stickW = 0.45;
           if (mode === 'loose') {
             // Pace from the meeting: flat out when it's tight, otherwise just enough to be there
             // as the ball is (the same pace the computer's players run at). A slow or dying ball
@@ -1064,7 +1064,7 @@ export class Match {
             const gap = this.ballDist(c);
             const floor = gap > 3 ? PLAYER.jogSpeed : gap > 1 ? PLAYER.jogSpeed + (bs < 3 ? 1 : 0) : bs < 1.5 ? 2.5 : 1.2;
             speed = Math.max(floor, this.ai.meetPace(c));
-            stickW *= clamp((ip.slack - 0.15) / 0.5, 0, 1);
+            stickW *= 0.35 + 0.65 * clamp((ip.slack - 0.15) / 0.5, 0, 1);
             c.burst = gap < 2.5;
             // Arrive, don't overrun: no faster than he can come into the meeting point moving
             // with the ball there (a ball running on ahead is taken in stride, one coming at

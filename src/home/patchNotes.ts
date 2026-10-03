@@ -1,5 +1,6 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.74', note: 'Your stick counts for more when your player goes for a loose ball: it bends his run up to 45% (was 30%), and still leans it a little even when the ball is tight to win.' },
   { v: '0.73', note: 'Stamina you can feel and see: a tired player loses up to a quarter of his top speed and nearly a third of his acceleration. Bottom left shows your player’s name and stamina, boxed green for defenders, yellow for midfielders, red for attackers, with a thin bar over his head.' },
   { v: '0.72', note: 'Running arms like a real player: they swing a beat behind the legs, further forward than back. On the forward swing the elbow closes and the hand comes up across the chest; on the back swing the arm opens and tucks by the hip. Walking arms hang looser.' },
   { v: '0.71.1', note: 'Softer goal nets: a shot now bulges the net out deeper and wider, and it takes longer to settle, with a slower, looser ripple. Gentler finishes move it more than before too.' },
