@@ -226,6 +226,9 @@ export class Match {
   private lastTackleTap = -10;
   /** Sprint-swipe tackle: committed, waiting for the moment to strike. */
   private lunge: { slide: boolean; until: number } | null = null;
+  /** Pressing: how long he's been tight on the carrier (s), and when he can next go in. */
+  private pressTight = 0;
+  private pokeReady = 0;
   /** Seconds the stick has been idle (read by the AI for auto-switching). */
   noInputT = 0;
   /** Seconds since the controlled player changed (UI flash). */
@@ -1153,7 +1156,13 @@ export class Match {
       // Goal-side, moving with the ball: its pace plus a pull onto the spot, so he neither
       // trails the carrier nor runs past him. Sprint presses tighter, up against him; a
       // touch that gets away from the carrier is pounced on (see AI.pressPoint).
-      const onBall = this.ai.pressPoint(c, carrier, tmpV, input.sprint ? 0.8 : 1.2);
+      // Held tight on him, he doesn't settle at that distance: he squeezes in onto the ball
+      // (sooner on Sprint), so the carrier has to beat him or lose it.
+      const d = this.ballDist(c);
+      this.pressTight = d < 2.2 ? this.pressTight + DT : 0;
+      const squeeze = smoothstep(0.25, 0.9, this.pressTight * (input.sprint ? 1.6 : 1));
+      const keep = (input.sprint ? 0.8 : 1.2) * (1 - squeeze) + 0.45 * squeeze;
+      const onBall = this.ai.pressPoint(c, carrier, tmpV, keep);
       const pull = onBall ? 5 : 3;
       const vx = this.ball.vel.x * 0.9 + (tmpV.x - c.pos.x) * pull;
       const vz = this.ball.vel.z * 0.9 + (tmpV.z - c.pos.z) * pull;
@@ -1169,7 +1178,18 @@ export class Match {
       // than he can backpedal, he opens his hips and runs with him instead.
       c.squareUp = !onBall && v < 4.5;
       c.burst = onBall;
-    }
+      // Going in: the moment the ball shows (a heavy touch, the near side, him turned away
+      // from us) and a foot can get to it, he pokes at it. Kept out for long enough, he goes
+      // through anyway, shield or not, and takes his chances.
+      if (this.owner === carrier && !c.isBusy() && !this.lunge && this.time > this.pokeReady && this.ball.pos.y < 0.6 && d < 1.35) {
+        const forced = this.pressTight > (input.sprint ? 1.0 : 1.6) && d < 0.95;
+        if (this.ballOpen(c, carrier, d) || forced) {
+          this.lungeAt(c, false);
+          this.pokeReady = this.time + 0.8;
+          this.pressTight = 0;
+        }
+      }
+    } else this.pressTight = 0;
 
     // Ball seeking: the active player always hunts the ball (meets loose balls and
     // passes, closes down the carrier). The stick bends the run (up to 70%) while he has
@@ -1383,19 +1403,24 @@ export class Match {
     const reach = L.slide ? 2.8 : 1.5;
     if (d > reach || b.y > 0.7) return;
     const carrier = this.owner;
-    let open = true;
-    if (carrier && carrier.team !== c.team) {
-      // Shielded: the carrier's body is between us and the ball.
-      const cx = carrier.pos.x - c.pos.x;
-      const cz = carrier.pos.z - c.pos.z;
-      const cd = Math.hypot(cx, cz);
-      const behind = cd < d && ((cx * (b.x - c.pos.x) + cz * (b.z - c.pos.z)) / (cd * d + 1e-6)) > 0.85;
-      open = !behind || this.ballDist(carrier) > 0.5;
-    }
+    const open = !carrier || carrier.team === c.team || this.ballOpen(c, carrier, d);
     if (open || d < reach * 0.6) {
       this.lungeAt(c, L.slide);
       this.lunge = null;
     }
+  }
+
+  /**
+   * Whether a challenger at ball distance `d` can get a foot to the carrier's ball: it isn't
+   * tucked away behind the carrier's body (or it's run out from under him).
+   */
+  ballOpen(c: Player, carrier: Player, d: number): boolean {
+    const b = this.ball.pos;
+    const cx = carrier.pos.x - c.pos.x;
+    const cz = carrier.pos.z - c.pos.z;
+    const cd = Math.hypot(cx, cz);
+    const behind = cd < d && (cx * (b.x - c.pos.x) + cz * (b.z - c.pos.z)) / (cd * d + 1e-6) > 0.85;
+    return !behind || this.ballDist(carrier) > 0.5;
   }
 
   /** Strike toward where the ball will be as the foot arrives. */

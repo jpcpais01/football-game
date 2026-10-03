@@ -1222,8 +1222,9 @@ export class AI {
     // Tackle when close and the ball is exposed.
     if (d < 1.5 && !p.isBusy() && m.time > this.tackleReady[p.id]) {
       this.tackleReady[p.id] = m.time + 0.9 + m.rng.next() * 0.8;
-      const exposed = m.ballDist(carrier) > 0.45 ? 0.25 : 0;
-      if (m.rng.next() < 0.15 + p.attrs.defending * 0.2 + exposed) {
+      // He goes in when a foot can get to it; with it tucked away, only now and then.
+      const open = m.ballOpen(p, carrier, d);
+      if (m.rng.next() < (open ? 0.4 + p.attrs.defending * 0.3 : 0.1 + p.attrs.defending * 0.1)) {
         const dx = m.ball.pos.x - p.pos.x;
         const dz = m.ball.pos.z - p.pos.z;
         const dd = Math.max(0.01, Math.hypot(dx, dz));
