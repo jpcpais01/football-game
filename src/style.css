@@ -442,3 +442,23 @@ html, body {
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35), 0 0 0 1.5px rgba(244, 239, 227, 0.25);
 }
 .minimap canvas { display: block; width: 100%; }
+
+/* Pre-match cutscene: letterbox bars, a caption low on the left, a skip hint. Tap anywhere. */
+.cutscene { position: absolute; inset: 0; z-index: 20; cursor: pointer; touch-action: none; }
+.cutscene.hidden { display: none; }
+.cs-bar { position: absolute; left: 0; right: 0; height: 9%; background: #000; animation: cs-bar 0.5s ease-out both; }
+.cs-bar.top { top: 0; transform-origin: top; }
+.cs-bar.bot { bottom: 0; transform-origin: bottom; }
+@keyframes cs-bar { from { transform: scaleY(0); } }
+.cs-cap {
+  position: absolute; left: 5%; bottom: calc(9% + 18px); display: none; padding: 6px 16px 8px; border-left: 4px solid var(--gold, #ffd447);
+  background: linear-gradient(90deg, rgba(8, 12, 22, 0.85), rgba(8, 12, 22, 0)); animation: cs-cap 0.6s ease-out both;
+}
+.cutscene.captioned .cs-cap { display: block; }
+.cs-cap b { display: block; font-weight: 800; font-size: clamp(26px, 4.6vw, 46px); letter-spacing: 0.05em; text-transform: uppercase; line-height: 1; color: var(--ink); }
+.cs-cap span { display: block; margin-top: 4px; font-weight: 600; font-size: clamp(13px, 2vw, 19px); letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-dim); }
+@keyframes cs-cap { from { opacity: 0; transform: translateX(-16px); } }
+.cs-skip {
+  position: absolute; right: 4%; bottom: calc(9% + 14px); font-weight: 800; font-size: 13px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.6); animation: cs-cap 0.6s 0.8s ease-out both;
+}

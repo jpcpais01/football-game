@@ -48,6 +48,7 @@ export class SquadScreen {
     const kit = this.ui.kit;
     const sel = this.selected;
     const hasCustom = c.state.lineup.custom.some(Boolean);
+    const cap = c.captainIndex();
     this.el.innerHTML = `
       <header class="topbar">
         <button class="back" aria-label="Back">‹</button>
@@ -66,14 +67,15 @@ export class SquadScreen {
             ${starters
               .map((p, i) => {
                 const s = c.slot(i);
-                return `<div class="token ${i === sel ? 'sel' : ''} ${s.pos === 'GK' ? 'gk' : ''}" data-slot="${i}" style="left:${toLeft(s.x)}%;top:${toTop(s.z)}%">${tokenHTML(p, s.pos, kit)}</div>`;
+                return `<div class="token ${i === sel ? 'sel' : ''} ${s.pos === 'GK' ? 'gk' : ''}" data-slot="${i}" style="left:${toLeft(s.x)}%;top:${toTop(s.z)}%">${tokenHTML(p, s.pos, kit)}${i === cap && p ? '<i class="tk-cap" title="Captain">C</i>' : ''}</div>`;
               })
               .join('')}
           </div></div>
           <div class="board-tools">
             <button class="tool auto">Auto-pick best XI</button>
             ${hasCustom ? '<button class="tool resetpos">Reset positions</button>' : ''}
-            <span class="tip">${sel >= 0 ? `Pick a player for <b>${c.slot(sel).pos}</b> →` : 'Drag players to swap or move them · tap to change'}</span>
+            ${sel >= 0 && starters[sel] ? (sel === cap ? '<span class="tool captain on">Captain</span>' : '<button class="tool captain">Make captain</button>') : ''}
+            <span class="tip">${sel >= 0 ? `Pick a player for <b>${c.slot(sel).pos}</b> →` : 'Drag players to swap or move them · tap to change or pick the captain'}</span>
           </div>
         </section>
         <aside class="roster">
@@ -97,6 +99,13 @@ export class SquadScreen {
       this.ui.toast(`Best XI picked · ${c.teamRating()} OVR`);
     });
     q('.resetpos')?.addEventListener('click', () => c.resetPositions());
+    q('button.captain')?.addEventListener('click', () => {
+      const p = starters[sel];
+      if (!p) return;
+      this.selected = -1;
+      c.setCaptain(p.id);
+      this.ui.toast(`${p.name.split(' ').slice(-1)[0]} is your captain`);
+    });
     this.el.querySelectorAll<HTMLElement>('[data-filter]').forEach((b) =>
       b.addEventListener('click', () => {
         this.filter = b.dataset.filter as Filter;

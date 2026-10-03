@@ -473,13 +473,15 @@ function sleeveMaterial(): THREE.MeshStandardMaterial {
   return litMaterial({
     groundAO: true,
     roughness: 0.78,
-    vertDecl: 'attribute vec3 aTrim; attribute vec3 aSkin; varying vec3 vTrim; varying vec3 vSkin;',
-    vertBody: 'vTrim = aTrim; vSkin = aSkin;',
-    fragDecl: `${KIT_DECL} varying vec3 vSkin;`,
+    vertDecl: 'attribute vec3 aTrim; attribute vec3 aSkin; attribute float aBand; varying vec3 vTrim; varying vec3 vSkin; varying float vBand;',
+    vertBody: 'vTrim = aTrim; vSkin = aSkin; vBand = aBand;',
+    fragDecl: `${KIT_DECL} varying vec3 vSkin; varying float vBand;`,
     diffuseHook: /* glsl */ `{
       float v = vUv2.y;
       vec3 c = diffuseColor.rgb;
       c = mix(c, vTrim, band(v, 0.43, 0.5));
+      // The captain's armband (left arm).
+      c = mix(c, vec3(1.0, 0.72, 0.05), vBand * band(v, 0.26, 0.4));
       c = mix(c, vSkin, step(0.5, v));
       diffuseColor.rgb = c;
     }`,
@@ -688,6 +690,7 @@ export class PlayersView {
       } else if (name === 'upperArm') {
         add('aTrim', 3);
         add('aSkin', 3);
+        add('aBand', 1);
       } else if (name === 'forearm') add('aAlt', 3);
       else if (name === 'shortsLeg' || name === 'shin' || name === 'boot') add('aTrim', 3);
       const mesh = new THREE.InstancedMesh(geo, mats[name], count);
@@ -726,6 +729,14 @@ export class PlayersView {
     mk.rotateX(Math.PI);
     this.marker = new THREE.Mesh(mk, new THREE.MeshBasicMaterial({ color: 0xffd447, toneMapped: false }));
     this.group.add(this.marker);
+  }
+
+  /** The players were moved by hand (a cut): settle feet and secondary motion afresh. */
+  snap(): void {
+    this.secReady.fill(0);
+    this.footW.fill(0);
+    this.inStance.fill(0);
+    this.ikOn.fill(0);
   }
 
   applyColors(match: Match): void {
@@ -771,6 +782,7 @@ export class PlayersView {
     ];
     const num = this.parts.torso.mesh.geometry.getAttribute('aNum') as THREE.InstancedBufferAttribute;
     const pat = this.parts.torso.mesh.geometry.getAttribute('aPat') as THREE.InstancedBufferAttribute;
+    const band = this.parts.upperArm.mesh.geometry.getAttribute('aBand') as THREE.InstancedBufferAttribute;
     const REF_KIT: Kit = { shirt: 0x17181b, shirt2: 0xf2c94c, shorts: 0x17181b, socks: 0x17181b, gkShirt: 0x17181b, gkShorts: 0x17181b };
     for (const p of this.list) {
       const kit = p.team === 2 ? REF_KIT : match.teams[p.team].info.kit;
@@ -787,6 +799,7 @@ export class PlayersView {
       set('upperArm', p, shirt);
       attr('upperArm', 'aTrim', p, trim);
       attr('upperArm', 'aSkin', p, gk ? shirt : p.look.skin);
+      band.setX(p.id * 2, p.team < 2 && match.teams[p.team].captain === p.index && match.teams[p.team].players[p.index] === p ? 1 : 0);
       set('forearm', p, gk ? shirt : p.look.skin);
       attr('forearm', 'aAlt', p, gk ? 0xf2f0ea : p.look.skin);
       set('hand', p, gk ? 0xf2f0ea : p.look.skin);
@@ -805,6 +818,7 @@ export class PlayersView {
     }
     num.needsUpdate = true;
     pat.needsUpdate = true;
+    band.needsUpdate = true;
     for (const { mesh: m } of this.partList) {
       if (m.instanceColor) m.instanceColor.needsUpdate = true;
     }

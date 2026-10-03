@@ -24,6 +24,7 @@ import {
   lampMaterial,
   lightShafts,
   pitchside,
+  playersTunnel,
   ringStrip,
   roofMaterial,
   sky,
@@ -493,6 +494,7 @@ export function createOldGround(homeColor: number, awayColor: number, club: Stad
   clock.userData.live = true;
   fixtures.add(clock);
   for (const s of [-4.5, 4.5]) beam(at({ ...awayMid, z: awayMid.z + s }, 18, tier(17) + 1.2), at({ ...awayMid, z: awayMid.z + s }, 18, tier(17) + 2.2), 0.3);
+  fixtures.add(playersTunnel(darkConcrete));
   group.add(bakeStatic(fixtures));
 
   // ---- floodlight pylons in the open corners: tapering lattice towers, a bank of lamps on top

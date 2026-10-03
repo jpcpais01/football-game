@@ -415,6 +415,12 @@ button.tile:hover .chev { transform: translateX(4px); }
 .board-tools { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 .tool { white-space: nowrap; padding: 7px 12px; border-radius: 10px; border: 1px solid var(--line-2); background: rgba(255, 255, 255, 0.06); font-size: 14px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
 .tool.auto { background: rgba(255, 212, 71, 0.14); border-color: rgba(255, 212, 71, 0.4); color: #ffe9a3; }
+.tool.captain { border-color: rgba(255, 212, 71, 0.55); color: var(--gold); }
+.tool.captain.on { background: var(--gold); color: #1b1205; }
+.tk-cap {
+  position: absolute; left: -8%; top: 30%; z-index: 3; width: calc(var(--tk) * 0.36); aspect-ratio: 1; border-radius: 50%; display: grid; place-items: center;
+  background: var(--gold); color: #1b1205; border: 1.5px solid #1b1205; font-style: normal; font-weight: 800; font-size: calc(var(--tk) * 0.24); line-height: 1;
+}
 .tip { font-size: 13px; font-weight: 600; letter-spacing: 0.06em; color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tip b { color: var(--gold); }
 

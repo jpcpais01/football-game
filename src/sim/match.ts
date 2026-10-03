@@ -83,6 +83,8 @@ export interface TeamSetup {
   info: TeamInfo;
   /** Eleven players in shirt-index order (0 keeper ... 9 striker; see meta/formations). */
   players: SetupPlayer[];
+  /** Shirt index of the captain (wears the armband). */
+  captain?: number;
 }
 
 export interface MatchSetup {
@@ -95,6 +97,8 @@ export interface TeamState {
   dir: number;
   score: number;
   players: Player[];
+  /** Shirt index of the captain. */
+  captain: number;
 }
 
 export interface MatchEvents {
@@ -221,7 +225,7 @@ export class Match {
     this.added = [1 + Math.floor(fourth.next() * 5), 1 + Math.floor(fourth.next() * 5)];
     for (let t = 0; t < 2; t++) {
       const ts = setup?.teams[t];
-      const team: TeamState = { info: ts ? ts.info : TEAMS[t], dir: t === 0 ? 1 : -1, score: 0, players: [] };
+      const team: TeamState = { info: ts ? ts.info : TEAMS[t], dir: t === 0 ? 1 : -1, score: 0, players: [], captain: ts?.captain ?? 9 };
       if (ts) {
         ts.players.forEach((sp, i) => {
           const p = new Player(this.players.length, t, i, sp.role, sp.x, sp.z, sp.attrs, sp.look);
