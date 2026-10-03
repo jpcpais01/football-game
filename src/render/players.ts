@@ -1289,6 +1289,39 @@ export class PlayersView {
         this.steerE[id] = 0;
       }
 
+      // ---------------- cushioning a high ball (Match.controlTouch): chest out and arched
+      // back over it with the arms wide, or the thigh lifted to meet it, then let go as it
+      // drops to the feet.
+      if (p.action === 'none' && p.touchH > 0.5 && p.sinceTouch < 0.5) {
+        const st = p.sinceTouch;
+        const k = smoothstep(0, 0.06, st) * (1 - smoothstep(0.22, 0.5, st));
+        if (p.touchH > PLAYER.controlHeight) {
+          flexExtra -= 0.38 * k;
+          leanF -= 0.15 * k;
+          armOutL = lerp(armOutL, 0.85, k);
+          armOutR = lerp(armOutR, 0.85, k);
+          armL = lerp(armL, 0.25, k);
+          armR = lerp(armR, 0.25, k);
+          elbowL = lerp(elbowL, 0.6, k);
+          elbowR = lerp(elbowR, 0.6, k);
+          kneeL += 0.25 * k;
+          kneeR += 0.25 * k;
+          hipY -= 0.05 * k;
+        } else if (p.kickLeg > 0) {
+          hipR = lerp(hipR, 1.15, k);
+          kneeR = lerp(kneeR, 1.35, k);
+          armOutL = lerp(armOutL, 0.5, k);
+          armOutR = lerp(armOutR, 0.35, k);
+        } else {
+          hipL = lerp(hipL, 1.15, k);
+          kneeL = lerp(kneeL, 1.35, k);
+          armOutR = lerp(armOutR, 0.5, k);
+          armOutL = lerp(armOutL, 0.35, k);
+        }
+        headPitch += 0.35 * k;
+        if (k > 0.3) headLook = false;
+      }
+
       // ---------------- actions
       const pr = p.actionDur > 0 ? clamp(p.actionT / p.actionDur, 0, 1) : 0;
       switch (p.action) {

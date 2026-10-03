@@ -22,7 +22,7 @@ const LERPED = [
   'leanSide', 'slideV0', 'slideStop', 'legX', 'legZ',
 ] as const satisfies readonly Keys<number>[];
 /** ...and taken from the nearer frame. */
-const STEPPED = ['kickLeg', 'pullX', 'pullZ', 'pullT'] as const satisfies readonly Keys<number>[];
+const STEPPED = ['kickLeg', 'pullX', 'pullZ', 'pullT', 'touchH'] as const satisfies readonly Keys<number>[];
 const FLAGS = ['kickLofted', 'throwIn'] as const satisfies readonly Keys<boolean>[];
 
 // Frame layout. A body: pos, prevPos, vel, facing, prevFacing, action, kickType, the keeper's

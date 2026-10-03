@@ -19,6 +19,7 @@ describe('fouls and free kicks', () => {
   it('fouls happen, but not all the time', () => {
     let fouls = 0;
     let freekicks = 0;
+    let offsides = 0;
     for (const seed of [3, 11, 29]) {
       const m = new Match(seed);
       m.autoPlay = true;
@@ -28,6 +29,7 @@ describe('fouls and free kicks', () => {
         m.step(input);
         const e = m.takeEvents();
         if (e.foul) fouls++;
+        if (e.offside) offsides++;
         if (m.setPiece && m.setPiece !== lastSP && (m.setPiece.kind === 'freekick' || m.setPiece.kind === 'penalty')) freekicks++;
         lastSP = m.setPiece;
       }
@@ -35,7 +37,8 @@ describe('fouls and free kicks', () => {
     // Three short matches (2 × 150 s each): a handful of fouls, not dozens.
     expect(fouls).toBeGreaterThan(0);
     expect(fouls).toBeLessThan(45);
-    expect(freekicks).toBeLessThanOrEqual(fouls);
+    // (Offsides restart with an indirect free kick too.)
+    expect(freekicks).toBeLessThanOrEqual(fouls + offsides);
   }, 120000);
 
   it('a foul becomes a free kick that is taken and play resumes', () => {

@@ -127,6 +127,9 @@ const tmpK = new V3();
 const STRETCH = 0.4;
 const STRETCH_DUR = 0.36;
 /** Look-ahead samples for deciding a stretch (every 0.05 s). */
+/** A dropping ball is let down onto the chest from above CHEST_TOP; above CHEST_MAX it can only be headed. */
+const CHEST_TOP = 1.55;
+const CHEST_MAX = 1.95;
 const STRETCH_N = 7;
 const stretchX = new Float32Array(STRETCH_N);
 const stretchY = new Float32Array(STRETCH_N);
@@ -2314,6 +2317,7 @@ export class Match {
     this.shotBy = plan.type === 'shot' ? p : null;
     p.touchCooldown = 0.35;
     p.sinceTouch = 0;
+    p.touchH = 0;
     if (this.setPiece) {
       // The wall jumps as the ball's struck (most of them) and holds its shape for a moment.
       for (const w of this.setPiece.wall?.players ?? []) {
@@ -2419,8 +2423,12 @@ export class Match {
     }
     if (this.offsideTouch(p)) return;
     if (h > PLAYER.controlHeight) {
-      // Head it only when it makes sense; otherwise take it down on the chest.
+      // Head it only when he means to (or must); otherwise he takes it down. A ball dropping
+      // onto him from above chest height he lets come down onto the chest, rather than
+      // meeting it at the first moment it's in reach of his head.
       if (challenged || this.shouldHead(p)) this.header(p, challenged);
+      else if (h > CHEST_TOP && this.ball.vel.y < -0.5 && this.dropsOnto(p)) return;
+      else if (h > CHEST_MAX) this.header(p, false);
       else this.controlTouch(p);
       return;
     }
@@ -2515,6 +2523,7 @@ export class Match {
       p.touchCooldown = 0.25;
     }
     p.sinceTouch = 0;
+    p.touchH = 0;
     this.lastTouch = p;
     this.judgeOffside(p);
     this.events.kicks.push(0.08);
@@ -2590,7 +2599,8 @@ export class Match {
     const b = this.ball;
     const h = b.pos.y;
     const relX = b.vel.x - p.vel.x;
-    const relY = b.vel.y;
+    // Chest and thigh give way under a dropping ball: they soak up half its fall.
+    const relY = b.vel.y * (h > 0.5 ? 0.5 : 1);
     const relZ = b.vel.z - p.vel.z;
     const rel = Math.sqrt(relX * relX + relY * relY + relZ * relZ);
     const q = p.attrs.control;
@@ -2609,6 +2619,9 @@ export class Match {
     }
     p.touchCooldown = 0.18;
     p.sinceTouch = 0;
+    p.touchH = h;
+    // (The leg on the ball's side takes it, if it's a thigh.)
+    p.kickLeg = -Math.sin(p.facing) * (b.pos.x - p.pos.x) + Math.cos(p.facing) * (b.pos.z - p.pos.z) >= 0 ? 1 : -1;
     this.owner = p;
     this.lastTouch = p;
     this.judgeOffside(p);
@@ -2625,7 +2638,6 @@ export class Match {
    */
   private shouldHead(p: Player): boolean {
     const b = this.ball;
-    if (b.pos.y > 1.95) return true; // too high to chest
     if (p.plan) return true;
     const team = this.teams[p.team];
     const distGoal = dist2D(b.pos.x, b.pos.z, PITCH.halfL * team.dir, 0);
@@ -2634,6 +2646,15 @@ export class Match {
     const ownThird = b.pos.x * team.dir < -PITCH.halfL / 3;
     if (ownThird && press < 4) return true;
     return press < 1.8;
+  }
+
+  /** Whether a ball coming down will still be on him by the time it's at chest height. */
+  private dropsOnto(p: Player): boolean {
+    const b = this.ball;
+    const t = (b.pos.y - 1.35) / -b.vel.y;
+    const dx = b.pos.x + b.vel.x * t - (p.pos.x + p.vel.x * t);
+    const dz = b.pos.z + b.vel.z * t - (p.pos.z + p.vel.z * t);
+    return Math.hypot(dx, dz) < 0.75;
   }
 
   private header(p: Player, challenged = false): void {
@@ -2677,6 +2698,7 @@ export class Match {
     p.plan = null;
     p.touchCooldown = 0.4;
     p.sinceTouch = 0;
+    p.touchH = 0;
     this.owner = null;
     this.lastTouch = p;
     this.lastKicker = p;
