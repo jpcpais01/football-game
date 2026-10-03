@@ -1191,12 +1191,12 @@ export class Match {
       }
     } else this.pressTight = 0;
 
-    // Ball seeking, only while Press or Sprint is held: he goes to meet a loose ball or a
-    // pass in flight (ours or theirs). The stick bends the run (up to 60%) while he has time
-    // in hand, about 30% when the meeting is tight; stick idle, pure seek. Either button
-    // attacks it flat out (easing only so as not to run past it). Button up: the stick alone
-    // moves him.
-    if (this.owner !== c && loose && (this.pressHeld || input.sprint || c.plan)) {
+    // Ball seeking, always on: the active player goes to meet a loose ball or a pass in
+    // flight, and closes down a carrier. The stick bends the run (up to 60%) while he has
+    // time in hand, about 30% when the meeting is tight; stick idle, pure seek. Sprint runs
+    // at it flat out (easing only so as not to run past it). Press or Sprint on a carrier is
+    // the real press above: taking it off him.
+    if (this.owner !== c && (!this.pressHeld || loose)) {
       const mode = this.seekTarget(c, tmpV);
       if (mode) {
         const dx = tmpV.x - c.pos.x;
@@ -1208,10 +1208,14 @@ export class Match {
           let speed: number;
           let stickW = 0.6;
           if (mode === 'loose') {
-            // Flat out: the button asked for it.
+            // Pace from the meeting: flat out when it's tight, otherwise just enough to be there
+            // as the ball is (Sprint: flat out anyway). A slow or dying ball close by won't
+            // come to him: he goes and gets it.
             const ip = this.ai.intercept[c.id];
+            const bs = Math.hypot(this.ball.vel.x, this.ball.vel.z);
             const gap = this.ballDist(c);
-            speed = c.topSpeed;
+            const floor = gap > 3 ? PLAYER.jogSpeed : gap > 1 ? PLAYER.jogSpeed + (bs < 3 ? 1 : 0) : bs < 1.5 ? 2.5 : 1.2;
+            speed = input.sprint ? c.topSpeed : Math.max(floor, this.ai.meetPace(c));
             stickW *= 0.5 + 0.5 * clamp((ip.slack - 0.15) / 0.5, 0, 1);
             c.burst = gap < 2.5;
             // Arrive, don't overrun: no faster than he can come into the meeting point moving

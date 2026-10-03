@@ -93,10 +93,9 @@ it('defender can win the ball with press + tackle', () => {
   expect(wins).toBeGreaterThan(3);
 });
 
-it('Sprint held, idle stick: active player goes and gets a loose ball', () => {
+it('idle stick, no button: active player goes and gets a loose ball', () => {
   const m = new Match(77);
   const input = makeInput();
-  input.sprint = true;
   m.phase = 'play';
   m.setPiece = null;
   for (const p of m.players) { p.pos.x = p.team === 0 ? -48 : 48; p.pos.z = (p.index - 5) * 5; p.prevPos.copy(p.pos); }
@@ -159,20 +158,6 @@ it('Sprint held: seeking wins over a stick pushed the other way', () => {
   }
   console.log('reached ball against the stick after', t.toFixed(2), 's');
   expect(t).toBeGreaterThan(0);
-});
-
-it('no button, idle stick: the active player does not fetch the ball', () => {
-  const m = new Match(80);
-  const input = makeInput();
-  m.phase = 'play';
-  m.setPiece = null;
-  for (const p of m.players) { p.pos.x = p.team === 0 ? -48 : 48; p.pos.z = (p.index - 5) * 5; p.prevPos.copy(p.pos); }
-  const c = m.teams[0].players[6];
-  c.pos.set(-10, 0, 0); c.prevPos.copy(c.pos);
-  m.setControlled(c);
-  m.ball.reset(0, 0);
-  for (let i = 0; i < 120 * 2; i++) { m.step(input); m.takeEvents(); }
-  expect(Math.hypot(c.pos.x + 10, c.pos.z)).toBeLessThan(1);
 });
 
 function emptyPitch(seed: number) {
