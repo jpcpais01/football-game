@@ -110,7 +110,7 @@ export class Profiler {
       this.gpuLast.set(name, ms);
       this.gpuPeak.set(name, Math.max(ms, this.gpuPeak.get(name) ?? 0));
     }
-    if (name === 'bake') this.stalled = Math.max(this.stalled, 2);
+    if (name?.startsWith('bake')) this.stalled = Math.max(this.stalled, 2);
   }
 
   begin(): void {
@@ -207,7 +207,7 @@ export class Profiler {
     // GPU time per pass (from the last probe; the peak over the window for bakes).
     if (this.gpuLast.size) {
       const parts: string[] = [];
-      for (const [k, v] of this.gpuLast) if (k !== 'bake' && !k.startsWith('#')) parts.push(`${k} ${v.toFixed(1)}`);
+      for (const [k, v] of this.gpuLast) if (!k.startsWith('bake') && !k.startsWith('#')) parts.push(`${k} ${v.toFixed(1)}`);
       lines.push(`gpu*  ${parts.join(' · ')}`);
       // The world's parts: what each adds (the whole world, less the world without it).
       const all = this.gpuLast.get('#all');
@@ -218,9 +218,14 @@ export class Profiler {
         const people = d('#people');
         lines.push(`gpu*  world parts: ground ${ground.toFixed(1)} · people ${people.toFixed(1)} · rest ${Math.max(0, all - ground - people).toFixed(1)} · sun shadows ${sh.toFixed(1)}`);
       }
-      const bake = this.gpuLast.get('bake');
-      const peak = this.gpuPeak.get('bake');
-      if (bake !== undefined) lines.push(`gpu*  bake ${bake.toFixed(1)} last${peak ? `, ${peak.toFixed(1)} peak` : ''} (sun shadow/light/clouds)`);
+      // The bakes: the dearest frame of each in the last two seconds (a dash: none ran).
+      const bakes: string[] = [];
+      for (const [k, v] of this.gpuLast) {
+        if (!k.startsWith('bake:')) continue;
+        const peak = this.gpuPeak.get(k);
+        bakes.push(`${k.slice(5)} ${peak !== undefined ? peak.toFixed(1) : `– (last ${v.toFixed(1)})`}`);
+      }
+      if (bakes.length) lines.push(`gpu*  bakes: ${bakes.join(' · ')}`);
     }
     // The slowest frame, by section (biggest first).
     this.worst = this.worstNow.slice().sort((a, b) => b[1] - a[1]);

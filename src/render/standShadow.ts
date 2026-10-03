@@ -97,7 +97,7 @@ export class StandShadow {
 
   /**
    * Re-bakes if the ground or the sun has changed. `on`: false when there's no sun to cast.
-   * A new ground is baked at once; the sun moving on is baked into the back map a sixth of
+   * A new ground is baked at once; the sun moving on is baked into the back map a twelfth of
    * the casters a frame (max blending: the order doesn't matter), then swapped in, with the
    * sun direction it was baked for (all at once in one frame cost a phone ~6 ms of GPU).
    */
@@ -110,7 +110,7 @@ export class StandShadow {
       this.casters.length = 0;
       this.collect(group, false);
       this.next = 0;
-      this.chunk = this.fresh ? this.casters.length : Math.ceil(this.casters.length / 6);
+      this.chunk = this.fresh ? this.casters.length : Math.ceil(this.casters.length / 12);
     } else if (group !== this.group) {
       // The ground changed mid-bake: start again for the new one.
       this.next = -1;
@@ -196,7 +196,7 @@ export class GroundLight {
   // ~11 cm texels: well inside the 0.3-1.5 m penumbra and the 10-15 m pool ramps.
   private scene = new THREE.Scene();
   private cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-  // Six bands, one a frame (a whole bake in one frame cost a phone ~6 ms of GPU).
+  // Twelve bands, one a frame (a whole bake in one frame cost a phone ~6 ms of GPU).
   private bake = new StripBake(
     () =>
       new THREE.WebGLRenderTarget(1120, 784, {
@@ -207,7 +207,7 @@ export class GroundLight {
         minFilter: THREE.LinearFilter,
         magFilter: THREE.LinearFilter,
       }),
-    6,
+    12,
     this.scene,
     this.cam,
   );

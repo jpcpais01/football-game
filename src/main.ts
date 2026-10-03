@@ -1233,9 +1233,11 @@ function frame(now: number): void {
   const timeBake = showStats && (standShadow.due(stadium.group, standOn) || groundLight.due(standShadow) || cloudField.due());
   if (timeBake) prof.lap('world'), prof.gpuSync(null), prof.begin();
   standShadow.update(renderer, stadium.group, standOn);
+  if (timeBake) prof.gpuSync('bake:sun shadow');
   groundLight.update(renderer, standShadow);
+  if (timeBake) prof.gpuSync('bake:pitch light');
   cloudField.update(renderer);
-  if (timeBake) prof.gpuSync('bake');
+  if (timeBake) prof.gpuSync('bake:clouds');
   if (!replay.active) turfMarks.update(match, renderer);
   prof.lap('world');
   if (playing) hud.update(match, now / 1000);
