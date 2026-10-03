@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 /**
  * Frame profiler for the FPS readout: where each frame's time goes, section by section, and
  * what the worst frame of the last two seconds was made of (that's where a stutter shows).
@@ -42,7 +43,7 @@ export class Profiler {
   private gpuSum = 0;
   private gpuMax = 0;
   private gpuN = 0;
-  // GPU probes (gl.finish, where no timer query exists): once a window the frame's passes are
+  // GPU probes (a pixel read back, where no timer query exists): once a window the frame's passes are
   // each waited for, and so is any bake (stand shadow, ground light, clouds) when it runs.
   private gpuLast = new Map<string, number>();
   private gpuPeak = new Map<string, number>();
@@ -51,7 +52,13 @@ export class Profiler {
   /** The text to show (refreshed every two seconds). */
   text = '';
 
-  attachGpu(gl: WebGL2RenderingContext): void {
+  private renderer: THREE.WebGLRenderer | null = null;
+  private tiny = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: false });
+  private px = new Uint8Array(4);
+
+  attachGpu(renderer: THREE.WebGLRenderer): void {
+    this.renderer = renderer;
+    const gl = renderer.getContext() as WebGL2RenderingContext;
     this.gl = gl;
     this.ext = gl.getExtension('EXT_disjoint_timer_query_webgl2');
   }
@@ -90,7 +97,14 @@ export class Profiler {
   gpuSync(name: string | null): void {
     if (!this.gl) return;
     const t = performance.now();
-    this.gl.finish();
+    // Read a pixel back: the browser has to wait for everything queued before it (a
+    // gl.finish() can return at once, as it does in Chrome on Android).
+    const r = this.renderer!;
+    const prev = r.getRenderTarget();
+    r.setRenderTarget(this.tiny);
+    r.clear(true, false, false);
+    r.readRenderTargetPixels(this.tiny, 0, 0, 1, 1, this.px);
+    r.setRenderTarget(prev);
     const ms = performance.now() - t;
     if (name) {
       this.gpuLast.set(name, ms);

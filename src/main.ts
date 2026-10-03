@@ -528,7 +528,7 @@ fpsEl.className = 'fps';
 ui.appendChild(fpsEl);
 // Under the counter: where the frame's time goes (sim, AI, animation, world, render, GPU).
 const prof = new Profiler();
-prof.attachGpu(renderer.getContext() as WebGL2RenderingContext);
+prof.attachGpu(renderer);
 prof.wrap(AI.prototype, 'update', 'ai');
 prof.wrap(AI.prototype, 'planThrough', 'thru');
 prof.wrap(Match.prototype, 'performKick', 'kick');
