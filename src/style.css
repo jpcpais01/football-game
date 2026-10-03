@@ -322,44 +322,42 @@ html, body {
   font-weight: 800; font-size: 15px; letter-spacing: 0.06em; text-transform: uppercase;
   white-space: pre; line-height: 1.1;
 }
-.hp-bar { margin-top: 4px; height: 5px; border-radius: 3px; background: rgba(15, 20, 17, 0.45); overflow: hidden; }
-.hp-bar i, .stamina i {
-  display: block; height: 100%; transform-origin: left center; background: #f4efe3; transition: background 0.2s;
+/* Every gauge (stamina, pass / shot power) shares one look: thin, a black hairline round it,
+   and a fixed red-to-green gradient that the fill reveals (clip-path), so its leading edge
+   shows the level's own colour. */
+.hp-bar, .stamina, .charge {
+  background: rgba(15, 20, 17, 0.55); box-shadow: 0 0 0 1px #000; overflow: hidden;
 }
-.hud-player.tired .hp-bar i, .stamina.tired i { background: #ff5a4a; }
-.hud-player.mid .hp-bar i { background: #1b1a12; }
-.hud-player.mid.tired .hp-bar i { background: #b8231a; }
+.hp-bar i, .stamina i, .charge .fill {
+  position: absolute; inset: 0; clip-path: inset(0 100% 0 0);
+  background: linear-gradient(90deg, #e5483b 0%, #f7a23b 35%, #f2d43a 60%, #3ddc6a 100%);
+}
+.hp-bar { position: relative; margin-top: 5px; height: 3px; border-radius: 2px; }
 /* Over the active player's head: very small and thin, just under the charge bar. */
 .stamina {
-  position: absolute; left: -14px; top: -4px; width: 28px; height: 3px; pointer-events: none;
-  background: rgba(15, 20, 17, 0.6); box-shadow: 0 0 0 1px rgba(15, 20, 17, 0.35);
-  overflow: hidden; display: none; will-change: transform;
+  position: absolute; left: -14px; top: -3px; width: 28px; height: 2px; pointer-events: none;
+  display: none; will-change: transform;
 }
 .stamina.show { display: block; }
 
 /* ---------------------------------------------------------------- Charge bar */
 .charge {
-  position: absolute; left: -24px; top: -14px; width: 48px; height: 7px; pointer-events: none;
-  border-radius: 4px; background: rgba(15, 20, 17, 0.7); box-shadow: 0 0 0 1.5px rgba(244, 239, 227, 0.75);
-  overflow: hidden; opacity: 0; transition: opacity 0.12s; will-change: transform;
+  position: absolute; left: -22px; top: -11px; width: 44px; height: 4px; pointer-events: none;
+  border-radius: 2px; opacity: 0; transition: opacity 0.12s; will-change: transform;
 }
 .charge.show { opacity: 1; }
-.charge .fill {
-  position: absolute; inset: 0; transform-origin: left center; transform: scaleX(0);
-  background: #f4efe3;
+/* Shot: green at full power (the tick), red again past it, where it would go over. */
+.charge.shot .fill {
+  background: linear-gradient(90deg, #e5483b 0%, #f7a23b 30%, #f2d43a 52%, #3ddc6a 80%, #3ddc6a 87%, #e5483b 100%);
 }
-.charge.lofted .fill { background: #9fd0ff; }
-.charge.shot .fill { background: linear-gradient(90deg, #ffd447, #ff9d3c); }
-.charge.over .fill { background: linear-gradient(90deg, #ffd447 0%, #ff9d3c 70%, #e5483b 100%); }
-.charge .tick { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: rgba(15, 20, 17, 0.85); }
+.charge .tick { position: absolute; top: 0; bottom: 0; width: 1px; background: #000; }
 /* Free kick / penalty: a power gauge — red when weak, green at the sweet spot, red again
-   when it would fly over. The fill reveals the fixed gradient instead of stretching it. */
-.charge.dead { width: 76px; left: -38px; height: 9px; }
-.charge.dead .fill, .charge.dead.shot .fill, .charge.dead.over .fill {
-  transform: none !important;
+   when it would fly over. */
+.charge.dead { width: 70px; left: -35px; height: 6px; border-radius: 3px; }
+.charge.dead .fill {
   background: linear-gradient(90deg, #e5483b 0%, #f7a23b 38%, #3ddc6a 74%, #3ddc6a 82%, #ffd447 88%, #e5483b 100%);
 }
-.charge.dead .tick { width: 3px; margin-left: -1.5px; background: #f4efe3; box-shadow: 0 0 0 1px rgba(15, 20, 17, 0.6); }
+.charge.dead .tick { width: 2px; margin-left: -1px; background: #f4efe3; box-shadow: 0 0 0 1px #000; }
 
 .version {
   position: absolute; right: calc(14px + var(--safe-r)); bottom: calc(10px + var(--safe-b));

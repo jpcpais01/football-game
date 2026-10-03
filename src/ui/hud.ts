@@ -86,8 +86,7 @@ export class Hud {
     const st = Math.round(c.stamina * 100);
     if (st !== this.pcStamina) {
       this.pcStamina = st;
-      this.pcFill.style.transform = `scaleX(${(st / 100).toFixed(2)})`;
-      this.pcard.classList.toggle('tired', st < 25);
+      this.pcFill.style.clipPath = `inset(0 ${100 - st}% 0 0)`;
     }
   }
 
