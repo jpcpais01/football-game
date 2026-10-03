@@ -191,7 +191,7 @@ export class AI {
   runTime(q: Player, x: number, z: number, react = 0.15, reach = 0): number {
     const dx = x - q.pos.x;
     const dz = z - q.pos.z;
-    const full = Math.hypot(dx, dz);
+    const full = Math.sqrt(dx * dx + dz * dz); // (not Math.hypot: this runs thousands of times a through ball)
     const d = full - reach;
     if (d < 0.3) return react * 0.5;
     const ux = dx / full;
@@ -663,7 +663,9 @@ export class AI {
           const vz = bz - az;
           const l2 = vx * vx + vz * vz;
           const k = l2 > 1e-6 ? clamp(((cx - ax) * vx + (cz - az) * vz) / l2, 0, 1) : 0;
-          if (Math.hypot(cx - ax - vx * k, cz - az - vz * k) < R && ys[i - 1] < 1) return i;
+          const ex = cx - ax - vx * k;
+          const ez = cz - az - vz * k;
+          if (ex * ex + ez * ez < R * R && ys[i - 1] < 1) return i;
         }
       }
       const d = dist2D(px, pz, xs[i], zs[i]) - reach;

@@ -1,7 +1,7 @@
 {
   "name": "football-game",
   "private": true,
-  "version": "0.96.13",
+  "version": "0.96.14",
   "type": "module",
   "scripts": {
     "dev": "vite --host",

@@ -1,5 +1,5 @@
 import { Ball } from './ball';
-import { BALL, DT } from './constants';
+import { BALL, DT, PITCH } from './constants';
 import { V3 } from './vec';
 
 /**
@@ -151,6 +151,81 @@ function smallestUp(f: (x: number) => number, min: number, max: number, a: numbe
   return hi;
 }
 
+/*
+ * Ground passes, tabulated. Struck from the grass, a side-foot pass runs in a straight line
+ * with no lift and no swerve, the same in every direction: how far it has gone and how fast
+ * it's going, step by step, depends only on the strike speed. So each strike speed's whole
+ * run (every DT, from the real integrator) is a table row, rows every PASS_DV m/s, and a
+ * pass in between is read off its two neighbours (centimetres from a full flight). Solving a
+ * pass used to roll out half a dozen whole flights in the frame of the kick.
+ */
+const PASS_MIN = 1;
+const PASS_DV = 0.25;
+const PASS_ROWS = Math.round((31 - PASS_MIN) / PASS_DV) + 1;
+const PASS_STEPS = Math.round(8 / DT);
+/** Per row: distance and speed after each step, interleaved (it stays put once stopped). */
+let passTable: Float32Array[] | null = null;
+
+/** Builds the ground-pass table (a few hundred thousand ball steps: do it while loading). */
+export function prepareGroundPasses(): void {
+  if (passTable) return;
+  passTable = [];
+  const from = new V3(0, BALL.radius, 0);
+  for (let r = 0; r < PASS_ROWS; r++) {
+    const v0 = PASS_MIN + r * PASS_DV;
+    const b = loadScratch(from, v0, 0, 0, makeSpin(1, 0, (v0 / 0.11) * 0.55, 0, new V3()));
+    const row = new Float32Array(PASS_STEPS * 2);
+    for (let k = 0; k < PASS_STEPS; k++) {
+      b.step(DT);
+      row[k * 2] = b.pos.x;
+      row[k * 2 + 1] = Math.sqrt(b.vel.x * b.vel.x + b.vel.z * b.vel.z);
+      if (row[k * 2 + 1] === 0) {
+        // Stopped: there it stays.
+        for (let j = k + 1; j < PASS_STEPS; j++) row[j * 2] = b.pos.x;
+        break;
+      }
+    }
+    passTable.push(row);
+  }
+}
+
+/** One row's answer for a pass of `dist` that should still be doing `floor` m/s there. */
+function passRowAt(row: Float32Array, dist: number, floor: number, out: { reach: number; t: number }): void {
+  // First step at or past `dist` (distance only grows): its time.
+  let lo = 0;
+  let hi = PASS_STEPS;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (row[mid * 2] < dist) lo = mid + 1;
+    else hi = mid;
+  }
+  out.t = (Math.min(lo, PASS_STEPS - 1) + 1) * DT;
+  // How far past `dist` it is once it slows below `floor` (speed only falls): negative if
+  // it gets there too slow.
+  lo = 0;
+  hi = PASS_STEPS;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (row[mid * 2 + 1] >= floor) lo = mid + 1;
+    else hi = mid;
+  }
+  out.reach = row[Math.min(lo, PASS_STEPS - 1) * 2] - dist;
+}
+
+const rowA = { reach: 0, t: 0 };
+const rowB = { reach: 0, t: 0 };
+/** The table read at strike speed v (between rows: linear), into rowA. */
+function passAt(v: number, dist: number, floor: number): { reach: number; t: number } {
+  const x = (Math.min(Math.max(v, PASS_MIN), 31) - PASS_MIN) / PASS_DV;
+  const i = Math.min(PASS_ROWS - 2, Math.floor(x));
+  const f = x - i;
+  passRowAt(passTable![i], dist, floor, rowA);
+  passRowAt(passTable![i + 1], dist, floor, rowB);
+  rowA.reach += (rowB.reach - rowA.reach) * f;
+  rowA.t += (rowB.t - rowA.t) * f;
+  return rowA;
+}
+
 /** Ground pass that arrives at `target` with roughly `arriveSpeed` m/s. */
 export function solveGroundPass(from: V3, tx: number, tz: number, arriveSpeed: number, maxSpeed = 30): KickResult {
   let dx = tx - from.x;
@@ -161,13 +236,26 @@ export function solveGroundPass(from: V3, tx: number, tz: number, arriveSpeed: n
   const rollFrac = 0.55; // side-foot pass: ball starts partly rolling (as in the roll table)
   // The table brackets it to a whole m/s: the softest row still going at that pace.
   const row = rollPaceFor(dist, arriveSpeed);
-  const fdx = dx;
-  const fdz = dz;
-  // Smooth in the strike speed: how far it gets before slowing to the pace it should arrive at.
-  const reach = (v: number) => groundReach(from, fdx, fdz, v, rollFrac, dist, arriveSpeed);
-  const best = row >= 20 ? smallestUp(reach, 1, maxSpeed, 20, 22, 0.002, 0.05) : smallestUp(reach, 1, maxSpeed, row - 0.5, row, 0.002, 0.05);
-  groundArrival(from, dx, dz, best, rollFrac, dist, tOut);
-  const bestT = tOut.t;
+  const lo = row >= 20 ? 20 : row - 0.5;
+  const hi = row >= 20 ? 22 : row;
+  let best: number;
+  let bestT: number;
+  // Off the grass (a first-time pass of a bouncing ball), or near a goal frame it could hit:
+  // the real flights.
+  const near = PITCH.halfL - 2.5;
+  if (from.y > BALL.radius + 1e-4 || Math.abs(from.x) > near || Math.abs(tx) > near || maxSpeed > 31) {
+    const fdx = dx;
+    const fdz = dz;
+    // Smooth in the strike speed: how far it gets before slowing to the pace it should arrive at.
+    const reach = (v: number) => groundReach(from, fdx, fdz, v, rollFrac, dist, arriveSpeed);
+    best = smallestUp(reach, 1, maxSpeed, lo, hi, 0.002, 0.05);
+    groundArrival(from, dx, dz, best, rollFrac, dist, tOut);
+    bestT = tOut.t;
+  } else {
+    prepareGroundPasses();
+    best = smallestUp((v) => passAt(v, dist, arriveSpeed).reach, 1, maxSpeed, lo, hi, 0.002, 0.05);
+    bestT = passAt(best, dist, arriveSpeed).t;
+  }
   const spin = makeSpin(dx, dz, (best / 0.11) * rollFrac, 0, new V3());
   return { vel: new V3(dx * best, 0, dz * best), spin, time: bestT };
 }

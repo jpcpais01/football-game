@@ -6,7 +6,7 @@ import './render/shadowChunk';
 import { DT, GOAL_SEQ, MATCH, PITCH } from './sim/constants';
 import { smoothstep } from './sim/vec';
 import { CELEBRATIONS, Match, type MatchEvents } from './sim/match';
-import { rollTimeAt } from './sim/kick';
+import { prepareGroundPasses, rollTimeAt } from './sim/kick';
 import { createPitch } from './render/pitch';
 import { GroundLight, StandShadow } from './render/standShadow';
 import { CloudField } from './render/cloudField';
@@ -1138,6 +1138,8 @@ function frame(now: number): void {
     // Compile every shader while the boot screen is still up (no hitch the first time
     // something appears), then lift the curtain once the first frame has been drawn.
     booted = true;
+    // The ground-pass table too (or the first pass of the attract match would build it).
+    prepareGroundPasses();
     renderer.setRenderTarget(pixelLook() ? pixelPass.target : null);
     const compiled = renderer.compileAsync(scene, rig.camera).catch(() => undefined);
     renderer.setRenderTarget(null);
