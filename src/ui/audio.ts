@@ -307,7 +307,7 @@ export class GameAudio {
       const g = ctx.createGain();
       g.gain.value = 1.1;
       src.connect(g).connect(out);
-      src.start(t);
+      src.start(t, 0.1); // the recording opens with a beat of dead air
       return;
     }
     const src = ctx.createBufferSource();
