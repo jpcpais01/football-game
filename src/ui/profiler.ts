@@ -206,24 +206,27 @@ export class Profiler {
     if (this.gcs) lines.push(`gc    ${this.gcs}× in 2 s`);
     // GPU time per pass (from the last probe; the peak over the window for bakes).
     if (this.gpuLast.size) {
+      // Every figure less the round trip a wait costs on its own.
+      const idle = this.gpuLast.get('#idle') ?? 0;
+      const net = (v: number) => Math.max(0, v - idle);
       const parts: string[] = [];
-      for (const [k, v] of this.gpuLast) if (!k.startsWith('bake') && !k.startsWith('#')) parts.push(`${k} ${v.toFixed(1)}`);
-      lines.push(`gpu*  ${parts.join(' · ')}`);
+      for (const [k, v] of this.gpuLast) if (!k.startsWith('bake') && !k.startsWith('#')) parts.push(`${k} ${net(v).toFixed(1)}`);
+      lines.push(`gpu*  ${parts.join(' · ')}  (wait itself ${idle.toFixed(1)}, taken off)`);
       // The world's parts: what each adds (the whole world, less the world without it).
       const all = this.gpuLast.get('#all');
       if (all !== undefined) {
-        const d = (k: string) => Math.max(0, all - (this.gpuLast.get(k) ?? all));
-        const sh = Math.max(0, (this.gpuLast.get('#shadow') ?? all) - all);
-        const ground = d('#ground');
-        const people = d('#people');
-        lines.push(`gpu*  world parts: ground ${ground.toFixed(1)} · people ${people.toFixed(1)} · rest ${Math.max(0, all - ground - people).toFixed(1)} · sun shadows ${sh.toFixed(1)}`);
+        const g = (k: string) => this.gpuLast.get(k) ?? all;
+        const ground = Math.max(0, all - g('#ground'));
+        const people = Math.max(0, all - g('#people'));
+        const rest = Math.max(0, net(all) - ground - people);
+        lines.push(`gpu*  world: ground ${ground.toFixed(1)} · people ${people.toFixed(1)} · rest ${rest.toFixed(1)} · sun shadows ${Math.max(0, g('#shadow') - all).toFixed(1)} · uploads ${Math.max(0, g('#upload') - all).toFixed(1)}`);
       }
       // The bakes: the dearest frame of each in the last two seconds (a dash: none ran).
       const bakes: string[] = [];
       for (const [k, v] of this.gpuLast) {
         if (!k.startsWith('bake:')) continue;
         const peak = this.gpuPeak.get(k);
-        bakes.push(`${k.slice(5)} ${peak !== undefined ? peak.toFixed(1) : `– (last ${v.toFixed(1)})`}`);
+        bakes.push(`${k.slice(5)} ${peak !== undefined ? net(peak).toFixed(1) : `– (last ${net(v).toFixed(1)})`}`);
       }
       if (bakes.length) lines.push(`gpu*  bakes: ${bakes.join(' · ')}`);
     }

@@ -1101,7 +1101,14 @@ function probeWorld(): void {
     prof.gpuSync(name);
     if (hide) hide.visible = was!;
   };
-  // The first one also redraws the sun's shadow map (the probe asked for it).
+  // What a wait costs by itself (the round trip to the GPU, taken off every figure).
+  prof.gpuSync('#idle');
+  // The first draw of a frame also uploads what changed (the players' poses, textures).
+  const shadows = renderer.shadowMap.needsUpdate;
+  renderer.shadowMap.needsUpdate = false;
+  time(null, '#upload');
+  // Then with the sun's shadow map redrawn (the probe asked for it).
+  renderer.shadowMap.needsUpdate = shadows;
   time(null, '#shadow');
   time(null, '#all');
   time(stadium.group, '#ground');

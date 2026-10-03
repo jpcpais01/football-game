@@ -1,5 +1,6 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.96.6', note: 'FPS counter: graphics timings now subtract the cost of the measurement itself, and the frame’s data uploads are timed apart from the sun shadows, so each figure is what that part really costs.' },
   { v: '0.96.5', note: 'The sun-shadow and pitch-light updates are split into twelve smaller steps (was six), halving their per-frame hiccup. The FPS counter times each update on its own (sun shadow, pitch light, clouds) and shows its worst frame.' },
   { v: '0.96.4', note: 'Frame pacing removed: waiting for the graphics chip before each frame cost more frames than it saved. The FPS counter now shows what each part of the world really adds (stands, players, the rest) and what the sun shadows cost.' },
   { v: '0.96.3', note: 'Steadier frames: the grass is lit once per pixel instead of four times (about a quarter of its graphics cost), and a frame is only sent once the graphics chip has caught up, so slow moments no longer pile up into big stutters. The FPS counter splits the world by part.' },
