@@ -1,5 +1,6 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.96.4', note: 'Frame pacing removed: waiting for the graphics chip before each frame cost more frames than it saved. The FPS counter now shows what each part of the world really adds (stands, players, the rest) and what the sun shadows cost.' },
   { v: '0.96.3', note: 'Steadier frames: the grass is lit once per pixel instead of four times (about a quarter of its graphics cost), and a frame is only sent once the graphics chip has caught up, so slow moments no longer pile up into big stutters. The FPS counter splits the world by part.' },
   { v: '0.96.2', note: 'Smoother frames: the sun-shadow, pitch-light and cloud updates (a 5–6 ms graphics hiccup every few seconds) are now spread across several frames, and the 3D picture is stored in a packed format that halves the graphics memory traffic of every frame.' },
   { v: '0.96.1', note: 'The FPS counter’s graphics-chip timings now work on Android phones too (they read zero before): each drawing pass and each shadow bake is timed by reading a pixel back, which the browser has to wait for.' },

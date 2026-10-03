@@ -918,35 +918,6 @@ let rafAvg = 16.7;
 let lastRaf = performance.now();
 /** The frame-rate cap, everywhere in the app (matches, menus, pause, cutscenes, drills). */
 const TARGET_MS = 1000 / 120;
-/**
- * GPU pacing: a fence after every drawn frame. A new frame is only sent once the GPU has
- * finished the one before last, so at most one waits behind the one being drawn. Without
- * this, when the GPU can't keep up the browser queues frames until it stalls on the lot
- * at once (the 30-45 ms drops); with it, a refresh the GPU isn't ready for is simply
- * skipped (the match runs on) and the frames come out evenly. Not a cap: while the GPU
- * keeps up, every frame is drawn.
- */
-const gl2 = renderer.getContext() as WebGL2RenderingContext;
-const fences: (WebGLSync | null)[] = [null, null];
-let behindSince = 0;
-function gpuBehind(now: number): boolean {
-  const f = fences[0];
-  if (!f) return false;
-  if (gl2.clientWaitSync(f, 0, 0) === gl2.TIMEOUT_EXPIRED) {
-    // (A fence that never signals, a lost context: don't wait on it for ever.)
-    if (!behindSince) behindSince = now;
-    if (now - behindSince < 100) return true;
-  }
-  behindSince = 0;
-  gl2.deleteSync(f);
-  fences[0] = null;
-  return false;
-}
-function fenceFrame(): void {
-  if (fences[0]) gl2.deleteSync(fences[0]);
-  fences[0] = fences[1];
-  fences[1] = gl2.fenceSync(gl2.SYNC_GPU_COMMANDS_COMPLETE, 0);
-}
 
 let perfCheckAt = performance.now() + 3000;
 let fpsFrames = 0;
@@ -1118,25 +1089,23 @@ function showcase(dt: number): void {
 
 let cpuAvg = 0;
 /**
- * For the counter's probe: the world drawn a part at a time (each on its own, into the
- * world target, before the real frame overwrites it), so its GPU time splits into the
- * ground (stands, roofs, crowd), the people and the rest (the grass has its own pass).
+ * For the counter's probe: what each part of the world costs the GPU, as the difference it
+ * makes (the whole world drawn, then again without the part: each part on its own would
+ * show what the others hide). Before the real frame, which overwrites it all.
  */
 function probeWorld(): void {
-  const parts: [string, THREE.Object3D[]][] = [
-    ['ground', [stadium.group]],
-    ['people', [playersView.group]],
-  ];
-  const shown = scene.children.map((c) => c.visible);
-  const solo = (keep: THREE.Object3D[] | null) =>
-    scene.children.forEach((c, i) => (c.visible = shown[i] && c !== pitchMesh && (keep ? keep.includes(c) : !parts.some(([, g]) => g.includes(c)))));
-  renderer.setRenderTarget(pixelPass.target);
-  for (const [name, keep] of [...parts, ['other', null] as [string, null]]) {
-    solo(keep);
-    renderer.render(scene, rig.camera);
-    prof.gpuSync('·' + name);
-  }
-  scene.children.forEach((c, i) => (c.visible = shown[i]));
+  const time = (hide: THREE.Object3D | null, name: string) => {
+    const was = hide?.visible;
+    if (hide) hide.visible = false;
+    pixelPass.renderWorld(renderer, scene, rig.camera);
+    prof.gpuSync(name);
+    if (hide) hide.visible = was!;
+  };
+  // The first one also redraws the sun's shadow map (the probe asked for it).
+  time(null, '#shadow');
+  time(null, '#all');
+  time(stadium.group, '#ground');
+  time(playersView.group, '#people');
   renderer.setRenderTarget(null);
 }
 
@@ -1158,7 +1127,6 @@ function frame(now: number): void {
   lastRaf = now;
   const hidden = home.opaque && !playing;
   if (now < nextFrameAt - rafAvg * 0.5) return;
-  if (!hidden && gpuBehind(now)) return;
   nextFrameAt = now - nextFrameAt > TARGET_MS ? now + TARGET_MS : nextFrameAt + TARGET_MS;
   const t0 = performance.now();
   prof.begin();
@@ -1301,13 +1269,11 @@ function frame(now: number): void {
     if (probe) probeWorld();
     pixelPass.render(renderer, scene, rig.camera, SHARED.uFlood.value, atmo.weather === 'sunny' ? 0.35 : 1, rig.subPixelX, rig.subPixelY, probe ? (pass) => prof.gpuSync(pass) : undefined);
     if (showStats && !probe) prof.gpuEnd();
-    fenceFrame();
   } else {
     renderer.shadowMap.needsUpdate = true;
     if (showStats) prof.gpuBegin();
     renderer.render(scene, rig.camera);
     if (showStats) prof.gpuEnd();
-    fenceFrame();
   }
   prof.lap('render');
   const cpuMs = performance.now() - t0;

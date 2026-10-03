@@ -207,14 +207,17 @@ export class Profiler {
     // GPU time per pass (from the last probe; the peak over the window for bakes).
     if (this.gpuLast.size) {
       const parts: string[] = [];
-      const split: string[] = [];
-      for (const [k, v] of this.gpuLast) {
-        if (k === 'bake') continue;
-        (k.startsWith('·') ? split : parts).push(`${k.replace('·', '')} ${v.toFixed(1)}`);
-      }
+      for (const [k, v] of this.gpuLast) if (k !== 'bake' && !k.startsWith('#')) parts.push(`${k} ${v.toFixed(1)}`);
       lines.push(`gpu*  ${parts.join(' · ')}`);
-      // The world pass, each part drawn on its own (they overlap a little: the sum runs over).
-      if (split.length) lines.push(`gpu*  world = ${split.join(' · ')}`);
+      // The world's parts: what each adds (the whole world, less the world without it).
+      const all = this.gpuLast.get('#all');
+      if (all !== undefined) {
+        const d = (k: string) => Math.max(0, all - (this.gpuLast.get(k) ?? all));
+        const sh = Math.max(0, (this.gpuLast.get('#shadow') ?? all) - all);
+        const ground = d('#ground');
+        const people = d('#people');
+        lines.push(`gpu*  world parts: ground ${ground.toFixed(1)} · people ${people.toFixed(1)} · rest ${Math.max(0, all - ground - people).toFixed(1)} · sun shadows ${sh.toFixed(1)}`);
+      }
       const bake = this.gpuLast.get('bake');
       const peak = this.gpuPeak.get('bake');
       if (bake !== undefined) lines.push(`gpu*  bake ${bake.toFixed(1)} last${peak ? `, ${peak.toFixed(1)} peak` : ''} (sun shadow/light/clouds)`);
