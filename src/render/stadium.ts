@@ -601,6 +601,8 @@ export interface StadiumClub {
   motto?: { text: string; bg: number; fg: number };
   /** Year the club was founded (from the crest), for the old ground's gable. */
   founded?: string;
+  /** The player's own pictures for the home end's card display and the giant tifo. */
+  tifos?: { end?: CanvasImageSource | null; giant?: CanvasImageSource | null };
 }
 
 /** Draws `img` (a 100 x 124 crest) centred at (x, y), `h` tall. */
@@ -658,6 +660,12 @@ export function tifoTexture(home: number, club: StadiumClub): THREE.CanvasTextur
   const hex = '#' + home.toString(16).padStart(6, '0');
   const draw = () => {
     const g = cv.getContext('2d')!;
+    const own = club.tifos?.end;
+    if (own) {
+      g.drawImage(own, 0, 0, 512, 160);
+      tex.needsUpdate = true;
+      return;
+    }
     g.fillStyle = hex;
     g.fillRect(0, 0, 512, 160);
     // Chevron bands top and bottom.
@@ -716,6 +724,14 @@ function hangingTifoTexture(home: number, club: StadiumClub): THREE.CanvasTextur
   let crest: CanvasImageSource | null = null;
   const draw = () => {
     const g = cv.getContext('2d')!;
+    const own = club.tifos?.giant;
+    if (own) {
+      // The player's picture, with the hem it's tied to the roof by.
+      g.drawImage(own, 0, 0, W, H);
+      hem(g);
+      tex.needsUpdate = true;
+      return;
+    }
     g.fillStyle = hex;
     g.fillRect(0, 0, W, H);
     // Sunburst behind the crest: every other ray a shade darker.
@@ -784,13 +800,18 @@ function hangingTifoTexture(home: number, club: StadiumClub): THREE.CanvasTextur
     g.strokeStyle = NAVY;
     g.lineWidth = 3;
     g.strokeRect(18, 18, W - 36, H - 36);
+    hem(g);
+    tex.needsUpdate = true;
+  };
+  const hem = (g: CanvasRenderingContext2D) => {
+    g.fillStyle = 'rgba(0, 0, 0, 0.3)';
+    g.fillRect(0, 0, W, 6);
+    g.fillStyle = '#c9c4b8';
     for (let x = 22; x < W; x += 48) {
-      g.fillStyle = '#c9c4b8';
       g.beginPath();
-      g.arc(x, 8, 3, 0, Math.PI * 2);
+      g.arc(x, 4, 3, 0, Math.PI * 2);
       g.fill();
     }
-    tex.needsUpdate = true;
   };
   draw();
   void document.fonts?.ready.then(draw);

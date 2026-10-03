@@ -11,7 +11,7 @@ import { TurfMarks } from './render/turfMarks';
 import { createStadium } from './render/stadium';
 import { createOldGround } from './render/oldGround';
 import { createBarePitch } from './render/barePitch';
-import { clearFanBanner, loadFanBanner, pickFanBanner } from './ui/fanBanner';
+import { TIFOS, type TifoKind, loadTifo } from './ui/tifos';
 import { createGoals } from './render/goals';
 import { PlayersView } from './render/players';
 import { BallView } from './render/ballView';
@@ -114,6 +114,8 @@ scene.add(freeze(createPitch(renderer, turfMarks.texture)));
 /** The ground standing now. The bare pitch has no crowd: no terraces, chants or bench run. */
 let ground = club.state.ground ?? 'stadium';
 let crowded = ground !== 'bare';
+/** The player's own tifo pictures (Club settings, Tifos); null = the club's own design. */
+const tifoArt: Record<TifoKind, HTMLCanvasElement | null> = { giant: null, end: null, fan: null };
 const makeStadium = () => {
   ground = club.state.ground ?? 'stadium';
   crowded = ground !== 'bare';
@@ -127,6 +129,7 @@ const makeStadium = () => {
           name: club.info().name,
           motto: club.bannerColors(),
           founded: club.state.crest.year,
+          tifos: tifoArt,
         });
   // The crowd (the costliest shader) draws after the rest of the opaque scene, so whatever
   // stands in front of it has already filled the depth buffer and hides those pixels.
@@ -139,7 +142,6 @@ const makeStadium = () => {
 let stadium = makeStadium();
 scene.add(freeze(stadium.group));
 boot.__boot?.(0.75);
-let fanPhoto: HTMLCanvasElement | null = null;
 
 function rebuildStadium(): void {
   scene.remove(stadium.group);
@@ -159,8 +161,22 @@ function rebuildStadium(): void {
   for (const t of textures) t.dispose();
   stadium = makeStadium();
   scene.add(freeze(stadium.group));
-  if (fanPhoto) stadium.setFanBanner(fanPhoto);
+  stadium.setFanBanner(tifoArt.fan);
 }
+
+/** A tifo picture was uploaded or taken down: the fan banner swaps in place, the others are
+ * painted into the stands, so the ground is rebuilt. */
+function setTifo(kind: TifoKind, img: HTMLCanvasElement | null): void {
+  tifoArt[kind] = img;
+  if (kind === 'fan') stadium.setFanBanner(img);
+  else rebuildStadium();
+}
+void Promise.all(TIFOS.map((t) => loadTifo(t.id))).then((imgs) => {
+  if (!imgs.some(Boolean)) return;
+  TIFOS.forEach((t, i) => (tifoArt[t.id] = imgs[i]));
+  if (imgs.some((img, i) => img && TIFOS[i].id !== 'fan')) rebuildStadium();
+  else stadium.setFanBanner(tifoArt.fan);
+});
 const goals = createGoals();
 scene.add(freeze(goals.group));
 const officials = new Officials();
@@ -254,11 +270,7 @@ playersView.hideBench = !crowded;
 
 const home = new HomeUI(ui, club, audio, {
   onPlay: (seed) => startGame(seed),
-  bannerLabel: () => (hasFanBanner ? 'Change your banner' : 'Your banner: add a photo'),
-  onBanner: async () => {
-    const photo = await pickFanBanner();
-    if (photo) setFanBanner(photo);
-  },
+  onTifo: (kind, img) => setTifo(kind, img),
   onGround: (g) => {
     if (g === ground) return;
     rebuildStadium();
@@ -308,7 +320,6 @@ pauseMenu.innerHTML = `
     <button class="smooth ghost">Smoothing: on</button>
     <label class="fine wide"><span>Pixels</span><div class="fine-track"><div class="fine-ticks"></div><input class="fine-in" type="range" min="${PIXELS_MIN}" max="${PIXELS_MAX}" step="1"></div><b class="fine-val">288</b></label>
     <button class="stats ghost wide">FPS counter: off</button>
-    <button class="fan ghost wide">Your banner: add photo</button>
   </div>`;
 ui.appendChild(pauseMenu);
 
@@ -705,26 +716,6 @@ const soundBtn = pauseMenu.querySelector('.sound') as HTMLButtonElement;
 soundBtn.addEventListener('click', () => {
   audio.setMuted(!audio.muted);
   soundBtn.textContent = `Sound: ${audio.muted ? 'off' : 'on'}`;
-});
-
-// "Your banner": a photo the fans hold up in the stands (kept on this device).
-let hasFanBanner = false;
-const fanBtn = pauseMenu.querySelector('.fan') as HTMLButtonElement;
-function setFanBanner(photo: HTMLCanvasElement | null): void {
-  hasFanBanner = photo !== null;
-  fanPhoto = photo;
-  stadium.setFanBanner(photo);
-  fanBtn.textContent = hasFanBanner ? 'Your banner: remove' : 'Your banner: add photo';
-}
-void loadFanBanner().then((photo) => photo && setFanBanner(photo));
-fanBtn.addEventListener('click', async () => {
-  if (hasFanBanner) {
-    clearFanBanner();
-    setFanBanner(null);
-  } else {
-    const photo = await pickFanBanner();
-    if (photo) setFanBanner(photo);
-  }
 });
 
 function setPaused(p: boolean): void {
