@@ -43,8 +43,7 @@ import {
  *   growing on top of it.
  * - The away end is open to the sky under a timber pergola of solar louvres.
  * - In the corners, floodlight "light trees" (voxel trunks, branches, a solar canopy over
- *   the lamps) rise out of planted mounds; beyond the stands, terraced garden towers, avenues
- *   of trees and wind turbines turning on the hills.
+ *   the lamps) rise out of planted mounds; beyond the stands, open green plains to the horizon.
  * The front walls stand where the big stadium's do, so the ball, the flares and the
  * camera's crowd shots all work the same here.
  */
@@ -156,42 +155,6 @@ function vineMaterial(): THREE.MeshStandardMaterial {
     }`,
   });
   m.side = THREE.DoubleSide;
-  return m;
-}
-
-/**
- * The garden towers round the ground: walls in their own colour (vertex colour), a grid of
- * windows that warm up at dusk, and planted balconies on some floors.
- */
-function towerMaterial(): THREE.MeshStandardMaterial {
-  const m = litMaterial({
-    vertexColors: true,
-    roughness: 0.9,
-    ...WN,
-    fragDecl: HASH + 'varying vec3 vWN; float gWin;',
-    diffuseHook: `{
-      bool xf = abs(vWN.x) > 0.5;
-      float s = xf ? vWorldPos.z : vWorldPos.x;
-      float face = xf ? floor(vWorldPos.x) : floor(vWorldPos.z);
-      float y = vWorldPos.y;
-      vec2 cell = vec2(floor(s / 3.0), floor(y / 3.4));
-      vec2 w = vec2(fract(s / 3.0), fract(y / 3.4));
-      float side = step(abs(vWN.y), 0.5);
-      float win = step(abs(w.x - 0.5), 0.26) * step(0.32, w.y) * step(w.y, 0.84) * side;
-      float on = step(0.5, vhash(vec3(cell, face)));
-      gWin = win * on;
-      vec3 c = mix(diffuseColor.rgb, mix(${v3(0x26343f)}, ${v3(0xffcf88)}, on * uFlood), win);
-      float planted = step(w.y, 0.16) * side * step(0.45, vhash(vec3(cell.y, face, 7.0)));
-      diffuseColor.rgb = mix(c, vhash(vec3(cell, 3.0)) < 0.5 ? ${v3(LEAVES[1])} : ${v3(LEAVES[0])}, planted);
-    }`,
-  });
-  m.onBeforeCompile = ((orig) => (shader: Parameters<typeof orig>[0], r: Parameters<typeof orig>[1]) => {
-    orig(shader, r);
-    shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <emissivemap_fragment>',
-      '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vec3(1.0, 0.74, 0.42) * gWin * uFlood * 0.9;',
-    );
-  })(m.onBeforeCompile.bind(m));
   return m;
 }
 
@@ -330,7 +293,8 @@ export function createSolarGround(homeColor: number, awayColor: number, club: St
   const group = new THREE.Group();
   group.add(sky());
   const [land, apron] = groundPlanes();
-  (land.material as THREE.MeshStandardMaterial).color.setHex(0x5f7646);
+  // Open green plains to the horizon all round: nothing stands beyond the ground.
+  (land.material as THREE.MeshStandardMaterial).color.setHex(0x5f8044);
   group.add(land, apron);
 
   const main = standPath(0, -FZ, 0, -1, 44, 0);
@@ -621,78 +585,6 @@ export function createSolarGround(homeColor: number, awayColor: number, club: St
   }
   group.add(nearStand);
 
-  // ---- beyond the stands: avenues of trees, the garden towers, wind turbines on the hills
-  for (let x = -66; x <= 66; x += 8.25) tree(scenery, bark, crown, x + (rnd() - 0.5) * 2, 0, -FZ - 38 - rnd() * 4, 1.2 + rnd() * 0.5, rnd);
-  for (const sx of [-1, 1]) for (let z = -48; z <= 48; z += 8) tree(scenery, bark, crown, sx * (FX + (sx < 0 ? 28 : 25)) + (rnd() - 0.5) * 2, 0, z + (rnd() - 0.5) * 2, 1.1 + rnd() * 0.5, rnd);
-  for (let x = -60; x <= 60; x += 10) tree(scenery, bark, crown, x + (rnd() - 0.5) * 3, 0, FZ + 20 + rnd() * 4, 1.1 + rnd() * 0.5, rnd);
-
-  const towerParts: Parts = new Map();
-  const tower = towerMaterial();
-  const TONES = [0xf0e8d6, 0xe8d2b0, 0xdfe6dc, 0xe9c9a6, 0xf3eee2];
-  for (let i = 0; i < 26; i++) {
-    const a = (i / 26) * Math.PI * 2 + (rnd() - 0.5) * 0.12;
-    const r = 1 + rnd() * 0.25;
-    const x = Math.cos(a) * 150 * r;
-    const z = Math.sin(a) * 118 * r;
-    const ry = Math.floor(rnd() * 4) * (Math.PI / 2);
-    const tone = new THREE.Color(TONES[Math.floor(rnd() * TONES.length)]);
-    let w = 14 + rnd() * 10;
-    let d = 14 + rnd() * 8;
-    let y = 0;
-    const levels = 3 + Math.floor(rnd() * 4);
-    for (let l = 0; l < levels; l++) {
-      const h = 6.8 * (1 + Math.floor(rnd() * 2));
-      const g = box(w, h, d, x, y, z, ry);
-      const n = g.attributes.position.count;
-      const col = new Float32Array(n * 3);
-      for (let v = 0; v < n; v++) col.set([tone.r, tone.g, tone.b], v * 3);
-      g.setAttribute('color', new THREE.BufferAttribute(col, 3));
-      put(towerParts, tower, g);
-      y += h;
-      // The terrace on the step: a planted slab, the next level set back.
-      put(scenery, l === levels - 1 ? bloom : hedge, box(w - 0.6, 0.9, d - 0.6, x, y - 0.05, z, ry));
-      w -= 3.6 + rnd() * 2;
-      d -= 3.6 + rnd() * 2;
-      if (w < 6 || d < 6) break;
-    }
-    // Most towers wear a solar crown; the rest grow a tree on top.
-    if (rnd() < 0.65) {
-      const g = box(Math.max(5, w + 2), 0.35, Math.max(5, d + 2), 0, 0, 0);
-      put(scenery, solar, g.applyMatrix4(new THREE.Matrix4().compose(new THREE.Vector3(x, y + 2.2, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(0.3, ry, 0)), new THREE.Vector3(1, 1, 1))));
-      put(scenery, bone, box(0.5, 2.2, 0.5, x, y, z));
-    } else tree(scenery, bark, crown, x, y + 0.8, z, 1.6, rnd);
-  }
-  group.add(meshes(towerParts));
-
-  // Wind turbines on the hills behind the main stand: white towers, rotors turning in the wind.
-  const TURBINES: [number, number, number][] = [[-150, -172, 0.2], [-78, -190, 1.1], [8, -182, 2.3], [92, -194, 0.7], [165, -168, 1.7]];
-  const HUB = 50;
-  const blade = new THREE.BoxGeometry(1.4, 22, 0.4).translate(0, 11, 0);
-  const rotors = new THREE.InstancedMesh(blade, bone, TURBINES.length * 3);
-  rotors.userData.noStandShadow = true;
-  rotors.frustumCulled = false;
-  for (const [x, z] of TURBINES) {
-    put(scenery, hedge, box(70, 6, 40, x, -2, z - 6)); // the hill
-    for (let y = 4; y < HUB; y += 6.5) {
-      const w = 3 - ((y - 4) / HUB) * 1.6;
-      put(scenery, bone, box(w, 6.5, w, x, y, z));
-    }
-    put(scenery, bone, box(2.4, 2.6, 5.4, x, HUB - 1.3, z - 1));
-  }
-  const blades = (time: number) => {
-    const m = new THREE.Matrix4();
-    const rq = new THREE.Quaternion();
-    const zq = new THREE.Vector3(0, 0, 1);
-    TURBINES.forEach(([x, z, phase], i) => {
-      for (let k = 0; k < 3; k++) {
-        rq.setFromAxisAngle(zq, time * 0.9 + phase + (k * Math.PI * 2) / 3);
-        rotors.setMatrixAt(i * 3 + k, m.compose(new THREE.Vector3(x, HUB, z + 1.8), rq, new THREE.Vector3(1, 1, 1)));
-      }
-    });
-    rotors.instanceMatrix.needsUpdate = true;
-  };
-  blades(0);
-  group.add(rotors);
   group.add(meshes(scenery));
 
   const timberMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), timber, timberBeams.length);
@@ -722,7 +614,6 @@ export function createSolarGround(homeColor: number, awayColor: number, club: St
       const flood = updateShared(time, excitement, atmo, tifo, terraces, banks);
       shafts.visible = flood > 0.2; // below this a beam adds well under one colour step
       glows.update(flood);
-      blades(time);
     },
   };
 }
