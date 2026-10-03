@@ -1,5 +1,6 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.76.2', note: 'Fixed the stamina card in matches: it showed up huge, upright and mid-screen because it shared a name with the collectible player cards. It now sits small in the bottom-left corner, and the collectible cards look right again too.' },
   { v: '0.76.1', note: 'No more trumpets: the crowd no longer sings with synthesised voices, which sounded like brass, and the rising "ooo" in attacks is gone. The drum, claps, Viking HUH, boos, near-miss ooh and the groan after a goal stay, now as breathy shouts.' },
   { v: '0.76', note: 'Livelier keepers: the ready stance eases in and out, shifts its weight and keeps the hands moving. Dives stretch with soft elbows and a tucked top leg, land curled, gather a held ball, push up off the grass. High catches raise a knee; low ones go down on one knee.' },
   { v: '0.75', note: 'A real crowd: the stadium noise is now a recording, five overlapping copies drifting up and down so it never loops audibly. It swells with danger and surges steeply in the last few metres before the goal line. Goals bring a recorded roar. Chants, drums and claps stay.' },
