@@ -1,5 +1,6 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.94.1', note: 'No more stutter on long balls. Working out a lofted pass or cross could take a phone tens of milliseconds in one frame, which showed as a hitch while the camera chased the ball. It now finds the same kick in a few tries instead of dozens. Corner and cross aiming are smoother too.' },
   { v: '0.94', note: 'Your player always goes for a loose ball by himself again, the stick bending his run (up to 60%); Sprint gets there flat out. Press and Sprint are for taking the ball off an opponent: squeezing in, poking it away, tackling.' },
   { v: '0.93.1', note: 'Nothing moves the same way twice. Every kick, header, tackle, catch and celebration now varies a little: arms bigger or smaller, swung wider or across, the trunk turned or bent more to one side. A slow, subtle drift also runs through the upper body and arms while running.' },
   { v: '0.93', note: 'Your player only goes for a loose ball while you hold Press or Sprint: flat out, the stick bending his run (up to 60%, 30% when it’s tight). Let go and the stick alone moves him. Pass pressed early still meets the ball.' },

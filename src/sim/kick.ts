@@ -1,5 +1,5 @@
 import { Ball } from './ball';
-import { DT } from './constants';
+import { BALL, DT } from './constants';
 import { V3 } from './vec';
 
 /**
@@ -57,7 +57,99 @@ function groundArrival(from: V3, fx: number, fz: number, v0: number, rollFrac: n
   return -1;
 }
 
+/**
+ * How far past `dist` (along fx, fz) a ground pass struck at v0 is when it slows below
+ * `floor` m/s: negative if it gets there too slow. Once it is through `dist` still faster,
+ * the rest of the way is estimated (rolling resistance plus drag) instead of rolled out:
+ * only the sign has to be exact, and the estimate keeps it smooth for the root finder.
+ */
+function groundReach(from: V3, fx: number, fz: number, v0: number, rollFrac: number, dist: number, floor: number): number {
+  const spin = makeSpin(fx, fz, (v0 / 0.11) * rollFrac, 0, new V3());
+  const b = loadScratch(from, fx * v0, 0, fz * v0, spin);
+  const f2 = floor * floor;
+  for (let t = 0; t < 8; t += DT) {
+    b.step(DT);
+    const v2 = b.vel.x * b.vel.x + b.vel.z * b.vel.z;
+    const along = (b.pos.x - from.x) * fx + (b.pos.z - from.z) * fz;
+    if (v2 < f2) return along - dist;
+    if (along >= dist) return along - dist + (v2 - f2) / (2 * (BALL.rollDecel + 0.015 * v2));
+  }
+  return (b.pos.x - from.x) * fx + (b.pos.z - from.z) * fz - dist;
+}
+
 const tOut = { t: 0 };
+
+/**
+ * For an increasing f: the smallest x in [min, max] with f(x) >= 0, to within tolX (or as
+ * soon as 0 <= f(x) < tolF). Each f is a whole ball flight, so plain bisection (14-16 of
+ * them over the full range) cost a long ball 10 ms in one frame. This starts from a guess
+ * (a, then b's distance from it), steps along the secant until the answer is bracketed, then closes in by
+ * regula falsi (Illinois), bisecting whenever one end stalls: a handful of flights.
+ */
+function smallestUp(f: (x: number) => number, min: number, max: number, a: number, b: number, tolX: number, tolF: number): number {
+  // The first guess decides which side the second goes (one width away).
+  const w0 = Math.max(tolX, Math.abs(b - a));
+  let x0 = Math.min(max, Math.max(min, a));
+  let f0 = f(x0);
+  let x1: number;
+  let f1: number;
+  if (f0 < 0) {
+    if (x0 >= max) return max;
+    x1 = Math.min(max, x0 + w0);
+    f1 = f(x1);
+  } else {
+    if (f0 < tolF || x0 <= min) return x0;
+    x1 = x0;
+    f1 = f0;
+    x0 = Math.max(min, x1 - w0);
+    f0 = f(x0);
+  }
+  // Bracket it: from the end nearer the answer, along the secant (overshooting a little).
+  while ((f0 >= 0) === (f1 >= 0)) {
+    const up = f1 < 0;
+    if (up ? x1 >= max : x0 <= min) return up ? max : min;
+    if (!up && f0 < tolF) return x0;
+    const w = x1 - x0;
+    const sec = f1 > f0 ? ((up ? -f1 : -f0) * w) / (f1 - f0) : 0;
+    if (up) {
+      x0 = x1;
+      f0 = f1;
+      x1 = Math.min(max, x1 + Math.min(4 * w, Math.max(w, sec * 1.15)));
+      f1 = f(x1);
+    } else {
+      x1 = x0;
+      f1 = f0;
+      x0 = Math.max(min, x0 - Math.min(4 * w, Math.max(w, -sec * 1.15)));
+      f0 = f(x0);
+    }
+  }
+  // f(lo) < 0 <= f(hi).
+  let lo = x0;
+  let hi = x1;
+  let wlo = f0;
+  let whi = f1;
+  let fhi = f1;
+  let side = 0;
+  let same = 0;
+  for (let i = 0; i < 40 && fhi >= tolF && hi - lo > tolX; i++) {
+    const r = wlo / (wlo - whi);
+    const x = same >= 2 || !(r > 0 && r < 1) ? (lo + hi) * 0.5 : Math.min(hi - tolX * 0.5, Math.max(lo + tolX * 0.5, lo + (hi - lo) * r));
+    const fx = f(x);
+    const s = fx >= 0 ? 1 : -1;
+    same = s === side ? same + 1 : 0;
+    if (s > 0) {
+      hi = x;
+      fhi = whi = fx;
+      if (side === 1) wlo *= 0.5;
+    } else {
+      lo = x;
+      wlo = fx;
+      if (side === -1) whi *= 0.5;
+    }
+    side = s;
+  }
+  return hi;
+}
 
 /** Ground pass that arrives at `target` with roughly `arriveSpeed` m/s. */
 export function solveGroundPass(from: V3, tx: number, tz: number, arriveSpeed: number, maxSpeed = 30): KickResult {
@@ -66,26 +158,16 @@ export function solveGroundPass(from: V3, tx: number, tz: number, arriveSpeed: n
   const dist = Math.max(0.5, Math.sqrt(dx * dx + dz * dz));
   dx /= dist;
   dz /= dist;
-  const rollFrac = 0.55; // side-foot pass: ball starts partly rolling
-  let lo = 1;
-  let hi = maxSpeed;
-  let best = hi;
-  let bestT = 0;
-  for (let i = 0; i < 16; i++) {
-    const mid = (lo + hi) * 0.5;
-    const s = groundArrival(from, dx, dz, mid, rollFrac, dist, tOut, arriveSpeed);
-    if (s < arriveSpeed) {
-      lo = mid;
-    } else {
-      hi = mid;
-      best = mid;
-      bestT = tOut.t;
-    }
-  }
-  if (bestT === 0) {
-    groundArrival(from, dx, dz, best, rollFrac, dist, tOut);
-    bestT = tOut.t;
-  }
+  const rollFrac = 0.55; // side-foot pass: ball starts partly rolling (as in the roll table)
+  // The table brackets it to a whole m/s: the softest row still going at that pace.
+  const row = rollPaceFor(dist, arriveSpeed);
+  const fdx = dx;
+  const fdz = dz;
+  // Smooth in the strike speed: how far it gets before slowing to the pace it should arrive at.
+  const reach = (v: number) => groundReach(from, fdx, fdz, v, rollFrac, dist, arriveSpeed);
+  const best = row >= 20 ? smallestUp(reach, 1, maxSpeed, 20, 22, 0.002, 0.05) : smallestUp(reach, 1, maxSpeed, row - 0.5, row, 0.002, 0.05);
+  groundArrival(from, dx, dz, best, rollFrac, dist, tOut);
+  const bestT = tOut.t;
   const spin = makeSpin(dx, dz, (best / 0.11) * rollFrac, 0, new V3());
   return { vel: new V3(dx * best, 0, dz * best), spin, time: bestT };
 }
@@ -130,14 +212,14 @@ export function solveLofted(from: V3, tx: number, tz: number, angleDeg: number, 
     fx = dx / d;
     fz = dz / d;
     const want = Math.sqrt((tx - from.x) ** 2 + (tz - from.z) ** 2);
-    let lo = 2;
-    let hi = 38;
-    for (let i = 0; i < 14; i++) {
-      const mid = (lo + hi) * 0.5;
-      if (loftLanding(from, fx, fz, mid, angle, backspin, curl, lOut) < want) lo = mid;
-      else hi = mid;
-    }
-    speed = (lo + hi) * 0.5;
+    // First guess: the speed that carries it there in a vacuum (drag and spin are then
+    // a small correction); after a curl correction, the last speed.
+    const g = pass === 0 ? Math.sqrt((9.81 * Math.max(1, want)) / Math.max(0.2, Math.sin(2 * angle))) : speed;
+    const gfx = fx;
+    const gfz = fz;
+    // It lands where the step that comes down puts it (a step is ~15 cm of flight): within
+    // that is as close as the flight can tell.
+    speed = smallestUp((v) => loftLanding(from, gfx, gfz, v, angle, backspin, curl, lOut) - want, 2, 38, g * (pass === 0 ? 1.25 : 1), g * (pass === 0 ? 1.3 : 1.01), 0.004, 0.15);
     if (curl === 0) break;
     loftLanding(from, fx, fz, speed, angle, backspin, curl, lOut);
     ax += tx - lOut.x;
