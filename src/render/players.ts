@@ -1080,8 +1080,8 @@ export class PlayersView {
       let hipL = aHip * sinP;
       let hipR = -aHip * sinP;
       const kneeAmp = (0.25 + 1.35 * s) * stepAmt;
-      let kneeL = 0.06 + kneeAmp * Math.pow(Math.max(0, cosP), 1.4) + 0.12 * s;
-      let kneeR = 0.06 + kneeAmp * Math.pow(Math.max(0, -cosP), 1.4) + 0.12 * s;
+      let kneeL = 0.1 + kneeAmp * Math.pow(Math.max(0, cosP), 1.4) + 0.12 * s;
+      let kneeR = 0.1 + kneeAmp * Math.pow(Math.max(0, -cosP), 1.4) + 0.12 * s;
       let legOutL = 0.04;
       let legOutR = 0.04;
       let legYawL = 0;
@@ -1117,14 +1117,14 @@ export class PlayersView {
       let armRotR = -0.3 * s * moveAmt * fwdR;
       const hip0 = this.hipBase[id];
       // (Less drop with planted feet: the knees then bend to take it instead.)
-      let hipY = hip0 - (0.012 + 0.05 * s) * Math.abs(cosP) * moveAmt * (1 - 0.45 * this.ikOn[id]);
+      let hipY = hip0 - (0.016 + 0.07 * s) * Math.abs(cosP) * moveAmt * (1 - 0.3 * this.ikOn[id]);
       // Hips rotate and drop with each stride; the shoulders counter-rotate.
       let pelvisYaw = -0.1 * s * sinP * moveAmt;
-      let pelvisRoll = 0.05 * (0.3 + s) * sinP * moveAmt;
-      let twist = 0.16 * s * sinP * moveAmt;
+      let pelvisRoll = 0.06 * (0.4 + s) * sinP * moveAmt;
+      let twist = (0.05 + 0.2 * s) * sinP * moveAmt;
       let flexExtra = 0;
       let sideExtra = 0;
-      let leanF = p.leanFwd * 0.5;
+      let leanF = p.leanFwd * 0.6;
       let leanS = -p.leanSide;
       let roll = 0;
       let lift = 0;
@@ -2202,11 +2202,11 @@ export class PlayersView {
       // The upper body carries inertia: it pitches with acceleration and braking, swings
       // past and settles (underdamped spring), and bends a little out of turns. The head
       // stays level and tracks the ball.
-      const flexTarget = clamp(p.leanFwd * 0.8 - p.accelFwd * 0.012 + s * 0.06 + flexExtra, -0.6, 0.7);
+      const flexTarget = clamp(p.leanFwd * 0.9 - p.accelFwd * 0.014 + s * 0.12 + flexExtra, -0.6, 0.7);
       // (Only a little counter-bend: the trunk goes into a turn with the legs.)
       const sideTarget = clamp(-leanS * 0.15 + sideExtra, -0.45, 0.45);
       const w = 13;
-      const zeta = 0.42;
+      const zeta = 0.34;
       this.spF[id] += (w * w * (flexTarget - this.sF[id]) - 2 * zeta * w * this.spF[id]) * dt;
       this.sF[id] += this.spF[id] * dt;
       this.spS[id] += (w * w * (sideTarget - this.sS[id]) - 2 * zeta * w * this.spS[id]) * dt;
@@ -2248,9 +2248,12 @@ export class PlayersView {
       // Torso mesh sits at the waist unrotated; the shader bends it through the spine.
       const T = this.chainT(this.j3, P, 0, 0.04, 0);
       this.put('torso', j, T, bs.torsoW, bs.torsoL, bs.torsoD);
-      const flex = spineFlex + 0.04;
+      // Each footfall gives through the trunk: it folds a touch as the weight lands on the
+      // planted leg and opens again on the push-off; the shoulders sway over the stance leg.
+      const give = Math.cos(2 * phi) * moveAmt * (p.action === 'none' ? 1 : 0);
+      const flex = spineFlex + 0.04 + (0.015 + 0.045 * s) * give;
       const tw = twist - pelvisYaw;
-      const side = spineSide - pelvisRoll;
+      const side = spineSide - 0.8 * pelvisRoll;
       bend.setXYZ(j, flex, tw, side);
       const C = this.chain(this.chest, T, 0, 0, 0, flex, tw, side);
       // Neck and head: level gaze (counter the body's pitch and roll), turned toward the

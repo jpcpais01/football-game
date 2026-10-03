@@ -1,5 +1,6 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.90.1', note: 'Looser, more natural bodies. Players lean further into their running and bend more through the spine. Each footfall gives through the knees and trunk, the hips sway and the shoulders twist more, even when walking, and the upper body settles more springily after a stop or burst.' },
   { v: '0.90', note: 'Pressing goes for the ball. Held tight on the carrier, your player squeezes in instead of hovering, pokes at the ball the moment it shows (a heavy touch, the near side, a turn), and if kept out too long goes through anyway. Computer pressers tackle when the ball is open.' },
   { v: '0.89.1', note: 'Shoot is now Kick, and it swapped places with Through: Kick sits on top above Sprint, Through on the diagonal. In defence Press and Switch moved with them.' },
   { v: '0.89', note: 'No more passes to nobody: with no team-mate to feet where you aim, the ball goes into the path of one who can run onto it, or into space as hard as you charged it. A full charge looks for the man further on. Lobs into space fly.' },
