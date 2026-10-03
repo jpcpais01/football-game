@@ -1100,11 +1100,16 @@ export class Match {
         t.x = gx - dir * depth;
         t.z = clamp(t.z, -PITCH.halfW + 2.5, PITCH.halfW - 2.5);
       } else if (this.aimingGoalKick && m > 0.12) {
-        // Anywhere upfield a keeper can reach: 15 to 62 m out, inside the touchlines.
+        // Anywhere upfield a keeper can reach: 15 to 62 m out, inside the touchlines. The
+        // camera stands behind the keeper looking at the ring, so the stick is screen-relative:
+        // up sends it further, right moves it to his right (right of (fx, fz) is (-fz, fx)).
         const t = sp.target!;
         const dir = this.teams[sp.team].dir;
-        t.x = clamp(t.x + input.moveX * 16 * DT, -PITCH.halfL + 3, PITCH.halfL - 3);
-        t.z = clamp(t.z - input.moveY * 16 * DT, -PITCH.halfW + 3, PITCH.halfW - 3);
+        const fl = Math.hypot(t.x - sp.x, t.z - sp.z) || 1;
+        const fx = (t.x - sp.x) / fl;
+        const fz = (t.z - sp.z) / fl;
+        t.x = clamp(t.x + (input.moveY * fx - input.moveX * fz) * 16 * DT, -PITCH.halfL + 3, PITCH.halfL - 3);
+        t.z = clamp(t.z + (input.moveY * fz + input.moveX * fx) * 16 * DT, -PITCH.halfW + 3, PITCH.halfW - 3);
         if ((t.x - sp.x) * dir < 8) t.x = sp.x + dir * 8;
         const dx = t.x - sp.x;
         const dz = t.z - sp.z;
