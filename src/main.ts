@@ -616,8 +616,15 @@ async function lockLandscape(): Promise<void> {
 }
 void lockLandscape();
 // The first tap anywhere goes fullscreen too, so the home screen is landscape and
-// edge to edge from the start rather than only once a match begins.
-document.addEventListener('pointerdown', () => void enterFullscreen(), { once: true, capture: true });
+// edge to edge from the start rather than only once a match begins. On touch only the
+// end of a tap counts as a user gesture (a pointerdown does not), so listen for that,
+// and keep listening until fullscreen has really been granted.
+function fullscreenOnTap(): void {
+  void enterFullscreen().then(() => {
+    if (document.fullscreenElement) document.removeEventListener('pointerup', fullscreenOnTap, true);
+  });
+}
+document.addEventListener('pointerup', fullscreenOnTap, true);
 
 let wakeLock: { release(): Promise<void> } | null = null;
 async function keepAwake(): Promise<void> {
