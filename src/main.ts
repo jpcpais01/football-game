@@ -399,22 +399,14 @@ function updateCharge(alpha: number): void {
   const hold = inp.holdTime[btn];
   // Shoot: full power at 0.85 s, over-hit beyond (red).
   const shot = btn === 2;
-  // Pass / Through: the bar is the pass weight (full at 0.6 s); blue once slid up (lofted).
+  // Pass / Through: the bar is the pass weight (full at 0.6 s).
   const p = shot ? Math.min(1.15, hold / 0.85) / 1.15 : Math.min(1, hold / 0.6);
   // Dead-ball shot (aiming at the reticle): a gauge whose green peak is the best power —
   // full pace without sending it over (power ~0.92 of 1.15 on the bar's scale).
   const dead = shot && aimScreen !== null;
   charge.classList.toggle('dead', dead);
-  if (dead) {
-    chargeFill.style.transform = '';
-    chargeFill.style.clipPath = `inset(0 ${((1 - p) * 100).toFixed(1)}% 0 0)`;
-  } else {
-    chargeFill.style.clipPath = '';
-    chargeFill.style.transform = `scaleX(${p.toFixed(3)})`;
-  }
+  chargeFill.style.clipPath = `inset(0 ${((1 - p) * 100).toFixed(1)}% 0 0)`;
   charge.classList.toggle('shot', shot);
-  charge.classList.toggle('over', shot && hold > 0.85);
-  charge.classList.toggle('lofted', !shot && inp.swipe[btn]);
   chargeTick.style.display = shot ? '' : 'none';
   chargeTick.style.left = `${((dead ? 0.92 : 1) / 1.15) * 100}%`;
   let x: number;
@@ -459,8 +451,7 @@ function updateStamina(alpha: number): void {
   const st = Math.round(c.stamina * 100);
   if (st !== staminaLast) {
     staminaLast = st;
-    staminaFill.style.transform = `scaleX(${(st / 100).toFixed(2)})`;
-    staminaBar.classList.toggle('tired', st < 25);
+    staminaFill.style.clipPath = `inset(0 ${100 - st}% 0 0)`;
   }
   if (!staminaShown) staminaBar.classList.add('show'), (staminaShown = true);
 }
@@ -1121,8 +1112,11 @@ function frame(now: number): void {
   if (playing) hud.update(match, now / 1000);
   if (playing && !paused) minimap.update(match, now / 1000);
   updateAim();
-  // Corner ring and flight preview (holding Shoot shows the floated ball).
-  cornerAim.update(match, playing && controls.input.held[Btn.C], now / 1000);
+  // Corner / goal kick ring and flight preview (holding Shoot shows the floated ball); the
+  // same for a cross while Pass is held and slid up.
+  const inp = controls.input;
+  const crossing = playing && !paused && inp.held[Btn.A] && inp.swipe[Btn.A];
+  cornerAim.update(match, playing && inp.held[Btn.C], now / 1000, crossing ? inp : null);
   updateCharge(alpha);
   updateStamina(alpha);
 

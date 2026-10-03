@@ -2,11 +2,12 @@ import * as THREE from 'three';
 import { Ball } from '../sim/ball';
 import { DT } from '../sim/constants';
 import type { Match } from '../sim/match';
+import type { V3 } from '../sim/vec';
 
 const DOTS = 34;
 
 /**
- * Corner and goal-kick aiming, FIFA-style: a gold ring on the grass where the delivery will come down,
+ * Corner, goal-kick and cross aiming, FIFA-style: a gold ring on the grass where the delivery will come down,
  * and a dotted arc of its flight. The arc is the real flight (the match's own corner solver
  * and ball physics), whipped or floated depending on the button being held.
  */
@@ -20,6 +21,7 @@ export class CornerAim {
   private ball = new Ball();
   private solvedAt = -1;
   private lastKey = '';
+  private cross: ReturnType<Match['crossAim']> = null;
 
   constructor() {
     const gold = new THREE.Color(0xffd447);
@@ -71,35 +73,63 @@ export class CornerAim {
     this.group.visible = false;
   }
 
-  update(match: Match, float: boolean, time: number): void {
+  /**
+   * Per frame. `cross` is the stick while the human holds a lofted Pass (null otherwise): on
+   * the ball in the crossing zone, that previews the open-play cross the same way.
+   */
+  update(match: Match, float: boolean, time: number, cross: { moveX: number; moveY: number } | null): void {
     const sp = match.setPiece;
-    const show = match.aimingDelivery && !!sp?.target;
-    this.group.visible = show;
-    if (!show || !sp?.target) return;
-    const t = sp.target;
-    // The ring breathes; it squashes a little toward the camera like a mark on the grass.
-    const s = 1 + 0.08 * Math.sin(time * 5);
-    this.ring.position.set(t.x, 0.04, t.z);
-    this.ring.scale.setScalar(s);
-    this.disc.position.set(t.x, 0.045, t.z);
-    (this.disc.material as THREE.MeshBasicMaterial).opacity = 0.55 + 0.3 * Math.sin(time * 5);
+    if (match.aimingDelivery && sp?.target) {
+      const t = sp.target;
+      this.place(t.x, t.z, time);
+      // Re-solve the flight only when the aim or the style changes (at most 20 a second).
+      const key = `${t.x.toFixed(2)}|${t.z.toFixed(2)}|${float}`;
+      if (key === this.lastKey || time - this.solvedAt < 0.05) return;
+      this.lastKey = key;
+      this.solvedAt = time;
+      const r = match.solveDelivery(t.x, t.z, float);
+      this.fly(match, r.vel, r.spin, r.time);
+      this.group.visible = true;
+      return;
+    }
+    if (cross) {
+      // The cross follows the stick and the runners: re-solved up to 20 times a second.
+      if (time - this.solvedAt >= 0.05 || this.lastKey !== 'cross') {
+        this.solvedAt = time;
+        this.lastKey = 'cross';
+        this.cross = match.crossAim(cross.moveX, cross.moveY);
+        if (this.cross) this.fly(match, this.cross.vel, this.cross.spin, this.cross.time);
+      }
+      if (this.cross) {
+        this.place(this.cross.x, this.cross.z, time);
+        this.group.visible = true;
+        return;
+      }
+    }
+    this.lastKey = '';
+    this.cross = null;
+    this.group.visible = false;
+  }
 
-    // Re-solve the flight only when the aim or the style changes.
-    const key = `${t.x.toFixed(2)}|${t.z.toFixed(2)}|${float}`;
-    // (A full flight solve: at most 20 a second while the aim is moving.)
-    if (key === this.lastKey || time - this.solvedAt < 0.05) return;
-    this.lastKey = key;
-    this.solvedAt = time;
-    const r = match.solveDelivery(t.x, t.z, float);
+  /** The ring on the grass: it breathes, like a mark on the pitch. */
+  private place(x: number, z: number, time: number): void {
+    const s = 1 + 0.08 * Math.sin(time * 5);
+    this.ring.position.set(x, 0.04, z);
+    this.ring.scale.setScalar(s);
+    this.disc.position.set(x, 0.045, z);
+    (this.disc.material as THREE.MeshBasicMaterial).opacity = 0.55 + 0.3 * Math.sin(time * 5);
+  }
+
+  /** The dotted flight from the ball, sampled evenly in time until it comes down. */
+  private fly(match: Match, vel: V3, spin: V3, time: number): void {
     const b = this.ball;
     b.pos.copy(match.ball.pos);
     b.prevPos.copy(b.pos);
-    b.vel.copy(r.vel);
-    b.spin.copy(r.spin);
+    b.vel.copy(vel);
+    b.spin.copy(spin);
     b.onGround = false;
     b.inGoal = false;
-    // Sample the flight evenly in time until it comes down.
-    const total = Math.max(0.2, r.time);
+    const total = Math.max(0.2, time);
     const every = total / (DOTS - 1);
     let next = 0;
     let n = 0;
@@ -109,7 +139,7 @@ export class CornerAim {
         this.pos[n * 3] = b.pos.x;
         this.pos[n * 3 + 1] = Math.max(0.12, b.pos.y);
         this.pos[n * 3 + 2] = b.pos.z;
-        // Faint at the foot, strong over the box.
+        // Faint at the foot, strong where it comes down.
         this.alpha[n] = 0.25 + 0.7 * (n / (DOTS - 1));
         n++;
         next += every;

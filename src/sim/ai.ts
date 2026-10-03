@@ -1171,25 +1171,52 @@ export class AI {
     return out.set(x * dir, 0, z * dir);
   }
 
+  /**
+   * Where a presser goes on the carrier. Goal-side of the ball, `keep` metres off it, and
+   * where it will be a moment from now rather than where it is, so he moves with the
+   * carrier instead of a step behind him. Except when the carrier's touch has put the ball
+   * nearer the presser than him: then it's there to be won and he goes straight onto it
+   * (returns true). Nobody is ever just stood off a loose touch.
+   */
+  pressPoint(p: Player, carrier: Player, out: V3, keep = 1.3): boolean {
+    const b = this.m.ball;
+    const bx = b.pos.x + b.vel.x * 0.25;
+    const bz = b.pos.z + b.vel.z * 0.25;
+    // Both of them a moment on too: a carrier running onto his own touch isn't exposed.
+    const mine = dist2D(p.pos.x + p.vel.x * 0.25, p.pos.z + p.vel.z * 0.25, bx, bz);
+    const his = dist2D(carrier.pos.x + carrier.vel.x * 0.25, carrier.pos.z + carrier.vel.z * 0.25, bx, bz);
+    if (b.pos.y < 0.7 && mine < 2 && mine < his - 0.2) {
+      out.set(bx, 0, bz);
+      return true;
+    }
+    return this.containAt(p, bx, bz, out, keep);
+  }
+
   /** Goal-side point from which to contain the ball carrier. */
   containTarget(p: Player, out: V3, keep = 1.3): V3 {
-    const m = this.m;
-    const b = m.ball.pos;
-    const gx = -m.teams[p.team].dir * PITCH.halfL;
-    const dx = gx - b.x;
-    const dz = -b.z * 0.5;
+    const b = this.m.ball.pos;
+    this.containAt(p, b.x, b.z, out, keep);
+    return out;
+  }
+
+  private containAt(p: Player, bx: number, bz: number, out: V3, keep: number): false {
+    const gx = -this.m.teams[p.team].dir * PITCH.halfL;
+    const dx = gx - bx;
+    const dz = -bz * 0.5;
     const d = Math.max(0.1, Math.hypot(dx, dz));
-    return out.set(b.x + (dx / d) * keep, 0, b.z + (dz / d) * keep);
+    out.set(bx + (dx / d) * keep, 0, bz + (dz / d) * keep);
+    return false;
   }
 
   private press(p: Player, carrier: Player): void {
     const m = this.m;
-    this.containTarget(p, this.tmp);
+    const onBall = this.pressPoint(p, carrier, this.tmp);
     const d = m.ballDist(p);
-    this.moveTo(p, this.tmp.x, this.tmp.z, d > 4, true);
-    // Closing in: square to him, ready to jockey.
-    p.squareUp = d < 6;
-    if (d < 5) {
+    this.moveTo(p, this.tmp.x, this.tmp.z, d > 4 || onBall, true);
+    // Closing in: square to him, ready to jockey; a loose touch is pounced on.
+    p.squareUp = d < 6 && !onBall;
+    p.burst = onBall;
+    if (d < 5 && !onBall) {
       p.wantSpeed = Math.min(p.wantSpeed, carrier.speed + 1.5 + d);
     }
     // Tackle when close and the ball is exposed.

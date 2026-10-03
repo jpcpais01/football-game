@@ -1,5 +1,11 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.82.1', note: 'Slimmer gauges: the stamina bars and the pass and shot power bar are thinner, with a fine black outline, and fill from red to green. The shot bar turns red again past full power, where it would fly over.' },
+  { v: '0.82', note: 'Tackles reworked. Once you commit, you go where your momentum takes you: no more snapping round after the ball. Slides bend only slightly at a sprint, last longer on the grass, and the leg reaches for the ball. The ball now flies off the leg how it was struck.' },
+  { v: '0.81.2', note: 'Crosses show their aim: hold Pass and slide up on the ball out wide, and the gold ring and the ball’s flight appear where the cross will come down. The stick steers which runner it’s for, and the ring follows.' },
+  { v: '0.81.1', note: 'The goal roar no longer audibly ends and restarts: after the first take, three overlapping, staggered copies of it swell in underneath, each drifting in level, carrying the roar seamlessly through the celebration.' },
+  { v: '0.81', note: 'Sprint or press on a high ball and your player attacks it: real aerial duels, decided by jump, height, strength and run-up, with the winner heading it under pressure. Pressing the carrier now moves with him instead of trailing, sprint gets right up against him, and any loose touch gets pounced on.' },
+  { v: '0.80.5', note: 'Rain is half as loud.' },
   { v: '0.80.4', note: 'Fixed the fans’ flags in the stands shaking faster and faster the longer you played until they flickered. Their ripple now speeds up mid-swing and settles at the turn, at the same gentle pace all match.' },
   { v: '0.80.3', note: 'No more sparkle on the grass late in the match: the dew no longer throws twinkling floodlight glints across the pitch. The soft evening sheen on the turf stays.' },
   { v: '0.80.2', note: 'The buttons say what they do while you line up a corner (Whip, Short, Float) or a goal kick (Drive, Short, Float), and go back to Pass, Through and Shoot once the ball is struck.' },
