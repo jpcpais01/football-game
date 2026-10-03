@@ -72,9 +72,13 @@ export class StandShadow {
   }
 
   /** Re-bakes if the ground or the sun has changed. `on`: false when there's no sun to cast. */
+  /** Whether update() will bake this frame. */
+  due(group: THREE.Object3D, on: boolean): boolean {
+    return on && (group !== this.group || this.uSun.value.angleTo(SUN_DIR) >= REBAKE);
+  }
+
   update(renderer: THREE.WebGLRenderer, group: THREE.Object3D, on: boolean): void {
-    if (!on) return;
-    if (group === this.group && this.uSun.value.angleTo(SUN_DIR) < REBAKE) return;
+    if (!this.due(group, on)) return;
     this.group = group;
     this.uSun.value.copy(SUN_DIR);
     SHARED.uStandSun.value.copy(SUN_DIR);
@@ -164,10 +168,16 @@ export class GroundLight {
     this.scene.add(quad);
   }
 
+  /** Whether update() will bake this frame (given the stands as they are now). */
+  due(stands: StandShadow): boolean {
+    const k = this.key;
+    return !(k.version === stands.version && Math.abs(SHARED.uStandSoft.value - k.soft) < 0.02 && k.lamps === SHARED.uLamps.value && k.n === SHARED.uLampN.value && k.norm === SHARED.uLampNorm.value);
+  }
+
   update(renderer: THREE.WebGLRenderer, stands: StandShadow): void {
+    if (!this.due(stands)) return;
     const k = this.key;
     const soft = SHARED.uStandSoft.value;
-    if (k.version === stands.version && Math.abs(soft - k.soft) < 0.02 && k.lamps === SHARED.uLamps.value && k.n === SHARED.uLampN.value && k.norm === SHARED.uLampNorm.value) return;
     k.version = stands.version;
     k.soft = soft;
     k.lamps = SHARED.uLamps.value;

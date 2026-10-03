@@ -42,6 +42,12 @@ export class Profiler {
   private gpuSum = 0;
   private gpuMax = 0;
   private gpuN = 0;
+  // GPU probes (gl.finish, where no timer query exists): once a window the frame's passes are
+  // each waited for, and so is any bake (stand shadow, ground light, clouds) when it runs.
+  private gpuLast = new Map<string, number>();
+  private gpuPeak = new Map<string, number>();
+  private probeAt = 0;
+  private stalled = 0;
   /** The text to show (refreshed every two seconds). */
   text = '';
 
@@ -70,6 +76,27 @@ export class Profiler {
       s.now += performance.now() - t0;
       return r;
     };
+  }
+
+  /** Whether this frame should wait for the GPU after each pass (once a window). */
+  probeDue(now: number): boolean {
+    if (!this.gl || now - this.probeAt < WINDOW_MS) return false;
+    this.probeAt = now;
+    this.stalled = 2; // this frame and the next don't count toward the frame times
+    return true;
+  }
+
+  /** Waits for the GPU; the wait is charged to `name` (null: just drain what's queued). */
+  gpuSync(name: string | null): void {
+    if (!this.gl) return;
+    const t = performance.now();
+    this.gl.finish();
+    const ms = performance.now() - t;
+    if (name) {
+      this.gpuLast.set(name, ms);
+      this.gpuPeak.set(name, Math.max(ms, this.gpuPeak.get(name) ?? 0));
+    }
+    if (name === 'bake') this.stalled = Math.max(this.stalled, 2);
   }
 
   begin(): void {
@@ -114,6 +141,13 @@ export class Profiler {
 
   /** End of a drawn frame: `frameMs` is the time since the last one. */
   end(now: number, frameMs: number, cpuMs: number): void {
+    if (this.stalled > 0) {
+      // A probed frame (it waited for the GPU on purpose) and the one after: not counted.
+      this.stalled--;
+      for (const s of this.secs) s.now = 0;
+      if (now - this.windowAt >= WINDOW_MS) this.report(now);
+      return;
+    }
     // A drop in the JS heap since the last frame: the garbage collector ran in between.
     const mem = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;
     if (mem) {
@@ -156,6 +190,14 @@ export class Profiler {
       lines.push(`${s.sub ? ' └' : ''}${s.name.padEnd(s.sub ? 5 : 7)}avg${f(s.sum / n)} max${f(s.max)}`);
     }
     if (this.gcs) lines.push(`gc    ${this.gcs}× in 2 s`);
+    // GPU time per pass (from the last probe; the peak over the window for bakes).
+    if (this.gpuLast.size) {
+      const parts: string[] = [];
+      for (const [k, v] of this.gpuLast) if (k !== 'bake') parts.push(`${k} ${v.toFixed(1)}`);
+      lines.push(`gpu*  ${parts.join(' · ')}`);
+      const bake = this.gpuLast.get('bake');
+      if (bake !== undefined) lines.push(`gpu*  bake ${bake.toFixed(1)} last, ${(this.gpuPeak.get('bake') ?? 0).toFixed(1)} peak (sun shadow/light/clouds)`);
+    }
     // The slowest frame, by section (biggest first).
     this.worst = this.worstNow.slice().sort((a, b) => b[1] - a[1]);
     lines.push(`worst frame: ${this.worst.map(([k, v]) => (k === 'gc' ? 'GC' : `${k} ${v.toFixed(1)}`)).join(' · ')}`);
@@ -165,5 +207,6 @@ export class Profiler {
     this.frameSum = this.cpuSum = this.cpuMax = this.worstMs = 0;
     this.gpuSum = this.gpuMax = this.gpuN = 0;
     for (const s of this.secs) s.sum = s.max = 0;
+    this.gpuPeak.clear();
   }
 }

@@ -1193,9 +1193,14 @@ function frame(now: number): void {
   }
   if (crowded) terraces.update(running ? dt : 0, match);
   stadium.update(now / 1000, match.excitement, atmo, tifo, terraces, cutscene.active ? cutscene.hang : tifo);
-  standShadow.update(renderer, stadium.group, SHARED.uStandOn.value > 0);
+  const standOn = SHARED.uStandOn.value > 0;
+  // With the counter on, a bake's GPU time is measured on its own (drained before, waited after).
+  const timeBake = showStats && (standShadow.due(stadium.group, standOn) || groundLight.due(standShadow) || cloudField.due());
+  if (timeBake) prof.lap('world'), prof.gpuSync(null), prof.begin();
+  standShadow.update(renderer, stadium.group, standOn);
   groundLight.update(renderer, standShadow);
   cloudField.update(renderer);
+  if (timeBake) prof.gpuSync('bake');
   if (!replay.active) turfMarks.update(match, renderer);
   prof.lap('world');
   if (playing) hud.update(match, now / 1000);
@@ -1222,9 +1227,12 @@ function frame(now: number): void {
     /* skip */
   } else if (pixelLook()) {
     if ((shadowTick++ & 1) === 0) renderer.shadowMap.needsUpdate = true;
-    if (showStats) prof.gpuBegin();
-    pixelPass.render(renderer, scene, rig.camera, SHARED.uFlood.value, atmo.weather === 'sunny' ? 0.35 : 1, rig.subPixelX, rig.subPixelY);
-    if (showStats) prof.gpuEnd();
+    // Once every two seconds the counter waits for the GPU after each pass to time it.
+    const probe = showStats && prof.probeDue(now);
+    if (probe) prof.gpuSync(null), (renderer.shadowMap.needsUpdate = true); // (timed with its shadow pass)
+    else if (showStats) prof.gpuBegin();
+    pixelPass.render(renderer, scene, rig.camera, SHARED.uFlood.value, atmo.weather === 'sunny' ? 0.35 : 1, rig.subPixelX, rig.subPixelY, probe ? (pass) => prof.gpuSync(pass) : undefined);
+    if (showStats && !probe) prof.gpuEnd();
   } else {
     renderer.shadowMap.needsUpdate = true;
     if (showStats) prof.gpuBegin();
