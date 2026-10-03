@@ -86,6 +86,16 @@ function hash01(id: number, k: number): number {
   return v - Math.floor(v);
 }
 
+/** The same, spread over [-1, 1). */
+function rnd(id: number, k: number): number {
+  return hash01(id, k) * 2 - 1;
+}
+
+/** A slow, smooth wander in [-1, 1] for player id (channel k, about f rad/s). */
+function drift(t: number, id: number, k: number, f: number): number {
+  return Math.sin(t * f + hash01(id, k) * 6.283) * 0.65 + Math.sin(t * f * 2.3 + hash01(id, k + 1) * 6.283) * 0.35;
+}
+
 function lathe(points: [number, number][], segments = 14): THREE.BufferGeometry {
   return new THREE.LatheGeometry(
     points.map(([r, y]) => new THREE.Vector2(r, y)),
@@ -2168,6 +2178,46 @@ export class PlayersView {
         this.bodyAy[id] += (ay - this.bodyAy[id]) * (1 - Math.exp(-dt * 25));
         this.bodyVy[id] = vy;
         this.bodyY[id] = yNow;
+      }
+      // Variation: nothing is done exactly the same way twice. Each action draws its own
+      // small differences (a bigger or smaller arm, swung wider or across, the trunk turned
+      // or bent a little more to one side), eased in and out over the action; on top, a
+      // slow drift wanders through the upper body all the time. Keyed on the player, the
+      // action's start and the match clock, so a replay shows the same take.
+      {
+        const handsOn = held === p || p.action === 'catch' || p.action === 'throw' || throwIn ? 0.35 : 1;
+        const mt = match.time;
+        const dA = drift(mt, id, 11, 0.7) * handsOn;
+        const dB = drift(mt, id, 13, 0.55) * handsOn;
+        const dT = drift(mt, id, 15, 0.62);
+        const dS = drift(mt, id, 17, 0.48);
+        armL += 0.06 * dA;
+        armR += 0.06 * dB;
+        armOutL += 0.03 * (0.5 + 0.5 * dB);
+        armOutR += 0.03 * (0.5 + 0.5 * dA);
+        elbowL *= 1 + 0.08 * dB;
+        elbowR *= 1 + 0.08 * dA;
+        twist += 0.035 * dT;
+        sideExtra += 0.03 * dS;
+        flexExtra += 0.025 * dT * dS;
+        headPitch += 0.03 * dS;
+        if (p.action !== 'none' && p.actionDur > 0) {
+          const seed = id + 0.1373 * Math.round((mt - p.actionT) * 20) + 0.0371 * p.action.length;
+          const e = smoothstep(0, 0.15, pr) * (1 - smoothstep(0.82, 1, pr));
+          const ea = e * handsOn;
+          armL = armL * (1 + 0.22 * ea * rnd(seed, 1)) + 0.14 * ea * rnd(seed, 2);
+          armR = armR * (1 + 0.22 * ea * rnd(seed, 3)) + 0.14 * ea * rnd(seed, 4);
+          armOutL += 0.08 * ea * rnd(seed, 5);
+          armOutR += 0.08 * ea * rnd(seed, 6);
+          elbowL *= 1 + 0.18 * ea * rnd(seed, 7);
+          elbowR *= 1 + 0.18 * ea * rnd(seed, 8);
+          armRotL += 0.12 * ea * rnd(seed, 9);
+          armRotR += 0.12 * ea * rnd(seed, 10);
+          twist = twist * (1 + 0.2 * e * rnd(seed, 11)) + 0.1 * e * rnd(seed, 12);
+          flexExtra += 0.07 * e * rnd(seed, 13);
+          sideExtra += 0.06 * e * rnd(seed, 14);
+          headPitch += 0.06 * e * rnd(seed, 15);
+        }
       }
       let turnRate = 0;
       if (dt > 0) {
