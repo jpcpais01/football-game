@@ -10,6 +10,7 @@ import { PYLONS, SHARED, blobMaterial, litMaterial } from './look';
 import { divePose, type DivePose } from '../sim/keeperPose';
 import type { Officials } from './officials';
 import type { Benches } from './bench';
+import type { Managers } from './managers';
 
 /**
  * Players: shaped, kitted figures (collars, trim, numbers, faces, hair) built from a few
@@ -613,6 +614,8 @@ export class PlayersView {
   officials: Officials | null = null;
   /** The substitutes' benches (their sitting, squatting and reactions). */
   bench: Benches | null = null;
+  /** The two managers in their technical areas (drawn and hidden with the benches). */
+  managers: Managers | null = null;
   /** No dugouts at this ground: the substitutes aren't drawn. */
   hideBench = false;
   /** No referee or linesmen (training). */
@@ -846,6 +849,23 @@ export class PlayersView {
       const [boot, sole] = BOOTS[Math.floor(Math.random() * BOOTS.length)];
       set('boot', p, boot);
       attr('boot', 'aTrim', p, sole);
+      // Managers: long sleeves and trousers in their own clothes, no number.
+      const fit = p.team < 2 ? this.managers?.outfit(p, kit) : null;
+      if (fit) {
+        set('torso', p, fit.coat);
+        attr('torso', 'aTrim', p, fit.trim);
+        pat.setX(p.id, fit.pattern);
+        num.setX(p.id, -1);
+        for (const part of ['upperArm', 'forearm'] as const) set(part, p, fit.coat);
+        attr('upperArm', 'aTrim', p, fit.coat);
+        attr('upperArm', 'aSkin', p, fit.coat);
+        attr('forearm', 'aAlt', p, fit.cuff);
+        for (const part of ['pelvis', 'shortsLeg', 'thigh', 'shin'] as const) set(part, p, fit.trousers);
+        attr('shortsLeg', 'aTrim', p, fit.stripe);
+        attr('shin', 'aTrim', p, fit.trousers);
+        set('boot', p, fit.shoes);
+        attr('boot', 'aTrim', p, fit.sole);
+      }
     }
     num.needsUpdate = true;
     pat.needsUpdate = true;
@@ -1116,6 +1136,7 @@ export class PlayersView {
     this.cull();
     const floodOn = this.flood.visible;
     const benchFrom = this.hideBench && this.bench ? this.bench.all[0].id : Infinity;
+    if (this.managers) this.managers.group.visible = !this.hideBench;
     for (const p of this.list) {
       // A ground with no bench (or no officials) never shows them: don't pose them either.
       if (p.id >= benchFrom || (this.hideOfficials && p.team === 2)) continue;
@@ -2100,7 +2121,7 @@ export class PlayersView {
       }
 
       // Substitutes: sat on the bench, squatting at the line, reacting (see render/bench).
-      const bp = this.bench?.pose(p, this.body[id].leg, h * this.bodyScale[id]);
+      const bp = this.bench?.pose(p, this.body[id].leg, h * this.bodyScale[id]) ?? this.managers?.pose(p, this.body[id].leg) ?? null;
       if (bp) {
         const k = bp.legs;
         hipY = lerp(hipY, bp.hipY, k);
@@ -2131,6 +2152,13 @@ export class PlayersView {
         headPitch += bp.headPitch;
         lift += bp.lift;
         if (!bp.look) headLook = false;
+        if (bp.kick > 0) {
+          hipR = lerp(hipR, bp.kickHip, bp.kick);
+          kneeR = lerp(kneeR, bp.kickKnee, bp.kick);
+          ankleR += bp.kickAnkle * bp.kick;
+          hipL = lerp(hipL, bp.plantHip, bp.kick);
+          kneeL = lerp(kneeL, bp.plantKnee, bp.kick);
+        }
       }
 
       // Officials' signals: the referee points for a restart, linesmen raise the flag.

@@ -493,6 +493,20 @@ button.tile:hover .chev { transform: translateX(4px); }
 .drill-opt span { font-size: 11px; font-weight: 600; letter-spacing: 0.02em; opacity: 0.8; line-height: 1.25; font-family: var(--font); }
 .drill-opt em { font-style: normal; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--gold); }
 .drill-hint { margin-top: 10px; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; color: var(--ink-dim); }
+/* Manager: your look on the touchline. */
+.modal.coach-modal .m-box { width: min(700px, 100%); }
+.coach-modal .kicker { color: var(--gold); font-size: 12px; letter-spacing: 0.25em; }
+.coach-ed { display: grid; grid-template-columns: minmax(110px, 0.7fr) 2fr; gap: 18px; align-items: start; }
+.coach-prev { position: sticky; top: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px 8px; border-radius: 14px; background: linear-gradient(#2f6b3a 0 70%, #24552e 70%); border: 1px solid var(--line-2); }
+.coach-fig { width: 100%; max-height: 46vh; image-rendering: pixelated; }
+.coach-name-tag { font-size: 14px; letter-spacing: 0.08em; text-transform: uppercase; text-align: center; color: #fff; text-shadow: 0 1px 0 #000; }
+.coach-opts h4 { margin: 12px 0 2px; font-size: 12px; font-weight: 600; letter-spacing: 0.2em; text-transform: uppercase; color: var(--gold); }
+.coach-opts h4 em { font-style: normal; color: var(--ink); margin-left: 6px; letter-spacing: 0.08em; }
+.coach-opts .chip-row { margin-top: 6px; }
+.coach-sw { grid-template-columns: repeat(auto-fill, minmax(28px, 34px)); }
+.sw.bald { border: 1px dashed var(--line-2); color: var(--ink-dim); font-size: 14px; }
+.coach-height { width: 100%; accent-color: var(--gold); }
+.coach-about { margin: 6px 0 0; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; color: var(--ink-dim); }
 .chip.ground-opt { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; text-align: left; white-space: normal; padding: 10px 12px; }
 .ground-opt span { font-size: 11px; font-weight: 600; letter-spacing: 0.02em; opacity: 0.8; line-height: 1.25; font-family: var(--font); }
 .ground-modal .kick-off { margin-left: auto; }

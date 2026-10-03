@@ -53,7 +53,71 @@ export interface ClubState {
   /** The ground last played at (picked before each match): preselected next time. */
   ground?: Ground;
   freePackAt: number; // ms timestamp when the free pack is next available
+  /** You, the manager on the touchline (unset: the default look). */
+  coach?: Coach;
 }
+
+/** The manager: how he looks and dresses, and how he takes it on the touchline. */
+export type CoachStyle = 'suit' | 'coat' | 'track' | 'puffer';
+export type CoachTemper = 'cool' | 'fiery' | 'showman';
+export interface Coach {
+  name: string;
+  skin: number;
+  /** Hair colour; -1 = bald. */
+  hair: number;
+  hairStyle: number;
+  /** Metres. */
+  height: number;
+  /** 0 slim, 1 average, 2 heavy. */
+  build: number;
+  style: CoachStyle;
+  temper: CoachTemper;
+}
+export const COACH_SKINS = [0xf1c9a5, 0xe0ac7e, 0xd9a77c, 0xc68a5c, 0x8d5a3b, 0x5e3a24];
+export const COACH_HAIRS = [0x1b1410, 0x4a3324, 0x8a5a2e, 0xc9a25a, 0x8f8f8f, 0xd6d3cc, -1];
+export const COACH_HAIR_STYLES: [number, string][] = [[0, 'Short'], [2, 'Curly'], [3, 'Bun']];
+export const COACH_BUILDS = ['Slim', 'Average', 'Heavy'];
+export const COACH_STYLES: [CoachStyle, string][] = [['suit', 'Suit'], ['coat', 'Coat & scarf'], ['track', 'Tracksuit'], ['puffer', 'Puffer']];
+export const COACH_TEMPERS: [CoachTemper, string, string][] = [
+  ['cool', 'Cool', 'Arms folded, a fist pump at most'],
+  ['fiery', 'Fiery', 'Rages at fouls, boots the water bottle'],
+  ['showman', 'Showman', 'Sprints down the line for goals'],
+];
+/** What a manager wears: coat (with its trim and shirt pattern), cuffs, trousers, shoes. */
+export interface Outfit {
+  coat: number;
+  trim: number;
+  pattern: number;
+  cuff: number;
+  trousers: number;
+  stripe: number;
+  shoes: number;
+  sole: number;
+}
+
+const shade = (c: number, k: number) => (Math.round(((c >> 16) & 255) * k) << 16) | (Math.round(((c >> 8) & 255) * k) << 8) | Math.round((c & 255) * k);
+
+/** The clothes for a style, in the club's colours where it has any. */
+export function coachOutfit(style: CoachStyle, kit: Kit, away = false): Outfit {
+  switch (style) {
+    case 'suit': {
+      // Dark suit, white shirt front.
+      const c = away ? 0x1c2438 : 0x23262e;
+      return { coat: c, trim: 0xf1efe8, pattern: 8, cuff: 0xf1efe8, trousers: c, stripe: c, shoes: 0x16110d, sole: 0x16110d };
+    }
+    case 'coat':
+      // A long camel coat, open over the club scarf.
+      return { coat: 0xa27a4c, trim: kit.shirt, pattern: 8, cuff: 0xa27a4c, trousers: 0x25262a, stripe: 0x25262a, shoes: 0x3a2618, sole: 0x1a120c };
+    case 'track':
+      // The club training top, darker than the kit so he's never taken for a player.
+      return { coat: shade(kit.shirt, 0.45), trim: kit.shirt, pattern: 0, cuff: kit.shirt, trousers: 0x1c1e23, stripe: kit.shirt, shoes: 0xf0efe9, sole: 0x1b1b1d };
+    case 'puffer':
+      // A long padded jacket, quilted in bands.
+      return { coat: 0x15171b, trim: 0x2a2d33, pattern: 2, cuff: 0x15171b, trousers: 0x15171b, stripe: 0x15171b, shoes: 0x1b1b1d, sole: 0xe8e6df };
+  }
+}
+
+export const defaultCoach = (): Coach => ({ name: 'The Gaffer', skin: 0xd9a77c, hair: 0x8f8f8f, hairStyle: 0, height: 1.8, build: 1, style: 'suit', temper: 'fiery' });
 
 /** Everything about how the club looks, as saved in the club studio. */
 export interface ClubLook {
@@ -395,6 +459,15 @@ export class Club {
 
   setKit(k: Partial<ClubKit>): void {
     this.state.kit = { ...this.state.kit, ...k };
+    this.save();
+  }
+
+  coach(): Coach {
+    return { ...defaultCoach(), ...this.state.coach };
+  }
+
+  setCoach(c: Partial<Coach>): void {
+    this.state.coach = { ...this.coach(), ...c };
     this.save();
   }
 

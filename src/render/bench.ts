@@ -59,8 +59,8 @@ interface Shape {
 
 const zero = (): Shape => ({ thL: 1.4, thR: 1.4, ftL: 0.4, ftR: 0.4, loL: 0.14, loR: 0.14, ywL: 0, ywR: 0, flex: 0, side: 0, tw: 0, head: 0, aL: 0, aR: 0, eL: 0.3, eR: 0.3, oL: 0.1, oR: 0.1, rL: 0, rR: 0, arms: 0 });
 
-type Arms = [aL: number, aR: number, eL: number, eR: number, oL: number, oR: number, rL: number, rR: number];
-const ARMS = {
+export type Arms = [aL: number, aR: number, eL: number, eR: number, oL: number, oR: number, rL: number, rR: number];
+export const ARMS = {
   thighs: [0.42, 0.4, 0.55, 0.6, 0.14, 0.12, 0, 0] as Arms,
   knees: [0.3, 0.32, 1.25, 1.2, 0.06, 0.05, -0.35, -0.3] as Arms,
   folded: [0.5, 0.45, 1.95, 1.8, 0.06, 0.04, -1.45, -1.4] as Arms,
@@ -141,6 +141,24 @@ export interface BenchPose {
   headPitch: number;
   lift: number;
   look: boolean;
+  /** A kick with the right foot (the managers' water bottle): its weight and the legs' angles. */
+  kick: number;
+  kickHip: number;
+  kickKnee: number;
+  kickAnkle: number;
+  plantHip: number;
+  plantKnee: number;
+}
+
+/** Squatting on the toes: knees out, shins leaning forward (weight `sq`). */
+export function squatLegs(o: BenchPose, leg: number, sq: number): void {
+  const th = 1.85;
+  const a = 0.55;
+  o.legs = sq;
+  o.hipY = ANKLE_Y + SHIN * leg * Math.cos(a) + THIGH * leg * Math.cos(th) + 0.03;
+  o.hipL = o.hipR = th;
+  o.kneeL = o.kneeR = th + a;
+  o.ankleL = o.ankleR = -0.7 * sq;
 }
 
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
@@ -159,6 +177,7 @@ export class Benches {
     legs: 0, hipY: 0, hipL: 0, hipR: 0, kneeL: 0, kneeR: 0, legOutL: 0, legOutR: 0, legYawL: 0, legYawR: 0, ankleL: 0, ankleR: 0,
     arms: 0, armL: 0, armR: 0, elbowL: 0, elbowR: 0, armOutL: 0, armOutR: 0, armRotL: 0, armRotR: 0,
     flex: 0, side: 0, twist: 0, headPitch: 0, lift: 0, look: true,
+    kick: 0, kickHip: 0, kickKnee: 0, kickAnkle: 0, plantHip: 0, plantKnee: 0,
   };
   private look = new V3();
 
@@ -230,16 +249,7 @@ export class Benches {
       // Feet flat on the floor (or heels down for a leg stretched out).
       o.ankleL = -0.35 * smoothstep(0.6, 1, o.kneeL) * st;
       o.ankleR = -0.35 * smoothstep(0.6, 1, o.kneeR) * st;
-    } else {
-      // Squatting at the line: on the toes, knees out, shins leaning forward.
-      const th = 1.85;
-      const a = 0.55;
-      o.legs = sq;
-      o.hipY = ANKLE_Y + SHIN * leg * Math.cos(a) + THIGH * leg * Math.cos(th) + 0.03;
-      o.hipL = o.hipR = th;
-      o.kneeL = o.kneeR = th + a;
-      o.ankleL = o.ankleR = -0.7 * sq;
-    }
+    } else squatLegs(o, leg, sq);
     o.legOutL = c.loL;
     o.legOutR = c.loR;
     o.legYawL = c.ywL;

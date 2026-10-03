@@ -807,10 +807,12 @@ export class Match {
 
     // Half / full time: once the added time is up, the referee lets an attack in the final third
     // play out. He blows when it's over: the ball back out of the third, won by the defenders,
-    // in the keeper's hands or dead, and at the latest a few minutes on.
+    // in the keeper's hands or dead, and at the latest a few minutes on. Never while the ball
+    // is in either penalty area, whoever has it.
     const over = this.clock - (MATCH.halfSeconds * (45 + this.addedTime)) / 45;
+    const inBox = Math.abs(ball.pos.x) > PITCH.halfL - PITCH.boxDepth && Math.abs(ball.pos.z) < PITCH.boxHalfWidth;
     const attack =
-      Math.abs(ball.pos.x) > PITCH.halfL / 3 && this.teams[this.possTeam].dir === Math.sign(ball.pos.x) && !this.heldBy;
+      inBox || (Math.abs(ball.pos.x) > PITCH.halfL / 3 && this.teams[this.possTeam].dir === Math.sign(ball.pos.x) && !this.heldBy);
     if (running && over >= 0 && ((this.phase === 'play' && !attack) || this.phase === 'out' || over >= (MATCH.halfSeconds * 3) / 45)) {
       this.pendingRestart = null;
       this.setPiece = null;

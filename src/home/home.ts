@@ -13,6 +13,7 @@ import { SquadScreen } from './squad';
 import { ClubScreen } from './clubScreen';
 import { crestSVG as clubCrestSVG } from '../meta/crest';
 import { StoreScreen } from './store';
+import { openCoachEditor } from './coachEditor';
 import type { TifoKind } from '../ui/tifos';
 import { DRILLS, type DrillKind } from '../sim/training';
 
@@ -43,6 +44,8 @@ export interface HomeHooks {
   onTifo(kind: TifoKind, img: HTMLCanvasElement | null, rebuild?: boolean): void;
   /** Kit or crest changed: re-dress the players and the stadium. */
   onIdentity(): void;
+  /** The manager's look changed: dress him on the touchline. */
+  onCoach(): void;
   /** A ground was picked before kick-off: build it behind the menu (a live preview). */
   onGround(g: Ground): void;
   /** Start a training drill (on the training ground). */
@@ -245,6 +248,7 @@ export class HomeUI {
           <div class="hero-actions">
             <button class="play-btn"><span>Play match</span><i>▶</i></button>
             <button class="train-btn"><span>Training</span></button>
+            <button class="train-btn coach-btn"><span>Manager</span></button>
           </div>
           <div class="hero-reward">Win <b>+1,500</b> · Draw <b>+800</b> · <b>+150</b> per goal</div>
         </section>
@@ -279,6 +283,7 @@ export class HomeUI {
     const q = (s: string) => this.homeEl.querySelector(s) as HTMLElement;
     q('.play-btn').addEventListener('click', () => this.pickGround());
     q('.train-btn').addEventListener('click', () => this.pickDrill());
+    q('.coach-btn').addEventListener('click', () => this.editCoach());
     q('.squad-tile').addEventListener('click', () => this.go('squad'));
     q('.store-tile').addEventListener('click', () => this.go('store'));
     q('.club-btn').addEventListener('click', () => this.go('club'));
@@ -319,6 +324,11 @@ export class HomeUI {
       this.closeModal();
       this.hooks.onPlay(this.nextSeed);
     });
+  }
+
+  /** You, the manager: name, look, outfit and temper. */
+  editCoach(): void {
+    openCoachEditor((html, cls) => this.openModal(html, cls), this.club, this.kit, () => this.hooks.onCoach());
   }
 
   /** Training: pick a drill. Each shows its best streak on this device. */
