@@ -1,5 +1,6 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.94.3', note: 'The FPS counter (pause menu) now shows where each frame goes: match physics, AI, kicks, animation, stadium, HUD, effects, rendering and the graphics chip, with averages, peaks and a breakdown of the slowest frame in the last two seconds.' },
   { v: '0.94.2', note: 'No more hitches when the camera swings somewhere new. Every stand, banner and texture used to be loaded onto the graphics chip the first time it came into view; now the whole ground is loaded at once, out of sight, at start-up, on a new ground and at kick-off.' },
   { v: '0.94.1', note: 'No more stutter on long balls. Working out a lofted pass or cross could take a phone tens of milliseconds in one frame, which showed as a hitch while the camera chased the ball. It now finds the same kick in a few tries instead of dozens. Corner and cross aiming are smoother too.' },
   { v: '0.94', note: 'Your player always goes for a loose ball by himself again, the stick bending his run (up to 60%); Sprint gets there flat out. Press and Sprint are for taking the ball off an opponent: squeezing in, poking it away, tackling.' },

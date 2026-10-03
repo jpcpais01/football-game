@@ -39,6 +39,8 @@ import { Replay } from './ui/replay';
 import { CornerAim } from './render/cornerAim';
 import { Btn } from './sim/input';
 import { GameAudio } from './ui/audio';
+import { Profiler } from './ui/profiler';
+import { AI } from './sim/ai';
 import { Club, type Ground } from './meta/club';
 import { crestCanvas } from './meta/crest';
 import { HomeUI, drillBests, saveDrillBest } from './home/home';
@@ -513,6 +515,12 @@ function updateStamina(alpha: number): void {
 const fpsEl = document.createElement('div');
 fpsEl.className = 'fps';
 ui.appendChild(fpsEl);
+// Under the counter: where the frame's time goes (sim, AI, animation, world, render, GPU).
+const prof = new Profiler();
+prof.attachGpu(renderer.getContext() as WebGL2RenderingContext);
+prof.wrap(AI.prototype, 'update', 'ai');
+prof.wrap(AI.prototype, 'planThrough', 'thru');
+prof.wrap(Match.prototype, 'performKick', 'kick');
 // FPS / frame-time readout: a pause-menu setting (always on with ?debug).
 let showStats = DEBUG;
 try {
@@ -1086,6 +1094,7 @@ function frame(now: number): void {
   if (now < nextFrameAt - rafAvg * 0.5) return;
   nextFrameAt = now - nextFrameAt > TARGET_MS ? now + TARGET_MS : nextFrameAt + TARGET_MS;
   const t0 = performance.now();
+  prof.begin();
   const frameMs = now - last;
   const dt = Math.min(0.1, frameMs / 1000);
   last = now;
@@ -1144,6 +1153,7 @@ function frame(now: number): void {
     if (!playing && match.phase === 'fulltime' && match.phaseT > 4) newMatch(), (match.autoPlay = true);
   }
   const alpha = replay.active ? replay.alpha : acc / DT;
+  prof.lap('sim');
   handleEvents(now / 1000);
 
   if (!cutscene.active && !replay.active) officials.update(match, running ? dt : 0);
@@ -1162,6 +1172,7 @@ function frame(now: number): void {
   } else playersView.update(match, alpha, now / 1000);
   ballView.update(match, alpha, running ? dt : 0);
   goals.update(replay.active ? replay.time : simTime);
+  prof.lap('anim');
   // Time of day follows the match clock (the attract mode loops through it too).
   const progress = TOD >= 0 ? TOD : Math.min(1, ((match.half - 1) * MATCH.halfSeconds + match.clock) / (2 * MATCH.halfSeconds));
   atmo.set(progress);
@@ -1185,6 +1196,7 @@ function frame(now: number): void {
   groundLight.update(renderer, standShadow);
   cloudField.update(renderer);
   if (!replay.active) turfMarks.update(match, renderer);
+  prof.lap('world');
   if (playing) hud.update(match, now / 1000);
   if (playing && !paused) minimap.update(match);
   updateAim();
@@ -1195,24 +1207,33 @@ function frame(now: number): void {
   cornerAim.update(match, playing && inp.held[Btn.C], now / 1000, crossing ? inp : null);
   updateCharge(alpha);
   updateStamina(alpha);
+  prof.lap('hud');
 
   particles.setScale(pixelLook() ? pixelPass.pixelHeight : renderer.domElement.height, rig.camera.fov);
   particles.update(running ? dt : 0, now / 1000, match, rig.focusX, rig.focusZ, crowded ? terraces : undefined);
   rain.update(atmo.weather === 'rain', rig.camera, rig.focusX, rig.focusZ, pixelLook() ? pixelPass.pixelHeight : renderer.domElement.height);
   audio.setRain(atmo.weather === 'rain');
   if (crowded) audio.terraces(terraces);
+  prof.lap('fx');
+  if (warmPending) prewarm(), prof.lap('warmup');
   // A full-screen menu covers the stadium: don't spend the battery drawing it.
-  if (warmPending) prewarm();
   if (home.opaque) {
     /* skip */
   } else if (pixelLook()) {
     if ((shadowTick++ & 1) === 0) renderer.shadowMap.needsUpdate = true;
+    if (showStats) prof.gpuBegin();
     pixelPass.render(renderer, scene, rig.camera, SHARED.uFlood.value, atmo.weather === 'sunny' ? 0.35 : 1, rig.subPixelX, rig.subPixelY);
+    if (showStats) prof.gpuEnd();
   } else {
     renderer.shadowMap.needsUpdate = true;
+    if (showStats) prof.gpuBegin();
     renderer.render(scene, rig.camera);
+    if (showStats) prof.gpuEnd();
   }
-  cpuAvg += (performance.now() - t0 - cpuAvg) * 0.05;
+  prof.lap('render');
+  const cpuMs = performance.now() - t0;
+  cpuAvg += (cpuMs - cpuAvg) * 0.05;
+  prof.end(now, frameMs, cpuMs);
   adaptQuality(frameMs, now);
 
   if (showStats) {
@@ -1225,6 +1246,7 @@ function frame(now: number): void {
       fpsEl.textContent = DEBUG
         ? `${fps} fps · ${ms} ms · ${Math.round(info.calls / fpsFrames)} calls · ${(info.triangles / fpsFrames / 1000).toFixed(0)}k tris · dpr ${dpr.toFixed(2)} · cpu ${cpuAvg.toFixed(2)}ms`
         : `${fps} fps · ${ms} ms`;
+      if (prof.text) fpsEl.textContent += '\n' + prof.text;
       fpsFrames = 0;
       fpsT = now;
       renderer.info.reset();
