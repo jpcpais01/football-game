@@ -41,8 +41,6 @@ import { Replay } from './ui/replay';
 import { CornerAim } from './render/cornerAim';
 import { Btn } from './sim/input';
 import { GameAudio } from './ui/audio';
-import { Profiler } from './ui/profiler';
-import { AI } from './sim/ai';
 import { Club, type Ground } from './meta/club';
 import { crestCanvas } from './meta/crest';
 import { HomeUI, drillBests, saveDrillBest } from './home/home';
@@ -528,35 +526,25 @@ function updateStamina(alpha: number): void {
 const fpsEl = document.createElement('div');
 fpsEl.className = 'fps';
 ui.appendChild(fpsEl);
-// Under the counter: where the frame's time goes (sim, AI, animation, world, render, GPU).
-const prof = new Profiler();
-prof.attachGpu(renderer);
-prof.wrap(AI.prototype, 'update', 'ai');
-prof.wrap(AI.prototype, 'planThrough', 'thru');
-prof.wrap(Match.prototype, 'performKick', 'kick');
-// FPS readout, a pause-menu setting: off, the frame rate only, or the full breakdown (which
-// times the GPU by waiting for it every two seconds: a hitch of its own). Full with ?debug.
-let statsMode = DEBUG ? 2 : 0;
+// FPS counter, a pause-menu setting (on with ?debug): frames a second and ms a frame.
+let showStats = DEBUG;
 try {
-  if (!DEBUG) statsMode = Math.min(2, Math.max(0, Number(localStorage.getItem('stats')) || 0));
+  if (!DEBUG) showStats = ['on', '1', '2'].includes(localStorage.getItem('stats') ?? '');
 } catch {
   /* keep default */
 }
-let showStats = statsMode > 0;
-let fullStats = statsMode === 2;
 const statsBtn = pauseMenu.querySelector('.stats') as HTMLButtonElement;
 const applyStats = () => {
-  showStats = statsMode > 0;
-  fullStats = statsMode === 2;
   fpsEl.style.display = showStats ? '' : 'none';
-  statsBtn.textContent = `FPS counter: ${['off', 'fps only', 'full breakdown'][statsMode]}`;
+  fpsEl.textContent = '';
+  statsBtn.textContent = `FPS counter: ${showStats ? 'on' : 'off'}`;
 };
 applyStats();
 statsBtn.addEventListener('click', () => {
-  statsMode = (statsMode + 1) % 3;
+  showStats = !showStats;
   applyStats();
   try {
-    localStorage.setItem('stats', String(statsMode));
+    localStorage.setItem('stats', showStats ? 'on' : 'off');
   } catch {
     /* ignore */
   }
@@ -652,7 +640,6 @@ function newMatch(seed = Date.now() & 0xffff): void {
 }
 
 function startGame(seed: number): void {
-  kickedOffAt = 0;
   warmPending = true;
   audio.unlock();
   void enterFullscreen();
@@ -687,7 +674,6 @@ function beginDrill(kind: DrillKind, seed?: number): void {
 
 /** Training: always at the training ground (the ground picked for matches comes back after). */
 function startTraining(kind: DrillKind): void {
-  kickedOffAt = 0;
   audio.unlock();
   void enterFullscreen();
   void keepAwake();
@@ -960,9 +946,6 @@ let perfCheckAt = performance.now() + 3000;
 let fpsFrames = 0;
 let fpsT = performance.now();
 let lastPhase = match.phase;
-/** When the ball first went live in this match (0: not yet). The counter measures from 10 s after. */
-let kickedOffAt = 0;
-const STATS_DELAY = 10000;
 
 /** 0..1: the ball in the last 12 m before a goal line, in front of the goal, rising
  * exponentially to the line (the crowd surges with it). */
@@ -1127,42 +1110,6 @@ function showcase(dt: number): void {
   match.phase = 'play';
 }
 
-let cpuAvg = 0;
-/**
- * For the counter's probe: what each part of the world costs the GPU, as the difference it
- * makes (the whole world drawn, then again without the part: each part on its own would
- * show what the others hide). Before the real frame, which overwrites it all.
- */
-const probeRT = new THREE.WebGLRenderTarget(1, 1);
-function probeWorld(): void {
-  const time = (hide: THREE.Object3D | null, name: string) => {
-    const was = hide?.visible;
-    if (hide) hide.visible = false;
-    pixelPass.renderWorld(renderer, scene, rig.camera);
-    prof.gpuSync(name);
-    if (hide) hide.visible = was!;
-  };
-  // What a wait costs by itself (the round trip to the GPU, taken off every figure).
-  prof.gpuSync('#idle');
-  // The whole scene into a single pixel, twice: every draw call is issued but almost nothing
-  // is filled. The first also uploads what changed this frame (poses, particles); the second
-  // is only the cost of issuing the draws.
-  const shadows = renderer.shadowMap.needsUpdate;
-  renderer.shadowMap.needsUpdate = false;
-  for (const name of ['#calls1', '#calls2']) {
-    renderer.setRenderTarget(probeRT);
-    renderer.render(scene, rig.camera);
-    prof.gpuSync(name);
-  }
-  // Then with the sun's shadow map redrawn (the probe asked for it).
-  renderer.shadowMap.needsUpdate = shadows;
-  time(null, '#shadow');
-  time(null, '#all');
-  time(stadium.group, '#ground');
-  time(playersView.group, '#people');
-  renderer.setRenderTarget(null);
-}
-
 function frame(now: number): void {
   if (!booted) {
     // Compile every shader while the boot screen is still up (no hitch the first time
@@ -1184,13 +1131,6 @@ function frame(now: number): void {
   const hidden = home.opaque && !playing;
   if (now < nextFrameAt - rafAvg * 0.5) return;
   nextFrameAt = now - nextFrameAt > TARGET_MS ? now + TARGET_MS : nextFrameAt + TARGET_MS;
-  const t0 = performance.now();
-  if (playing && !kickedOffAt && match.phase === 'play' && !cutscene.active) kickedOffAt = now;
-  // The counter measures only from 10 s after kickoff (loading, the walk-out and the first
-  // uploads aren't the match).
-  const measuring = showStats && kickedOffAt > 0 && now - kickedOffAt >= STATS_DELAY;
-  const fullMeasure = measuring && fullStats;
-  prof.begin();
   const frameMs = now - last;
   const dt = Math.min(0.1, frameMs / 1000);
   last = now;
@@ -1249,7 +1189,6 @@ function frame(now: number): void {
     if (!playing && match.phase === 'fulltime' && match.phaseT > 4) newMatch(), (match.autoPlay = true);
   }
   const alpha = replay.active ? replay.alpha : acc / DT;
-  prof.lap('sim');
   handleEvents(now / 1000);
 
   if (!cutscene.active && !replay.active) officials.update(match, running ? dt : 0);
@@ -1269,7 +1208,6 @@ function frame(now: number): void {
   } else playersView.update(match, alpha, now / 1000);
   ballView.update(match, alpha, running ? dt : 0);
   goals.update(replay.active ? replay.time : simTime);
-  prof.lap('anim');
   // Time of day follows the match clock (the attract mode loops through it too).
   const progress = TOD >= 0 ? TOD : Math.min(1, ((match.half - 1) * MATCH.halfSeconds + match.clock) / (2 * MATCH.halfSeconds));
   atmo.set(progress);
@@ -1290,17 +1228,10 @@ function frame(now: number): void {
   if (crowded) terraces.update(running ? dt : 0, match);
   stadium.update(now / 1000, match.excitement, atmo, tifo, terraces, cutscene.active ? cutscene.hang : tifo);
   const standOn = SHARED.uStandOn.value > 0;
-  // With the counter on, a bake's GPU time is measured on its own (drained before, waited after).
-  const timeBake = fullMeasure && (standShadow.due(stadium.group, standOn) || groundLight.due(standShadow) || cloudField.due());
-  if (timeBake) prof.lap('world'), prof.gpuSync(null), prof.begin();
   standShadow.update(renderer, stadium.group, standOn);
-  if (timeBake) prof.gpuSync('bake:sun shadow');
   groundLight.update(renderer, standShadow);
-  if (timeBake) prof.gpuSync('bake:pitch light');
   cloudField.update(renderer);
-  if (timeBake) prof.gpuSync('bake:clouds');
   if (!replay.active) turfMarks.update(match, renderer);
-  prof.lap('world');
   if (playing) hud.update(match, now / 1000);
   if (playing && !paused) minimap.update(match);
   updateAim();
@@ -1311,47 +1242,26 @@ function frame(now: number): void {
   cornerAim.update(match, playing && inp.held[Btn.C], now / 1000, crossing ? inp : null);
   updateCharge(alpha);
   updateStamina(alpha);
-  prof.lap('hud');
 
   particles.setScale(pixelLook() ? pixelPass.pixelHeight : renderer.domElement.height, rig.camera.fov);
   particles.update(running ? dt : 0, now / 1000, match, rig.focusX, rig.focusZ, crowded ? terraces : undefined);
   rain.update(atmo.weather === 'rain', rig.camera, rig.focusX, rig.focusZ, pixelLook() ? pixelPass.pixelHeight : renderer.domElement.height);
   audio.setRain(atmo.weather === 'rain');
   if (crowded) audio.terraces(terraces);
-  prof.lap('fx');
-  if (warmPending) prewarm(), prof.lap('warmup');
+  if (warmPending) prewarm();
   // A full-screen menu covers the stadium: don't spend the battery drawing it.
   if (home.opaque) {
     /* skip */
   } else if (pixelLook()) {
     if ((shadowTick++ & 1) === 0) renderer.shadowMap.needsUpdate = true;
-    // Once every two seconds the counter waits for the GPU after each pass to time it.
-    const probe = fullMeasure && prof.probeDue(now);
-    if (probe) prof.gpuSync(null), (renderer.shadowMap.needsUpdate = true); // (timed with its shadow pass)
-    else if (fullMeasure) prof.gpuBegin();
-    if (probe) probeWorld();
-    pixelPass.render(renderer, scene, rig.camera, SHARED.uFlood.value, atmo.weather === 'sunny' ? 0.35 : 1, rig.subPixelX, rig.subPixelY, probe ? (pass) => prof.gpuSync(pass) : undefined);
-    if (fullMeasure && !probe) prof.gpuEnd();
+    pixelPass.render(renderer, scene, rig.camera, SHARED.uFlood.value, atmo.weather === 'sunny' ? 0.35 : 1, rig.subPixelX, rig.subPixelY);
   } else {
     renderer.shadowMap.needsUpdate = true;
-    if (fullMeasure) prof.gpuBegin();
     renderer.render(scene, rig.camera);
-    if (fullMeasure) prof.gpuEnd();
   }
-  prof.lap('render');
-  const cpuMs = performance.now() - t0;
-  cpuAvg += (cpuMs - cpuAvg) * 0.05;
-  if (measuring) prof.end(now, frameMs, cpuMs);
-  else prof.discard(now);
-  if (fullMeasure) prof.markPage();
   adaptQuality(frameMs, now);
 
-  if (showStats && !measuring) {
-    fpsEl.textContent = kickedOffAt ? `measuring in ${Math.ceil((STATS_DELAY - (now - kickedOffAt)) / 1000)} s` : 'measuring from 10 s after kickoff';
-    fpsFrames = 0;
-    fpsT = now;
-    renderer.info.reset();
-  } else if (showStats) {
+  if (showStats) {
     fpsFrames++;
     if (now - fpsT > 500) {
       const fps = Math.round((fpsFrames * 1000) / (now - fpsT));
@@ -1359,9 +1269,8 @@ function frame(now: number): void {
       // Totals since the last readout (all passes: shadow, world, post, blit), per frame.
       const info = renderer.info.render;
       fpsEl.textContent = DEBUG
-        ? `${fps} fps · ${ms} ms · ${Math.round(info.calls / fpsFrames)} calls · ${(info.triangles / fpsFrames / 1000).toFixed(0)}k tris · dpr ${dpr.toFixed(2)} · cpu ${cpuAvg.toFixed(2)}ms`
+        ? `${fps} fps · ${ms} ms · ${Math.round(info.calls / fpsFrames)} calls · ${(info.triangles / fpsFrames / 1000).toFixed(0)}k tris · dpr ${dpr.toFixed(2)}`
         : `${fps} fps · ${ms} ms`;
-      if (fullStats && prof.text) fpsEl.textContent += '\n' + prof.text;
       fpsFrames = 0;
       fpsT = now;
       renderer.info.reset();

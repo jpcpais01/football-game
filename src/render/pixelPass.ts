@@ -428,7 +428,7 @@ export class PixelPass {
   }
 
   /** The world pass alone (the grass first, at art resolution) into `target`. */
-  renderWorld(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, onPass?: (pass: string) => void): void {
+  renderWorld(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera): void {
     const g = this.grass;
     // (With one sample a pixel the world pass already shades the grass once per art pixel.)
     const grassOn = !!g && this.ss > 1 && g.mesh.visible && g.mesh.parent !== null;
@@ -443,7 +443,6 @@ export class PixelPass {
       renderer.render(scene, camera);
       camera.layers.mask = mask;
       renderer.shadowMap.needsUpdate = shadows;
-      onPass?.('grass');
       g.mesh.material = g.copy;
     }
     renderer.setRenderTarget(this.target);
@@ -451,22 +450,19 @@ export class PixelPass {
     if (grassOn) g.mesh.material = g.material;
   }
 
-  render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera, night: number, cool = 1, subX = 0, subY = 0, onPass?: (pass: string) => void): void {
+  render(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.PerspectiveCamera, night: number, cool = 1, subX = 0, subY = 0): void {
     (this.blit.uniforms.uSub.value as THREE.Vector2).set(subX, subY);
     this.mat.uniforms.uCool.value = cool;
     this.mat.uniforms.uExposure.value = renderer.toneMappingExposure;
     this.mat.uniforms.uNear.value = camera.near;
     this.mat.uniforms.uFar.value = camera.far;
     this.mat.uniforms.uNight.value = night;
-    this.renderWorld(renderer, scene, camera, onPass);
-    onPass?.('world');
+    this.renderWorld(renderer, scene, camera);
     this.quad.material = this.mat;
     renderer.setRenderTarget(this.post);
     renderer.render(this.scene, this.cam);
-    onPass?.('post');
     this.quad.material = this.blit;
     renderer.setRenderTarget(null);
     renderer.render(this.scene, this.cam);
-    onPass?.('screen');
   }
 }
