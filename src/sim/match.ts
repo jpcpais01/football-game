@@ -2153,10 +2153,20 @@ export class Match {
       const firstTime = !fromHands && this.owner !== p && inc > 3;
       const volley = firstTime ? smoothstep(0.45, 0.9, b.pos.y) : 0;
       const half = firstTime ? smoothstep(0.18, 0.4, b.pos.y) * (1 - volley) : 0;
-      // Aim: stick sideways picks a post, otherwise the far post.
-      let sideSign: number;
-      if (Math.abs(plan.dirZ) > 0.35) sideSign = Math.sign(plan.dirZ);
-      else sideSign = b.pos.z > 0.5 ? -1 : b.pos.z < -0.5 ? 1 : this.rng.next() < 0.5 ? -1 : 1;
+      // Aim: the post the stick points at, judged from where the ball is (from out wide both
+      // posts lie the same way, so it's the angle against the goal mouth that counts). Stick
+      // idle or pointed through the middle: the far post. The computer names a side outright.
+      let sideSign = 0;
+      if (plan.aimed === undefined) {
+        if (Math.abs(plan.dirZ) > 0.35) sideSign = Math.sign(plan.dirZ);
+      } else if (plan.aimed) {
+        // `off`: how far the stick turns from the goal's centre toward +z; `mouth`: the goal's half-angle.
+        const gx = opp - b.pos.x;
+        const mouth = Math.max(0.05, Math.abs(angleDiff(Math.atan2(PITCH.goalHalfWidth - b.pos.z, gx), Math.atan2(-PITCH.goalHalfWidth - b.pos.z, gx))) / 2);
+        const off = angleDiff(Math.atan2(-b.pos.z, gx), Math.atan2(plan.dirZ, plan.dirX)) * team.dir;
+        if (Math.abs(off) > mouth * 0.3 && Math.abs(off) < Math.PI - 0.3) sideSign = Math.sign(off);
+      }
+      if (sideSign === 0) sideSign = b.pos.z > 0.5 ? -1 : b.pos.z < -0.5 ? 1 : this.rng.next() < 0.5 ? -1 : 1;
       const tz = sideSign * (PITCH.goalHalfWidth - 0.55 - (1 - Math.min(1, pw)) * 0.4);
       const finesse = pw < 0.55;
       const ty = 0.35 + Math.min(pw, 1) * 1.45 + Math.max(0, pw - 1) * 6;

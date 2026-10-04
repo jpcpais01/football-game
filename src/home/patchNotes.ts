@@ -1,5 +1,6 @@
 /** What changed, version by version (newest first). Each note: at most 50 words. */
 export const PATCH_NOTES: { v: string; note: string }[] = [
+  { v: '0.96.28', note: 'Shot aim fixed from wide: the stick now picks the post it points at as seen from the ball, so cutting in from the wing you can go near post by pointing at it (before, both posts counted as the far one). Stick idle always means far post.' },
   { v: '0.96.27', note: 'Goal-kick aim follows the stick as you see it from behind the keeper: up sends the ring further, down brings it closer, left and right move it across. It used to be turned 90 degrees.' },
   { v: '0.96.26', note: 'The minimap is now drawn by the game itself, in the same frame as the pitch, instead of as a second picture the browser had to redraw and layer over the game every frame. The FPS counter also shows your screen\'s top refresh rate.' },
   { v: '0.96.25', note: 'The FPS counter is simple again: on or off, showing frames a second and milliseconds a frame. All the timing breakdowns, graphics-chip probes and waits behind it are gone, so they cost nothing.' },
