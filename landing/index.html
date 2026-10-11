@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>GameNight Football</title>
+<meta name="description" content="Pixel-art 11 v 11 football with real ball physics. Free in your browser on computer, Android and iPhone. Install it like an app in two taps.">
+<meta property="og:title" content="GameNight Football">
+<meta property="og:description" content="Pixel-art 11 v 11 football with real ball physics. Free in your browser, installs like an app.">
+<meta property="og:image" content="img/og.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#110f1c">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;800&family=Jersey+10&family=Silkscreen&display=swap">
+<style>
+/* Layout: a floodlit night match. Full-bleed stadium hero, a row of facts, three short
+   feature rows with real screenshots, a gallery strip, then one "get the game" section. */
+:root {
+  --night: #110f1c;
+  --stand: #1b1830;
+  --line: #2f2a4d;
+  --chalk: #f2efe6;
+  --soft: #d6d2e8;
+  --muted: #a7a2c2;
+  --gold: #ffcf3a;
+  --gold-deep: #d99a12;
+  --turf: #2fbf5b;
+  --red: #e0413f;
+  --ink: #0b0a12;
+  --display: "Jersey 10", "Silkscreen", ui-monospace, monospace;
+  --pixel: "Silkscreen", ui-monospace, monospace;
+  --body: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+  --gutter: clamp(16px, 4vw, 48px);
+  --max: 1180px;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body { margin: 0; background: var(--night); color: var(--chalk); font: 500 clamp(18px, 1.35vw, 21px)/1.45 var(--body); -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+img { max-width: 100%; display: block; }
+a { color: inherit; }
+:focus-visible { outline: 3px solid var(--gold); outline-offset: 3px; }
+.wrap { max-width: var(--max); margin-inline: auto; padding-inline: var(--gutter); }
+h1, h2, h3 { font-family: var(--display); font-weight: 400; line-height: .9; margin: 0; text-wrap: balance; }
+p { margin: 0; }
+.eyebrow { font: 400 12px/1.2 var(--pixel); letter-spacing: .14em; text-transform: uppercase; color: var(--gold); }
+
+/* top bar */
+.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; background: color-mix(in srgb, var(--night) 84%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+.bar .wrap { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-block: 10px; }
+.logo { text-decoration: none; font: 400 34px/1 var(--display); color: var(--chalk); letter-spacing: .02em; }
+.logo b { color: var(--gold); font-weight: 400; }
+
+/* the game's chunky gold key */
+.btn { --c: var(--gold); --d: var(--gold-deep); --t: #1a1306;
+  display: inline-flex; flex-direction: column; justify-content: center; align-items: flex-start;
+  min-height: 58px; padding: 11px 22px 13px; text-decoration: none; color: var(--t);
+  background: linear-gradient(var(--c) 0 55%, color-mix(in srgb, var(--c) 82%, var(--d)) 55%);
+  border: 3px solid var(--ink); box-shadow: 0 5px 0 var(--ink), inset 0 -4px 0 var(--d);
+  font: 800 21px/1 var(--body); text-transform: uppercase; letter-spacing: .04em; cursor: pointer;
+  transition: transform .08s, box-shadow .08s; }
+.btn:hover { transform: translateY(-2px); box-shadow: 0 7px 0 var(--ink), inset 0 -4px 0 var(--d); }
+.btn:active { transform: translateY(4px); box-shadow: 0 1px 0 var(--ink), inset 0 -4px 0 var(--d); }
+.btn small { font: 400 10px/1.3 var(--pixel); letter-spacing: .08em; opacity: .75; margin-top: 4px; }
+.btn.ghost { --c: #2a2546; --d: #1c1833; --t: var(--chalk); }
+.btn.small { min-height: 0; padding: 8px 14px 10px; font-size: 17px; }
+
+/* hero */
+.hero { position: relative; isolation: isolate; overflow: hidden; }
+.hero > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 35%; z-index: -2; }
+.hero::after { content: ""; position: absolute; inset: 0; z-index: -1;
+  background: linear-gradient(90deg, rgba(17,15,28,.93) 0%, rgba(17,15,28,.7) 40%, rgba(17,15,28,.05) 75%), linear-gradient(0deg, var(--night) 0%, rgba(17,15,28,0) 28%); }
+.hero .wrap { padding-block: clamp(64px, 11vw, 150px) clamp(56px, 8vw, 110px); display: grid; gap: 22px; }
+.hero h1 { font-size: clamp(64px, 10vw, 144px); max-width: 14ch; text-shadow: 4px 4px 0 rgba(0,0,0,.45); }
+.hero h1 em { font-style: normal; color: var(--gold); }
+.lede { max-width: 36ch; font-size: clamp(20px, 1.8vw, 25px); color: #dcd8ee; }
+.cta { display: flex; flex-wrap: wrap; gap: 14px 16px; margin-top: 6px; }
+.free { font: 400 11px/1.4 var(--pixel); letter-spacing: .08em; color: var(--muted); }
+.free b { color: var(--turf); font-weight: 400; }
+
+/* facts */
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 2px; background: var(--line); border: 2px solid var(--line); margin-block: clamp(40px, 6vw, 72px); }
+.facts div { background: var(--night); padding: 18px 18px 16px; display: grid; gap: 6px; }
+.facts b { font: 400 clamp(44px, 5vw, 60px)/.85 var(--display); color: var(--gold); font-variant-numeric: tabular-nums; }
+.facts span { font: 400 11px/1.3 var(--pixel); letter-spacing: .08em; color: var(--muted); text-transform: uppercase; }
+
+/* feature rows */
+.feature { padding-block: clamp(36px, 5vw, 72px); }
+.row { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: clamp(24px, 4vw, 64px); align-items: center; }
+.row.flip { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
+.row.flip .copy { order: 2; }
+@media (max-width: 860px) { .row, .row.flip { grid-template-columns: minmax(0, 1fr); } .row.flip .copy { order: 0; } }
+.copy { display: grid; gap: 16px; min-width: 0; }
+.copy h2 { font-size: clamp(48px, 6vw, 80px); }
+.copy p { color: var(--soft); max-width: 46ch; }
+.ticks { list-style: none; padding: 0; margin: 2px 0 0; display: grid; gap: 8px; }
+.ticks li { display: grid; grid-template-columns: 14px 1fr; gap: 12px; align-items: baseline; }
+.ticks li::before { content: ""; width: 10px; height: 10px; background: var(--turf); box-shadow: 2px 2px 0 var(--ink); }
+.shot { margin: 0; position: relative; border: 3px solid var(--ink); box-shadow: 0 0 0 2px var(--line), 10px 10px 0 rgba(0,0,0,.35); background: #000; min-width: 0; }
+.shot img { width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; }
+.shot figcaption { position: absolute; left: 10px; bottom: 10px; font: 400 10px/1 var(--pixel); letter-spacing: .1em; text-transform: uppercase; background: rgba(8,7,14,.85); padding: 6px 8px; }
+.stack { display: grid; gap: 16px; min-width: 0; }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 520px) { .pair { grid-template-columns: 1fr; } }
+
+/* gallery strip */
+.gallery { padding-block: clamp(36px, 5vw, 64px); }
+.gallery .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 22px; }
+@media (max-width: 760px) { .gallery .grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* get the game */
+.get { padding-block: clamp(56px, 8vw, 110px); border-top: 3px solid var(--ink); background: repeating-linear-gradient(90deg, #13301f 0 80px, #163823 80px 160px); }
+.get header { display: grid; gap: 12px; margin-bottom: 30px; }
+.get h2 { font-size: clamp(56px, 8vw, 104px); }
+.get header p { color: var(--soft); max-width: 52ch; }
+.devices { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+@media (max-width: 900px) { .devices { grid-template-columns: minmax(0, 1fr); } }
+.device { background: var(--night); border: 3px solid var(--ink); box-shadow: 8px 8px 0 rgba(0,0,0,.35); padding: 24px 22px; display: grid; gap: 16px; align-content: start; min-width: 0; position: relative; }
+.device.mine { outline: 3px solid var(--gold); outline-offset: -3px; }
+.device .yours { position: absolute; top: -14px; right: 16px; font: 400 10px/1 var(--pixel); letter-spacing: .1em; background: var(--gold); color: #1a1306; padding: 7px 8px; border: 2px solid var(--ink); }
+.device h3 { font-size: 46px; display: flex; align-items: center; gap: 12px; }
+.device h3 svg { width: 32px; height: 32px; color: var(--gold); flex: none; }
+.device .btn { width: 100%; align-items: center; }
+.device ol { margin: 0; padding-left: 1.2em; display: grid; gap: 6px; color: var(--soft); }
+.device ol li::marker { font-family: var(--pixel); font-size: 12px; color: var(--gold); }
+.device .note { font-size: 16px; color: var(--muted); }
+
+footer { padding-block: 32px 44px; border-top: 1px solid var(--line); }
+footer .wrap { display: flex; flex-wrap: wrap; gap: 12px 24px; justify-content: space-between; color: var(--muted); font-size: 16px; }
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <div class="wrap">
+    <a class="logo" href="#top">GAME<b>NIGHT</b></a>
+    <a class="btn small" data-game href="#get">Play now</a>
+  </div>
+</header>
+
+<main id="top">
+  <section class="hero">
+    <img src="img/hero.webp" alt="A full stadium under the evening sun, flags waving behind the halfway line" fetchpriority="high">
+    <div class="wrap">
+      <p class="eyebrow">Pixel-art football · 11 v 11</p>
+      <h1>Football <em>night</em>, every night.</h1>
+      <p class="lede">Real ball physics, full stadiums and your own club. It runs right in your browser and installs like an app on your computer, Android phone or iPhone.</p>
+      <div class="cta">
+        <a class="btn" data-game href="#get">Play in browser<small>Starts in seconds</small></a>
+        <a class="btn ghost" href="#get">Install the app<small>Computer · Android · iPhone</small></a>
+      </div>
+      <p class="free"><b>Free</b> · no account · no store needed · works offline once installed</p>
+    </div>
+  </section>
+
+  <div class="wrap">
+    <div class="facts">
+      <div><b>120</b><span>Hz physics engine</span></div>
+      <div><b>22</b><span>Players on the pitch</span></div>
+      <div><b>6</b><span>Grounds to play at</span></div>
+      <div><b>3</b><span>Weathers, evening to rain</span></div>
+      <div><b>5</b><span>Kinds of card pack</span></div>
+    </div>
+  </div>
+
+  <section class="feature">
+    <div class="wrap row">
+      <div class="copy">
+        <p class="eyebrow">The match</p>
+        <h2>Every touch is physics.</h2>
+        <p>The ball curls, dips, skids and bounces like a real one. Players have weight and momentum, so first touches, passes and shots can go wrong under pressure. A joystick and four buttons on your phone, or the keyboard on a computer.</p>
+        <ul class="ticks">
+          <li>Hold to weight a pass, slide up to lift it</li>
+          <li>Free kicks and penalties from behind the taker</li>
+          <li>Goal replays, a walk-out from the tunnel and a crowd that roars</li>
+        </ul>
+      </div>
+      <div class="stack">
+        <figure class="shot"><img src="img/match.webp" alt="A match in the Big Stadium with the touch controls on screen" loading="lazy"><figcaption>Big Stadium · evening</figcaption></figure>
+        <div class="pair">
+          <figure class="shot"><img src="img/rain.webp" alt="A match in heavy rain at the Old Ground" loading="lazy"><figcaption>Rainy night</figcaption></figure>
+          <figure class="shot"><img src="img/walkout.webp" alt="Both teams walking out of the tunnel" loading="lazy"><figcaption>The walk-out</figcaption></figure>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="feature">
+    <div class="wrap row flip">
+      <div class="copy">
+        <p class="eyebrow">Your club</p>
+        <h2>Open packs. Pick your eleven.</h2>
+        <p>Every player card has twelve stats, plus height and weight, and all of them change how he plays. Open packs to sign new players, choose a formation and drag them into place.</p>
+        <ul class="ticks">
+          <li>A free daily pack, then Bronze, Silver, Gold and Legend</li>
+          <li>Six formations on a drag-and-drop tactics board</li>
+          <li>Win coins for wins, draws and goals</li>
+        </ul>
+      </div>
+      <div class="stack">
+        <figure class="shot"><img src="img/squad.webp" alt="The squad screen with players on a tactics board" loading="lazy"><figcaption>Squad</figcaption></figure>
+        <figure class="shot"><img src="img/store.webp" alt="The store with five card packs" loading="lazy"><figcaption>The store</figcaption></figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="feature">
+    <div class="wrap row">
+      <div class="copy">
+        <p class="eyebrow">Club studio</p>
+        <h2>Your colours, your crest.</h2>
+        <p>Design the shirt, build a crest from shapes, emblems and lettering, and watch your fans fly it on flags, banners and a giant tifo before kick-off.</p>
+        <ul class="ticks">
+          <li>Ten shirt designs in any colours</li>
+          <li>Crest maker with nine shapes and fourteen emblems</li>
+          <li>Six grounds, from a classic old ground to an Italian bowl</li>
+        </ul>
+      </div>
+      <div class="stack">
+        <figure class="shot"><img src="img/crest.webp" alt="The crest maker in the club studio" loading="lazy"><figcaption>Crest maker</figcaption></figure>
+        <div class="pair">
+          <figure class="shot"><img src="img/kit.webp" alt="The kit designer" loading="lazy"><figcaption>Kit designer</figcaption></figure>
+          <figure class="shot"><img src="img/tifo.webp" alt="A giant tifo with the club crest held up by the home end" loading="lazy"><figcaption>Giant tifo</figcaption></figure>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="gallery">
+    <div class="wrap">
+      <p class="eyebrow">Matchday</p>
+      <div class="grid">
+        <figure class="shot"><img src="img/crowd.webp" alt="The home end waving flags under a club banner" loading="lazy"><figcaption>The home end</figcaption></figure>
+        <figure class="shot"><img src="img/comunale.webp" alt="A sunny afternoon at Stadio Comunale" loading="lazy"><figcaption>Stadio Comunale</figcaption></figure>
+        <figure class="shot"><img src="img/bench.webp" alt="The bench jumping up to celebrate a goal" loading="lazy"><figcaption>The bench</figcaption></figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="get" id="get">
+    <div class="wrap">
+      <header>
+        <p class="eyebrow">Free to play</p>
+        <h2>Get the game.</h2>
+        <p>GameNight runs in your web browser, so there's nothing to download from a store. Open it and play, or add it to your home screen so it opens full screen like any other app.</p>
+      </header>
+      <div class="devices">
+        <article class="device" data-device="desktop">
+          <h3><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 4h18a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-7v2h3v2H7v-2h3v-2H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Zm1 2v9h16V6H4Z"/></svg>Computer</h3>
+          <a class="btn" data-game href="#get">Open the game<small>Chrome or Edge</small></a>
+          <ol>
+            <li>Open the game in Chrome or Edge.</li>
+            <li>Click the install icon at the right of the address bar, or the menu, then Install GameNight.</li>
+            <li>It now opens in its own window from your desktop or Start menu.</li>
+          </ol>
+          <p class="note">Play with the keyboard: WASD to move, J, K and L to pass, play through and shoot.</p>
+        </article>
+        <article class="device" data-device="android">
+          <h3><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7.2 3.1 8.5 5.4A8.7 8.7 0 0 1 12 4.7c1.3 0 2.5.3 3.5.7l1.3-2.3.9.5-1.3 2.3A7.6 7.6 0 0 1 20 12H4a7.6 7.6 0 0 1 3.6-6.1L6.3 3.6l.9-.5ZM9 8.3a.9.9 0 1 0 0 1.8.9.9 0 0 0 0-1.8Zm6 0a.9.9 0 1 0 0 1.8.9.9 0 0 0 0-1.8ZM4 13h16v6.5c0 .8-.7 1.5-1.5 1.5H17v1.5a1.5 1.5 0 0 1-3 0V21h-4v1.5a1.5 1.5 0 0 1-3 0V21H5.5c-.8 0-1.5-.7-1.5-1.5V13Z"/></svg>Android</h3>
+          <a class="btn" data-game href="#get">Open the game<small>Chrome</small></a>
+          <ol>
+            <li>Open the game in Chrome.</li>
+            <li>Tap the ⋮ menu, then Install app or Add to Home screen.</li>
+            <li>Start it from your home screen and tap once to go full screen and sideways.</li>
+          </ol>
+          <p class="note">Hold your phone sideways for the best view.</p>
+        </article>
+        <article class="device" data-device="ios">
+          <h3><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.4 12.6c0-2.4 2-3.6 2.1-3.7a4.6 4.6 0 0 0-3.6-2c-1.5-.2-3 .9-3.7.9-.8 0-2-.9-3.2-.9a4.8 4.8 0 0 0-4.1 2.5c-1.8 3-.5 7.6 1.3 10.1.8 1.2 1.8 2.6 3.1 2.5 1.2 0 1.7-.8 3.2-.8s1.9.8 3.2.8c1.3 0 2.2-1.2 3-2.5a10 10 0 0 0 1.4-2.8 4.3 4.3 0 0 1-2.7-4.1ZM14 5.4a4.3 4.3 0 0 0 1-3.2 4.5 4.5 0 0 0-2.9 1.5 4.1 4.1 0 0 0-1 3.1A3.7 3.7 0 0 0 14 5.4Z"/></svg>iPhone</h3>
+          <a class="btn" data-game href="#get">Open the game<small>Safari</small></a>
+          <ol>
+            <li>Open the game in Safari.</li>
+            <li>Tap Share, then Add to Home Screen, then Add.</li>
+            <li>Start it from your home screen and turn the phone sideways.</li>
+          </ol>
+          <p class="note">Works on iPad too.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>GameNight Football</span>
+    <span>Your club and players are saved on your device.</span>
+  </div>
+</footer>
+
+<script>
+// The game's address. Every "Play" and "Open the game" button uses it.
+const GAME_URL = "https://REPLACE-WITH-THE-GAME-ADDRESS.vercel.app";
+
+for (const a of document.querySelectorAll("[data-game]")) {
+  a.href = GAME_URL;
+  a.rel = "noopener";
+}
+
+// Point out the card for the device this page is open on.
+const ua = navigator.userAgent;
+const touchMac = /Macintosh/.test(ua) && navigator.maxTouchPoints > 1;
+const kind = /iPhone|iPad|iPod/.test(ua) || touchMac ? "ios" : /Android/.test(ua) ? "android" : "desktop";
+const card = document.querySelector('[data-device="' + kind + '"]');
+if (card) {
+  card.classList.add("mine");
+  const tag = document.createElement("span");
+  tag.className = "yours";
+  tag.textContent = "Your device";
+  card.prepend(tag);
+}
+</script>
+</body>
+</html>
